@@ -370,6 +370,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             options: MapOptions(
               initialCenter: _origin,
               initialZoom: _currentZoom,
+              // Disable rotation: lock North-up for motorcycle mount
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
               onTap: _onMapTap,
               onMapEvent: (event) {
                 if (event is MapEventMoveEnd) {
