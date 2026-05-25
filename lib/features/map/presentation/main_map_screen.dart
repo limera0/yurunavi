@@ -11,6 +11,8 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
+import '../../../services/connectivity_service.dart';
+import '../../../services/map_cache_provider.dart';
 import '../../../services/native_engine.dart';
 import '../providers/map_providers.dart';
 import '../../navigation/presentation/nav_screen.dart';
@@ -357,6 +359,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final waypoint = interaction.waypoint;
     final routePolyline = interaction.routePolyline;
     final selectedRouteIdx = interaction.selectedRouteIdx;
+    final isOnline = ref.watch(isOnlineProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -387,6 +390,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.yurunavi.app',
                 maxZoom: 19,
+                tileProvider: buildCachedTileProvider(),
               ),
 
               // ── ZOOM TIER 1 (any zoom): route polyline ──────────────
@@ -514,6 +518,17 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
                 ),
               ),
+            ),
+
+          // ══════════════════════════════════════════════════════
+          // LAYER 2b · Offline banner (network lost during ride)
+          // ══════════════════════════════════════════════════════
+          if (!isOnline)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 58,
+              left: 0,
+              right: 0,
+              child: const _OfflineBanner(),
             ),
 
           // ══════════════════════════════════════════════════════
@@ -1330,6 +1345,51 @@ class _PoiDot extends StatelessWidget {
           ],
         ),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Offline Banner
+// Displayed when connectivity is lost; communicates cached-map fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFB71C1C).withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.wifi_off_rounded, color: Colors.white, size: 15),
+            SizedBox(width: 7),
+            Text(
+              '오프라인 — 캐시 지도 사용 중',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ClusterDot extends StatelessWidget {
