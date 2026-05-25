@@ -389,24 +389,34 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 maxZoom: 19,
               ),
 
-              // 경로 폴리라인
+              // ── ZOOM TIER 1 (any zoom): route polyline ──────────────
+              // Always rendered — it's the primary navigation element.
+              // Stroke widens as the rider zooms in for precision.
               if (routePolyline.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(
                     points: routePolyline,
                     color: AppColors.primary.withValues(alpha: 0.85),
-                    strokeWidth: 4.0,
+                    strokeWidth: _currentZoom >= 13
+                        ? 6.0
+                        : _currentZoom >= 10.5
+                            ? 4.0
+                            : 3.0,
                     strokeCap: StrokeCap.round,
                     strokeJoin: StrokeJoin.round,
                   ),
                 ]),
 
-              // POI dots
-              if (pois.isNotEmpty)
+              // ── ZOOM TIER 2 (zoom ≥ 10.5): POI clusters ────────────
+              // Hide all POI detail at wide view — only the route matters
+              // at motorway speeds. Clusters appear once the rider slows.
+              if (pois.isNotEmpty && _currentZoom >= 10.5)
                 MarkerLayer(markers: _buildPoiMarkers(pois)),
 
-              // Touch radius circle
-              if (_touchPoint != null)
+              // ── ZOOM TIER 3 (zoom ≥ 13): detail overlays ───────────
+              // Tap-radius circle and destination radius only at street
+              // level; at wide zoom they cover too much of the screen.
+              if (_touchPoint != null && _currentZoom >= 13)
                 CircleLayer(circles: [
                   CircleMarker(
                     point: _origin,
@@ -420,8 +430,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
                 ]),
 
-              // 목적지-현위치 사이 반경 원 (목적지 확정 후)
-              if (dest != null)
+              if (dest != null && _currentZoom >= 10.5)
                 CircleLayer(circles: [
                   CircleMarker(
                     point: _origin,
@@ -435,16 +444,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 ]),
 
               // Origin + destination + waypoint markers
+              // Origin dot is always visible; dest/waypoint pins shown
+              // only at zoom ≥ 10.5 where they are legible.
               MarkerLayer(markers: [
-                // 현재 위치 (초록 원)
                 Marker(
                   point: _origin,
                   width: 22,
                   height: 22,
                   child: _OriginMarker(),
                 ),
-                // 경유지 (노랑 핀)
-                if (waypoint != null)
+                if (waypoint != null && _currentZoom >= 10.5)
                   Marker(
                     point: waypoint,
                     width: 36,
@@ -453,8 +462,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     child: const Icon(Icons.location_pin,
                         color: Color(0xFFFFB300), size: 36),
                   ),
-                // 목적지 (빨강 핀)
-                if (dest != null)
+                if (dest != null && _currentZoom >= 10.5)
                   Marker(
                     point: dest,
                     width: 36,
