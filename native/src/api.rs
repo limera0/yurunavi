@@ -1,4 +1,9 @@
+// flutter_rust_bridge annotations enable codegen:
+//   flutter_rust_bridge_codegen generate
+// All public structs/functions below are exposed to Dart automatically.
+
 /// GPS 좌표 포인트
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
 #[derive(Debug, Clone)]
 pub struct GpsPoint {
     pub lat: f64,
@@ -6,6 +11,7 @@ pub struct GpsPoint {
 }
 
 /// 경로 유사도 체크 결과
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
 #[derive(Debug)]
 pub struct SimilarityResult {
     /// Jaccard 유사도 (0.0 ~ 1.0)
@@ -15,11 +21,26 @@ pub struct SimilarityResult {
 }
 
 /// 와인딩 필터 결과
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
 #[derive(Debug)]
 pub struct WindingScore {
     /// 와인딩 점수 (0.0 ~ 100.0)
     pub score: f64,
     /// 분류: "country" | "provincial" | "national"
+    pub road_type: String,
+}
+
+/// 경로 계산 결과 (Flutter ↔ Rust 전달 단위)
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
+#[derive(Debug, Clone)]
+pub struct RouteResult {
+    /// 보간된 GPS 포인트 목록
+    pub points: Vec<GpsPoint>,
+    /// 총 거리 (미터)
+    pub total_distance_m: f64,
+    /// 와인딩 점수 (0~100)
+    pub winding_score: f64,
+    /// 도로 분류
     pub road_type: String,
 }
 
@@ -52,6 +73,7 @@ fn route_to_cells(points: &[GpsPoint]) -> std::collections::HashSet<(i64, i64)> 
 /// 두 경로의 유사도를 계산한다.
 /// - `route_a`, `route_b`: GPS 포인트 벡터
 /// - 반환: SimilarityResult { score, is_duplicate }
+#[flutter_rust_bridge::frb]
 pub fn check_route_similarity(
     route_a: Vec<GpsPoint>,
     route_b: Vec<GpsPoint>,
@@ -98,6 +120,7 @@ fn bearing(a: &GpsPoint, b: &GpsPoint) -> f64 {
 /// 1. 연속 세 포인트 간 방위각 변화의 누적 합계를 경로 거리로 정규화
 /// 2. 점수 0~100: 높을수록 꼬불꼬불한 도로 (시골길)
 /// 3. road_type 분류: score < 20 → national, 20~50 → provincial, >50 → country
+#[flutter_rust_bridge::frb]
 pub fn calc_winding_score(route: Vec<GpsPoint>) -> WindingScore {
     if route.len() < 3 {
         return WindingScore { score: 0.0, road_type: "national".to_string() };
@@ -141,6 +164,112 @@ fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
         * b.lat.to_radians().cos()
         * sin_half_lon * sin_half_lon;
     2.0 * R * h.sqrt().asin()
+}
+
+// ── 경로 계산 (Flutter → Rust 진입점) ────────────────────────────
+
+/// Flutter에서 호출하는 실제 경로 계산 함수.
+///
+/// `#[flutter_rust_bridge::frb(sync)]` 대신 비동기로 선언해
+/// Dart isolate를 블록하지 않는다.
+///
+/// 디버그 출력(`eprintln!`)은 `flutter run` 콘솔에서 확인 가능.
+/// 배포 빌드에서는 `--release` 플래그로 제거됨.
+#[flutter_rust_bridge::frb]
+pub fn calc_route(
+    origin: GpsPoint,
+    destination: GpsPoint,
+    waypoints: Vec<GpsPoint>,
+    route_type: i32,
+) -> RouteResult {
+    eprintln!(
+        "[YuruNavi/Rust] calc_route called: origin=({:.6},{:.6}) dest=({:.6},{:.6}) waypoints={} route_type={}",
+        origin.lat, origin.lng,
+        destination.lat, destination.lng,
+        waypoints.len(),
+        route_type,
+    );
+
+    for (i, wp) in waypoints.iter().enumerate() {
+        eprintln!("[YuruNavi/Rust]   waypoint[{}]=({:.6},{:.6})", i, wp.lat, wp.lng);
+    }
+
+    // ── 좌표 유효성 검증 ───────────────────────────────────────
+    // lat 범위: -90~90, lng 범위: -180~180
+    // 범위 초과 시 origin 근방의 빈 경로를 반환해 앱 크래시를 방지한다.
+    let coords_valid = |p: &GpsPoint| {
+        p.lat >= -90.0 && p.lat <= 90.0 && p.lng >= -180.0 && p.lng <= 180.0
+    };
+    if !coords_valid(&origin) || !coords_valid(&destination) {
+        eprintln!("[YuruNavi/Rust] ERROR: invalid coordinates detected — aborting route calc");
+        return RouteResult {
+            points: vec![origin.clone()],
+            total_distance_m: 0.0,
+            winding_score: 0.0,
+            road_type: "national".to_string(),
+        };
+    }
+
+    // ── 보간 파라미터 (route_type 별) ──────────────────────────
+    let (amplitude, steps): (f64, usize) = match route_type {
+        0 => (0.018, 28), // 시골길
+        1 => (0.010, 22), // 지방도로
+        _ => (0.004, 16), // 국도 (기본)
+    };
+
+    let all_stops: Vec<&GpsPoint> = std::iter::once(&origin)
+        .chain(waypoints.iter())
+        .chain(std::iter::once(&destination))
+        .collect();
+
+    let mut points: Vec<GpsPoint> = Vec::new();
+    let mut total_dist = 0.0_f64;
+    let mut phase: f64 = 0.0;
+    let wave_count = match route_type { 0 => 3.0, 1 => 2.0, _ => 1.0 };
+
+    for seg in 0..all_stops.len() - 1 {
+        let from = all_stops[seg];
+        let to = all_stops[seg + 1];
+
+        let d_lat = to.lat - from.lat;
+        let d_lng = to.lng - from.lng;
+        let len = (d_lat * d_lat + d_lng * d_lng).sqrt();
+        let (nx, ny) = if len > 0.0 { (-d_lng / len, d_lat / len) } else { (0.0, 0.0) };
+
+        // pseudo-random phase per segment (deterministic, no std::Random needed)
+        phase = (phase + 1.3) % (2.0 * std::f64::consts::PI);
+
+        for i in 0..=steps {
+            if i == 0 && seg > 0 { continue; } // avoid duplicate junction point
+            let t = i as f64 / steps as f64;
+            let wave = ((t * std::f64::consts::PI * wave_count + phase) as f64).sin();
+            let lat = from.lat + d_lat * t + ny * wave * amplitude;
+            let lng = from.lng + d_lng * t + nx * wave * amplitude;
+
+            if let Some(prev) = points.last() {
+                total_dist += haversine_m(prev, &GpsPoint { lat, lng });
+            }
+            points.push(GpsPoint { lat, lng });
+        }
+    }
+
+    let winding = if points.len() >= 3 {
+        calc_winding_score(points.clone())
+    } else {
+        WindingScore { score: 0.0, road_type: "national".to_string() }
+    };
+
+    eprintln!(
+        "[YuruNavi/Rust] calc_route done: {} points, {:.0}m, winding={:.1} ({})",
+        points.len(), total_dist, winding.score, winding.road_type
+    );
+
+    RouteResult {
+        points,
+        total_distance_m: total_dist,
+        winding_score: winding.score,
+        road_type: winding.road_type,
+    }
 }
 
 // ── 단위 테스트 ───────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import 'dart:developer' as dev;
 import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
@@ -130,20 +131,62 @@ class NativeEngine {
     return 2 * R * math.asin(math.sqrt(h));
   }
 
-  // ── 경로 생성 (더미) ─────────────────────────────────────────
+  // ── 경로 생성 ─────────────────────────────────────────────────
   //
-  // Rust 엔진에 실제 경로 계획 기능이 완성되면 이 함수를 native 바인딩으로 교체.
+  // ROOT CAUSE (2026-05-25): The Rust engine is NOT wired up yet.
+  //   - native/src/api.rs now has #[flutter_rust_bridge::frb] annotations.
+  //   - Run `flutter_rust_bridge_codegen generate` from the project root to
+  //     generate lib/src/rust/frb_generated.dart bindings.
+  //   - Replace the body of this function with:
+  //       final pts = await api.calcRoute(
+  //         origin: GpsPoint(lat: origin.latitude, lng: origin.longitude),
+  //         destination: GpsPoint(lat: destination.latitude, lng: destination.longitude),
+  //         waypoints: waypoints.map((w) => GpsPoint(lat: w.latitude, lng: w.longitude)).toList(),
+  //         routeType: routeType,
+  //       );
+  //       return pts.points.map((p) => LatLng(p.lat, p.lng)).toList();
+  //
+  // Until codegen runs this function uses a pure-Dart fallback that mirrors
+  // the Rust algorithm so UI development can continue.
+  //
   // routeType: 0=country(시골길), 1=provincial(지방도로), 2=national(국도)
-  //
-  // 알고리즘: origin→dest 직선 위에 N개 웨이포인트를 보간하면서
-  // 경로 타입에 따라 서로 다른 강도의 사인파 곡률을 적용해
-  // 느긋한 꼬불꼬불 경로 vs 직선에 가까운 경로를 시뮬레이션한다.
   static Future<List<LatLng>> calcDummyRoute({
     required LatLng origin,
     required LatLng destination,
     List<LatLng> waypoints = const [],
     int routeType = 2,
   }) async {
+    // ── Dart-side coordinate transfer log ────────────────────────
+    // These logs mirror what will be sent over FFI when the Rust bridge
+    // is live. Compare against [YuruNavi/Rust] eprintln! output.
+    dev.log(
+      '[YuruNavi/Dart] calcDummyRoute: '
+      'origin=(${origin.latitude.toStringAsFixed(6)},${origin.longitude.toStringAsFixed(6)}) '
+      'dest=(${destination.latitude.toStringAsFixed(6)},${destination.longitude.toStringAsFixed(6)}) '
+      'waypoints=${waypoints.length} '
+      'routeType=$routeType',
+      name: 'NativeEngine',
+    );
+    for (int i = 0; i < waypoints.length; i++) {
+      dev.log(
+        '[YuruNavi/Dart]   waypoint[$i]=(${waypoints[i].latitude.toStringAsFixed(6)},${waypoints[i].longitude.toStringAsFixed(6)})',
+        name: 'NativeEngine',
+      );
+    }
+
+    // ── Coordinate sanity check ───────────────────────────────────
+    // Mirrors the Rust-side validation in calc_route().
+    bool validCoord(LatLng p) =>
+        p.latitude >= -90 && p.latitude <= 90 &&
+        p.longitude >= -180 && p.longitude <= 180;
+    if (!validCoord(origin) || !validCoord(destination)) {
+      dev.log(
+        '[YuruNavi/Dart] ERROR: invalid coordinates — returning empty route',
+        name: 'NativeEngine',
+        level: 900, // warning level
+      );
+      return [origin];
+    }
     // 경로 타입별 파라미터 (amplitude=곡률, steps=포인트 수)
     const params = [
       (amplitude: 0.018, steps: 28), // 시골길
@@ -182,7 +225,12 @@ class NativeEngine {
       }
     }
 
-    // 실제 Rust 호출을 모사하는 비동기 딜레이 (300ms)
+    dev.log(
+      '[YuruNavi/Dart] calcDummyRoute done: ${result.length} points generated',
+      name: 'NativeEngine',
+    );
+
+    // Simulates the async latency of a real FFI call (remove after bridge live)
     await Future.delayed(const Duration(milliseconds: 300));
     return result;
   }
