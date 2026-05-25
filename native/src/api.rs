@@ -272,6 +272,213 @@ pub fn calc_route(
     }
 }
 
+// ── 엣지 케이스 가드 ─────────────────────────────────────────────
+
+/// GPS 측위 품질 분류
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpsQuality {
+    /// 정상 측위 (정확도 ≤ 20m, 타임스탬프 신선)
+    Good,
+    /// 측위 저하 (정확도 20–50m 또는 3–8초 경과)
+    Degraded,
+    /// 측위 불량 (정확도 > 50m 또는 8초 이상 경과)
+    Poor,
+}
+
+/// GPS 정확도 및 타임스탬프 신선도를 검사한다.
+///
+/// - `accuracy_m`: 디바이스에서 보고한 수평 정확도 (미터).
+/// - `age_ms`: 마지막 GPS 업데이트로부터 경과한 시간 (밀리초).
+///
+/// 반환: [GpsQuality] — Flutter에서 UI 경고 표시 여부 결정에 사용.
+#[flutter_rust_bridge::frb]
+pub fn check_gps_accuracy(accuracy_m: f64, age_ms: u64) -> GpsQuality {
+    if accuracy_m < 0.0 {
+        eprintln!("[YuruNavi/Rust] check_gps_accuracy: negative accuracy ({accuracy_m}) treated as Poor");
+        return GpsQuality::Poor;
+    }
+    let age_s = age_ms / 1000;
+    let quality = if accuracy_m <= 20.0 && age_s < 3 {
+        GpsQuality::Good
+    } else if accuracy_m <= 50.0 && age_s < 8 {
+        GpsQuality::Degraded
+    } else {
+        GpsQuality::Poor
+    };
+    if quality != GpsQuality::Good {
+        eprintln!(
+            "[YuruNavi/Rust] check_gps_accuracy: accuracy={accuracy_m:.1}m age={age_s}s → {:?}",
+            quality
+        );
+    }
+    quality
+}
+
+/// 이탈 감지 결과
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
+#[derive(Debug, Clone)]
+pub struct OffRouteStatus {
+    /// 경로 이탈 여부
+    pub is_off_route: bool,
+    /// 가장 가까운 경로 포인트까지의 거리 (미터)
+    pub closest_point_distance_m: f64,
+    /// 이탈 임계값 (미터) — 이 값보다 멀면 재경로 계산 트리거
+    pub threshold_m: f64,
+}
+
+/// 현재 위치가 경로 corridor 안에 있는지 검사한다.
+///
+/// 경로 상 모든 포인트 사이 선분과의 최소 수직 거리를 계산한다.
+/// `threshold_m`을 초과하면 재경로 계산이 필요하다는 신호를 반환한다.
+///
+/// - `current`: 라이더의 현재 위치.
+/// - `route`: 계획된 경로 포인트 배열.
+/// - `threshold_m`: 이탈 판정 임계값 (기본 권장: 150m).
+#[flutter_rust_bridge::frb]
+pub fn is_off_route(
+    current: GpsPoint,
+    route: Vec<GpsPoint>,
+    threshold_m: f64,
+) -> OffRouteStatus {
+    // Guard: threshold must be positive and route must have at least 2 points.
+    let threshold_m = if threshold_m <= 0.0 { 150.0 } else { threshold_m };
+
+    if route.len() < 2 {
+        eprintln!("[YuruNavi/Rust] is_off_route: route has < 2 points — returning off-route");
+        return OffRouteStatus {
+            is_off_route: true,
+            closest_point_distance_m: f64::MAX,
+            threshold_m,
+        };
+    }
+
+    // Coordinate validity guard.
+    let coords_valid = |p: &GpsPoint| {
+        p.lat >= -90.0 && p.lat <= 90.0 && p.lng >= -180.0 && p.lng <= 180.0
+    };
+    if !coords_valid(&current) {
+        eprintln!("[YuruNavi/Rust] is_off_route: invalid current position — skipping");
+        return OffRouteStatus {
+            is_off_route: false,
+            closest_point_distance_m: 0.0,
+            threshold_m,
+        };
+    }
+
+    // Find the minimum distance from `current` to any segment of the route.
+    let mut min_dist = f64::MAX;
+
+    for i in 0..route.len() - 1 {
+        let a = &route[i];
+        let b = &route[i + 1];
+        let d = point_to_segment_distance_m(&current, a, b);
+        if d < min_dist {
+            min_dist = d;
+        }
+    }
+
+    let off = min_dist > threshold_m;
+    if off {
+        eprintln!(
+            "[YuruNavi/Rust] is_off_route: TRIGGERED — {:.0}m from route (threshold {:.0}m)",
+            min_dist, threshold_m
+        );
+    }
+
+    OffRouteStatus {
+        is_off_route: off,
+        closest_point_distance_m: min_dist,
+        threshold_m,
+    }
+}
+
+/// 목적지 도달 가능성 결과
+#[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
+#[derive(Debug, Clone)]
+pub struct ReachabilityResult {
+    pub is_reachable: bool,
+    /// 사람이 읽을 수 있는 도달 불가 이유 (도달 가능 시 빈 문자열)
+    pub reason: String,
+}
+
+/// 목적지가 정상적인 경로 계산 대상인지 검사한다.
+///
+/// 실패 케이스:
+/// 1. origin == destination (동일 좌표, 오차 10m 이내)
+/// 2. 직선 거리 > 1500km (현실적인 바이크 투어 범위 초과)
+/// 3. 좌표 범위 초과
+#[flutter_rust_bridge::frb]
+pub fn check_destination_reachable(
+    origin: GpsPoint,
+    destination: GpsPoint,
+) -> ReachabilityResult {
+    let coords_valid = |p: &GpsPoint| {
+        p.lat >= -90.0 && p.lat <= 90.0 && p.lng >= -180.0 && p.lng <= 180.0
+    };
+
+    if !coords_valid(&origin) || !coords_valid(&destination) {
+        return ReachabilityResult {
+            is_reachable: false,
+            reason: "invalid_coordinates".to_string(),
+        };
+    }
+
+    let dist_m = haversine_m(&origin, &destination);
+
+    // Same-point guard: within 10 m is treated as "already there".
+    if dist_m < 10.0 {
+        eprintln!("[YuruNavi/Rust] check_destination_reachable: origin ≈ destination ({dist_m:.1}m)");
+        return ReachabilityResult {
+            is_reachable: false,
+            reason: "same_location".to_string(),
+        };
+    }
+
+    // Unreachable-by-motorcycle guard: > 1500 km straight line.
+    const MAX_DIST_M: f64 = 1_500_000.0;
+    if dist_m > MAX_DIST_M {
+        eprintln!(
+            "[YuruNavi/Rust] check_destination_reachable: distance {:.0}km exceeds 1500km limit",
+            dist_m / 1000.0
+        );
+        return ReachabilityResult {
+            is_reachable: false,
+            reason: "too_far".to_string(),
+        };
+    }
+
+    ReachabilityResult {
+        is_reachable: true,
+        reason: String::new(),
+    }
+}
+
+// ── 내부 헬퍼: 점 → 선분 수직 거리 ─────────────────────────────
+
+/// 점 P에서 선분 AB까지의 최단 거리 (미터, haversine 근사).
+fn point_to_segment_distance_m(p: &GpsPoint, a: &GpsPoint, b: &GpsPoint) -> f64 {
+    let ab_dist = haversine_m(a, b);
+    if ab_dist < 1.0 {
+        // Degenerate segment: A ≈ B, just return distance to A.
+        return haversine_m(p, a);
+    }
+
+    // Project P onto the infinite line through A–B using dot product in
+    // lat/lng space (valid for short distances where distortion is small).
+    let ax = b.lat - a.lat;
+    let ay = b.lng - a.lng;
+    let bx = p.lat - a.lat;
+    let by = p.lng - a.lng;
+    let t = ((bx * ax + by * ay) / (ax * ax + ay * ay)).clamp(0.0, 1.0);
+
+    let closest = GpsPoint {
+        lat: a.lat + t * ax,
+        lng: a.lng + t * ay,
+    };
+    haversine_m(p, &closest)
+}
+
 // ── 단위 테스트 ───────────────────────────────────────────────
 
 #[cfg(test)]
@@ -290,11 +497,124 @@ mod tests {
 
     #[test]
     fn winding_score_straight_road_is_low() {
-        // 완전 직선
         let route: Vec<GpsPoint> = (0..20)
             .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
             .collect();
         let ws = calc_winding_score(route);
         assert!(ws.score < 20.0, "직선 도로 점수가 너무 높음: {}", ws.score);
+    }
+
+    // ── 엣지 케이스 테스트 ──────────────────────────────────────
+
+    #[test]
+    fn gps_quality_good_accuracy() {
+        assert_eq!(check_gps_accuracy(10.0, 1000), GpsQuality::Good);
+    }
+
+    #[test]
+    fn gps_quality_degraded_accuracy() {
+        assert_eq!(check_gps_accuracy(35.0, 5000), GpsQuality::Degraded);
+    }
+
+    #[test]
+    fn gps_quality_poor_old_fix() {
+        // Age > 8 seconds should be Poor regardless of accuracy.
+        assert_eq!(check_gps_accuracy(5.0, 10_000), GpsQuality::Poor);
+    }
+
+    #[test]
+    fn gps_quality_negative_accuracy_is_poor() {
+        assert_eq!(check_gps_accuracy(-1.0, 500), GpsQuality::Poor);
+    }
+
+    #[test]
+    fn off_route_detects_large_deviation() {
+        // Straight route along latitude 37.0.
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        // Position 1 degree north — vastly off route (~111 km).
+        let far_pos = GpsPoint { lat: 38.0, lng: 127.05 };
+        let result = is_off_route(far_pos, route, 150.0);
+        assert!(result.is_off_route, "rider is 111km away — should be off-route");
+        assert!(result.closest_point_distance_m > 150.0);
+    }
+
+    #[test]
+    fn on_route_not_flagged() {
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        // Position exactly on the route.
+        let on_pos = GpsPoint { lat: 37.0, lng: 127.05 };
+        let result = is_off_route(on_pos, route, 150.0);
+        assert!(!result.is_off_route, "position on route should not trigger re-route");
+    }
+
+    #[test]
+    fn off_route_empty_route_is_off() {
+        let result = is_off_route(
+            GpsPoint { lat: 37.0, lng: 127.0 },
+            vec![],
+            150.0,
+        );
+        assert!(result.is_off_route, "empty route = off route");
+    }
+
+    #[test]
+    fn destination_same_as_origin_unreachable() {
+        let origin = GpsPoint { lat: 37.5665, lng: 126.9780 };
+        let dest = GpsPoint { lat: 37.5665, lng: 126.9780 };
+        let r = check_destination_reachable(origin, dest);
+        assert!(!r.is_reachable);
+        assert_eq!(r.reason, "same_location");
+    }
+
+    #[test]
+    fn destination_too_far_unreachable() {
+        // Seoul → Buenos Aires (~18,000 km).
+        let origin = GpsPoint { lat: 37.5665, lng: 126.9780 };
+        let dest = GpsPoint { lat: -34.6037, lng: -58.3816 };
+        let r = check_destination_reachable(origin, dest);
+        assert!(!r.is_reachable);
+        assert_eq!(r.reason, "too_far");
+    }
+
+    #[test]
+    fn normal_destination_is_reachable() {
+        // Seoul → Busan (~325 km).
+        let origin = GpsPoint { lat: 37.5665, lng: 126.9780 };
+        let dest = GpsPoint { lat: 35.1796, lng: 129.0756 };
+        let r = check_destination_reachable(origin, dest);
+        assert!(r.is_reachable, "Seoul→Busan should be reachable");
+    }
+
+    #[test]
+    fn invalid_coords_unreachable() {
+        let invalid = GpsPoint { lat: 999.0, lng: 0.0 };
+        let origin = GpsPoint { lat: 37.0, lng: 127.0 };
+        let r = check_destination_reachable(origin, invalid);
+        assert!(!r.is_reachable);
+        assert_eq!(r.reason, "invalid_coordinates");
+    }
+
+    #[test]
+    fn calc_route_invalid_coords_returns_safe_fallback() {
+        // Should not panic; returns a single-point route.
+        let origin = GpsPoint { lat: 999.0, lng: 0.0 };
+        let dest = GpsPoint { lat: 37.5665, lng: 126.9780 };
+        let result = calc_route(origin.clone(), dest, vec![], 2);
+        assert_eq!(result.points.len(), 1);
+        assert_eq!(result.total_distance_m, 0.0);
+    }
+
+    #[test]
+    fn zero_threshold_defaults_to_150m() {
+        let route: Vec<GpsPoint> = vec![
+            GpsPoint { lat: 37.0, lng: 127.0 },
+            GpsPoint { lat: 37.1, lng: 127.0 },
+        ];
+        let result = is_off_route(GpsPoint { lat: 37.05, lng: 127.0 }, route, 0.0);
+        assert_eq!(result.threshold_m, 150.0, "zero threshold should default to 150m");
     }
 }

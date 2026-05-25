@@ -24,6 +24,28 @@ class WindingScore {
   const WindingScore({required this.score, required this.roadType});
 }
 
+/// GPS 측위 품질 — mirrors Rust GpsQuality enum.
+enum GpsQuality { good, degraded, poor }
+
+/// 경로 이탈 상태 — mirrors Rust OffRouteStatus.
+class OffRouteStatus {
+  final bool isOffRoute;
+  final double closestPointDistanceM;
+  final double thresholdM;
+  const OffRouteStatus({
+    required this.isOffRoute,
+    required this.closestPointDistanceM,
+    required this.thresholdM,
+  });
+}
+
+/// 목적지 도달 가능성 — mirrors Rust ReachabilityResult.
+class ReachabilityResult {
+  final bool isReachable;
+  final String reason;
+  const ReachabilityResult({required this.isReachable, required this.reason});
+}
+
 /// Rust native engine의 Dart fallback 구현.
 ///
 /// flutter_rust_bridge codegen 완료 후 native 바인딩으로 교체 가능.
@@ -233,5 +255,132 @@ class NativeEngine {
     // Simulates the async latency of a real FFI call (remove after bridge live)
     await Future.delayed(const Duration(milliseconds: 300));
     return result;
+  }
+
+  // ── 엣지 케이스 가드 (Dart fallback) ────────────────────────────────────
+  // Each method mirrors the corresponding Rust function in native/src/api.rs.
+  // Replace with api.xxx() FFI calls after running flutter_rust_bridge_codegen.
+
+  /// GPS 측위 품질 검사.
+  /// [accuracyM]: 수평 정확도 (미터). [ageMs]: 마지막 GPS 업데이트 경과 시간 (ms).
+  static GpsQuality checkGpsAccuracy({
+    required double accuracyM,
+    required int ageMs,
+  }) {
+    if (accuracyM < 0) {
+      dev.log('[YuruNavi/Dart] checkGpsAccuracy: negative accuracy → Poor',
+          name: 'NativeEngine', level: 900);
+      return GpsQuality.poor;
+    }
+    final ageS = ageMs ~/ 1000;
+    if (accuracyM <= 20 && ageS < 3) return GpsQuality.good;
+    if (accuracyM <= 50 && ageS < 8) return GpsQuality.degraded;
+    dev.log(
+      '[YuruNavi/Dart] checkGpsAccuracy: ${accuracyM.toStringAsFixed(1)}m ${ageS}s → poor',
+      name: 'NativeEngine',
+    );
+    return GpsQuality.poor;
+  }
+
+  /// 현재 위치가 경로로부터 [thresholdM] 미터 이상 이탈했는지 검사.
+  static OffRouteStatus isOffRoute({
+    required LatLng current,
+    required List<LatLng> route,
+    double thresholdM = 150.0,
+  }) {
+    final threshold = thresholdM <= 0 ? 150.0 : thresholdM;
+
+    if (route.length < 2) {
+      dev.log('[YuruNavi/Dart] isOffRoute: route < 2 points',
+          name: 'NativeEngine', level: 900);
+      return OffRouteStatus(
+        isOffRoute: true,
+        closestPointDistanceM: double.maxFinite,
+        thresholdM: threshold,
+      );
+    }
+
+    if (!_validCoord(current)) {
+      return OffRouteStatus(
+        isOffRoute: false,
+        closestPointDistanceM: 0,
+        thresholdM: threshold,
+      );
+    }
+
+    double minDist = double.maxFinite;
+    for (int i = 0; i < route.length - 1; i++) {
+      final d = _pointToSegmentM(current, route[i], route[i + 1]);
+      if (d < minDist) minDist = d;
+    }
+
+    final off = minDist > threshold;
+    if (off) {
+      dev.log(
+        '[YuruNavi/Dart] isOffRoute: TRIGGERED — ${minDist.toStringAsFixed(0)}m from route',
+        name: 'NativeEngine',
+        level: 900,
+      );
+    }
+    return OffRouteStatus(
+      isOffRoute: off,
+      closestPointDistanceM: minDist,
+      thresholdM: threshold,
+    );
+  }
+
+  /// 목적지 도달 가능성 검사.
+  static ReachabilityResult checkDestinationReachable({
+    required LatLng origin,
+    required LatLng destination,
+  }) {
+    if (!_validCoord(origin) || !_validCoord(destination)) {
+      return const ReachabilityResult(
+          isReachable: false, reason: 'invalid_coordinates');
+    }
+    final distM = _haversineM(
+      GpsPoint(origin.latitude, origin.longitude),
+      GpsPoint(destination.latitude, destination.longitude),
+    );
+    if (distM < 10) {
+      dev.log('[YuruNavi/Dart] checkDestinationReachable: same_location',
+          name: 'NativeEngine', level: 900);
+      return const ReachabilityResult(
+          isReachable: false, reason: 'same_location');
+    }
+    if (distM > 1500000) {
+      dev.log(
+        '[YuruNavi/Dart] checkDestinationReachable: too_far (${(distM / 1000).toStringAsFixed(0)}km)',
+        name: 'NativeEngine',
+        level: 900,
+      );
+      return const ReachabilityResult(isReachable: false, reason: 'too_far');
+    }
+    return const ReachabilityResult(isReachable: true, reason: '');
+  }
+
+  // ── Internal coordinate helpers ──────────────────────────────
+
+  static bool _validCoord(LatLng p) =>
+      p.latitude >= -90 &&
+      p.latitude <= 90 &&
+      p.longitude >= -180 &&
+      p.longitude <= 180;
+
+  /// Minimum distance from point [p] to segment [a]–[b] in metres.
+  static double _pointToSegmentM(LatLng p, LatLng a, LatLng b) {
+    final ax = b.latitude - a.latitude;
+    final ay = b.longitude - a.longitude;
+    final bx = p.latitude - a.latitude;
+    final by = p.longitude - a.longitude;
+    final lenSq = ax * ax + ay * ay;
+    final t = lenSq < 1e-12
+        ? 0.0
+        : ((bx * ax + by * ay) / lenSq).clamp(0.0, 1.0);
+    final closest = LatLng(a.latitude + t * ax, a.longitude + t * ay);
+    return _haversineM(
+      GpsPoint(p.latitude, p.longitude),
+      GpsPoint(closest.latitude, closest.longitude),
+    );
   }
 }
