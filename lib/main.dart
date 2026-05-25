@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
+import 'features/map/providers/map_providers.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,15 +18,25 @@ void main() {
   runApp(const ProviderScope(child: YuruNaviApp()));
 }
 
-class YuruNaviApp extends StatelessWidget {
+class YuruNaviApp extends ConsumerWidget {
   const YuruNaviApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final riderMode = ref.watch(riderModeProvider);
+    final theme = riderMode ? AppTheme.rider : AppTheme.light;
+
+    // Status bar brightness flips with theme.
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness:
+          riderMode ? Brightness.light : Brightness.dark,
+    ));
+
     return MaterialApp(
       title: 'YuruNavi',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: theme,
       home: const SplashScreen(),
     );
   }

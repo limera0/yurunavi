@@ -219,3 +219,18 @@ class _RouteTypeNotifier extends Notifier<RouteTypeFilter> {
   RouteTypeFilter build() => RouteTypeFilter.national;
   void set(RouteTypeFilter t) => state = t;
 }
+
+// ── Rider Mode ────────────────────────────────────────────────────────────────
+
+/// Toggles High-Contrast Rider Mode (pitch black / neon green / safety orange).
+/// When true the app switches to [AppTheme.rider] and map overlays use
+/// [RiderModeColors] for maximum sunlight legibility.
+final riderModeProvider =
+    NotifierProvider<_RiderModeNotifier, bool>(_RiderModeNotifier.new);
+
+class _RiderModeNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+  void toggle() => state = !state;
+  void set(bool v) => state = v;
+}

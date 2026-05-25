@@ -360,9 +360,19 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final routePolyline = interaction.routePolyline;
     final selectedRouteIdx = interaction.selectedRouteIdx;
     final isOnline = ref.watch(isOnlineProvider);
+    final riderMode = ref.watch(riderModeProvider);
+
+    // Theme-adaptive colors for map overlays.
+    final routeColor =
+        riderMode ? RiderModeColors.mapRoute : AppColors.primary;
+    final originColor =
+        riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin;
+    final destColor =
+        riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor:
+          riderMode ? RiderModeColors.background : AppColors.background,
       body: Stack(
         children: [
           // ══════════════════════════════════════════════════════
@@ -396,16 +406,15 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               // ── ZOOM TIER 1 (any zoom): route polyline ──────────────
               // Always rendered — it's the primary navigation element.
               // Stroke widens as the rider zooms in for precision.
+              // In rider mode the stroke is thicker for glove-hand legibility.
               if (routePolyline.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(
                     points: routePolyline,
-                    color: AppColors.primary.withValues(alpha: 0.85),
-                    strokeWidth: _currentZoom >= 13
-                        ? 6.0
-                        : _currentZoom >= 10.5
-                            ? 4.0
-                            : 3.0,
+                    color: routeColor.withValues(alpha: 0.92),
+                    strokeWidth: riderMode
+                        ? (_currentZoom >= 13 ? 9.0 : _currentZoom >= 10.5 ? 7.0 : 5.0)
+                        : (_currentZoom >= 13 ? 6.0 : _currentZoom >= 10.5 ? 4.0 : 3.0),
                     strokeCap: StrokeCap.round,
                     strokeJoin: StrokeJoin.round,
                   ),
@@ -450,30 +459,35 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               // Origin + destination + waypoint markers
               // Origin dot is always visible; dest/waypoint pins shown
               // only at zoom ≥ 10.5 where they are legible.
+              // Rider mode: markers scale up for glove-friendly visibility.
               MarkerLayer(markers: [
                 Marker(
                   point: _origin,
-                  width: 22,
-                  height: 22,
-                  child: _OriginMarker(),
+                  width: riderMode ? 28 : 22,
+                  height: riderMode ? 28 : 22,
+                  child: _OriginMarker(color: originColor),
                 ),
                 if (waypoint != null && _currentZoom >= 10.5)
                   Marker(
                     point: waypoint,
-                    width: 36,
-                    height: 36,
+                    width: riderMode ? 48 : 36,
+                    height: riderMode ? 48 : 36,
                     alignment: Alignment.topCenter,
-                    child: const Icon(Icons.location_pin,
-                        color: Color(0xFFFFB300), size: 36),
+                    child: Icon(Icons.location_pin,
+                        color: riderMode
+                            ? RiderModeColors.tertiary
+                            : const Color(0xFFFFB300),
+                        size: riderMode ? 48 : 36),
                   ),
                 if (dest != null && _currentZoom >= 10.5)
                   Marker(
                     point: dest,
-                    width: 36,
-                    height: 36,
+                    width: riderMode ? 48 : 36,
+                    height: riderMode ? 48 : 36,
                     alignment: Alignment.topCenter,
-                    child: const Icon(Icons.location_pin,
-                        color: AppColors.mapDestination, size: 36),
+                    child: Icon(Icons.location_pin,
+                        color: destColor,
+                        size: riderMode ? 48 : 36),
                   ),
               ]),
             ],
@@ -541,6 +555,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             child: SafeArea(
               bottom: false,
               child: _MapHeader(
+                riderMode: riderMode,
+                onRiderModeToggle: () =>
+                    ref.read(riderModeProvider.notifier).toggle(),
                 onCourseRegister: () {},
                 onTourSummary: () {},
                 onSavedCourses: () {},
@@ -659,12 +676,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapHeader extends StatelessWidget {
+  final bool riderMode;
+  final VoidCallback onRiderModeToggle;
   final VoidCallback onCourseRegister;
   final VoidCallback onTourSummary;
   final VoidCallback onSavedCourses;
   final VoidCallback onSettings;
 
   const _MapHeader({
+    required this.riderMode,
+    required this.onRiderModeToggle,
     required this.onCourseRegister,
     required this.onTourSummary,
     required this.onSavedCourses,
@@ -673,15 +694,28 @@ class _MapHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final bgColor = riderMode
+        ? RiderModeColors.surface.withValues(alpha: 0.95)
+        : Colors.white.withValues(alpha: 0.95);
+
+    return Container(
+      color: bgColor,
       padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── 로고 ────────────────────────────────────────────
-          _LogoBadge(),
+          // ── 로고 ─────────────────────────────────────────────
+          _LogoBadge(riderMode: riderMode),
           const Spacer(),
-          // ── 아이콘 4개 ───────────────────────────────────────
+          // ── 라이더 모드 토글 (햇빛 아이콘) ───────────────────
+          _HeaderIcon(
+            icon: riderMode ? Icons.wb_sunny : Icons.wb_sunny_outlined,
+            onTap: onRiderModeToggle,
+            active: riderMode,
+            activeColor: RiderModeColors.primary,
+            activeBg: RiderModeColors.surface,
+          ),
+          const SizedBox(width: 6),
           _HeaderIcon(icon: Icons.image_outlined, onTap: onCourseRegister),
           const SizedBox(width: 6),
           _HeaderIcon(icon: Icons.history_rounded, onTap: onTourSummary),
@@ -696,6 +730,9 @@ class _MapHeader extends StatelessWidget {
 }
 
 class _LogoBadge extends StatelessWidget {
+  final bool riderMode;
+  const _LogoBadge({this.riderMode = false});
+
   @override
   Widget build(BuildContext context) {
     return Image.asset(
@@ -703,20 +740,23 @@ class _LogoBadge extends StatelessWidget {
       height: 40,
       fit: BoxFit.contain,
       errorBuilder: (context, error, stackTrace) {
-        // 폰트 이미지 없을 때 텍스트로 대체
         return RichText(
           text: TextSpan(
             children: [
               TextSpan(
                 text: 'YURU',
                 style: GoogleFontsHelper.logoStyle.copyWith(
-                  color: AppColors.primary,
+                  color: riderMode
+                      ? RiderModeColors.primary
+                      : AppColors.primary,
                 ),
               ),
               TextSpan(
                 text: 'NAVI',
                 style: GoogleFontsHelper.logoStyle.copyWith(
-                  color: AppColors.secondary,
+                  color: riderMode
+                      ? RiderModeColors.secondary
+                      : AppColors.secondary,
                 ),
               ),
             ],
@@ -740,8 +780,17 @@ class GoogleFontsHelper {
 class _HeaderIcon extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
+  final bool active;
+  final Color? activeColor;
+  final Color? activeBg;
 
-  const _HeaderIcon({required this.icon, required this.onTap});
+  const _HeaderIcon({
+    required this.icon,
+    required this.onTap,
+    this.active = false,
+    this.activeColor,
+    this.activeBg,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -752,7 +801,9 @@ class _HeaderIcon extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.92),
+          color: active
+              ? (activeBg ?? AppColors.primary.withValues(alpha: 0.15))
+              : Colors.white.withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(9),
           boxShadow: [
             BoxShadow(
@@ -762,7 +813,13 @@ class _HeaderIcon extends StatelessWidget {
             ),
           ],
         ),
-        child: Icon(icon, size: 19, color: AppColors.secondary),
+        child: Icon(
+          icon,
+          size: 19,
+          color: active
+              ? (activeColor ?? AppColors.primary)
+              : AppColors.secondary,
+        ),
       ),
     );
   }
@@ -1308,19 +1365,20 @@ class _AdBanner extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _OriginMarker extends StatelessWidget {
+  final Color color;
+  const _OriginMarker({this.color = AppColors.mapOrigin});
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 22,
-      height: 22,
       decoration: BoxDecoration(
-        color: AppColors.mapOrigin,
+        color: color,
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white, width: 3),
         boxShadow: [
           BoxShadow(
-            color: AppColors.mapOrigin.withValues(alpha: 0.45),
-            blurRadius: 10,
+            color: color.withValues(alpha: 0.55),
+            blurRadius: 12,
           ),
         ],
       ),

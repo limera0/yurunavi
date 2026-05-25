@@ -106,6 +106,103 @@ class AppTextStyles {
       );
 }
 
+// ── Rider Mode Design Tokens ──────────────────────────────────────────────────
+// High-contrast palette optimised for direct sunlight on a handlebar mount.
+// Pitch-black background eliminates glare; neon green + safety orange provide
+// maximum contrast ratios (> 7:1 against black, WCAG AAA).
+
+class RiderModeColors {
+  RiderModeColors._();
+
+  static const background = Color(0xFF000000);   // pure black – no glare
+  static const surface = Color(0xFF0D0D0D);      // near-black panels
+  static const surfaceVariant = Color(0xFF1A1A1A);
+
+  static const primary = Color(0xFF00FF6A);      // neon green – action / route
+  static const secondary = Color(0xFFFF6B00);    // safety orange – accent / POI
+  static const tertiary = Color(0xFFFFD600);     // amber – warnings / distance
+
+  static const textPrimary = Color(0xFFFFFFFF);  // white on black
+  static const textSecondary = Color(0xFFCCCCCC);
+  static const textHint = Color(0xFF777777);
+
+  // Map overlays
+  static const mapRoute = Color(0xFF00FF6A);
+  static const mapOrigin = Color(0xFF00FF6A);
+  static const mapDestination = Color(0xFFFF6B00);
+  static const mapCourse = Color(0xFF00FF6A);
+
+  static const error = Color(0xFFFF3B30);
+  static const warning = Color(0xFFFFD600);
+  static const success = Color(0xFF00FF6A);
+}
+
+class RiderModeTextStyles {
+  RiderModeTextStyles._();
+
+  // All styles are bold and oversized — readable at arm's length in sunlight.
+  static const TextStyle headlineXL = TextStyle(
+    fontSize: 34,
+    fontWeight: FontWeight.w900,
+    color: RiderModeColors.textPrimary,
+    height: 1.2,
+    letterSpacing: -0.5,
+  );
+
+  static const TextStyle headlineLG = TextStyle(
+    fontSize: 28,
+    fontWeight: FontWeight.w900,
+    color: RiderModeColors.textPrimary,
+    height: 1.3,
+  );
+
+  static const TextStyle headlineMD = TextStyle(
+    fontSize: 22,
+    fontWeight: FontWeight.w800,
+    color: RiderModeColors.textPrimary,
+    height: 1.4,
+  );
+
+  static const TextStyle titleSM = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w800,
+    color: RiderModeColors.textPrimary,
+  );
+
+  static const TextStyle bodyLG = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
+    color: RiderModeColors.textPrimary,
+    height: 1.6,
+  );
+
+  static const TextStyle bodyMD = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: RiderModeColors.textPrimary,
+    height: 1.5,
+  );
+
+  static const TextStyle labelLG = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w800,
+    color: RiderModeColors.textPrimary,
+    letterSpacing: 0.3,
+  );
+
+  static const TextStyle labelMD = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w700,
+    color: RiderModeColors.textPrimary,
+  );
+
+  static const TextStyle labelSM = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w700,
+    color: RiderModeColors.textSecondary,
+  );
+}
+
 // ── ThemeData ─────────────────────────────────────────────────────────────────
 
 class AppTheme {
@@ -201,6 +298,73 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         contentTextStyle: AppTextStyles.bodyMD.copyWith(color: Colors.white),
+      ),
+    );
+  }
+
+  /// High-Contrast Rider Mode — pitch black + neon green + safety orange.
+  /// Designed for direct sunlight on a handlebar mount.
+  static ThemeData get rider {
+    const cs = ColorScheme(
+      brightness: Brightness.dark,
+      primary: RiderModeColors.primary,
+      onPrimary: RiderModeColors.background,
+      secondary: RiderModeColors.secondary,
+      onSecondary: RiderModeColors.background,
+      tertiary: RiderModeColors.tertiary,
+      onTertiary: RiderModeColors.background,
+      surface: RiderModeColors.surface,
+      onSurface: RiderModeColors.textPrimary,
+      error: RiderModeColors.error,
+      onError: RiderModeColors.background,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: cs,
+      scaffoldBackgroundColor: RiderModeColors.background,
+      appBarTheme: const AppBarTheme(
+        elevation: 0,
+        backgroundColor: RiderModeColors.surface,
+        foregroundColor: RiderModeColors.textPrimary,
+        centerTitle: false,
+        titleTextStyle: RiderModeTextStyles.headlineMD,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: RiderModeColors.primary,
+          foregroundColor: RiderModeColors.background,
+          textStyle: RiderModeTextStyles.labelLG,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
+          elevation: 0,
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: RiderModeColors.primary,
+          textStyle: RiderModeTextStyles.labelLG,
+        ),
+      ),
+      cardTheme: const CardThemeData(
+        color: RiderModeColors.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+      ),
+      dividerTheme: DividerThemeData(
+        color: RiderModeColors.textHint.withValues(alpha: 0.4),
+        thickness: 1,
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        contentTextStyle: RiderModeTextStyles.bodyMD,
       ),
     );
   }
