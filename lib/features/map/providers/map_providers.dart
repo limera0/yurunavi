@@ -42,13 +42,14 @@ class SavedRoutesNotifier extends AsyncNotifier<List<SavedRoute>> {
       ref.read(routeServiceProvider).loadAll();
 
   Future<void> add(SavedRoute route) async {
-    final next = [...(state.value ?? []), route];
+    final next = <SavedRoute>[...(state.value ?? <SavedRoute>[]), route];
     state = AsyncData(next);
     await ref.read(routeServiceProvider).saveAll(next);
   }
 
   Future<void> remove(String id) async {
-    final next = (state.value ?? []).where((r) => r.id != id).toList();
+    final next =
+        (state.value ?? <SavedRoute>[]).where((r) => r.id != id).toList();
     state = AsyncData(next);
     await ref.read(routeServiceProvider).saveAll(next);
   }
