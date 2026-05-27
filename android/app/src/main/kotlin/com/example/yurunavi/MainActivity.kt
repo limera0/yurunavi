@@ -1,4 +1,4 @@
-package com.example.winding_road
+package com.example.yurunavi
 
 import io.flutter.embedding.android.FlutterActivity
 

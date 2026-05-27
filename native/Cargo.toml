@@ -1,10 +1,10 @@
 [package]
-name = "winding_road_native"
+name = "yurunavi_native"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "winding_road_native"
+name = "yurunavi_native"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]

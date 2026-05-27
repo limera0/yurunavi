@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <application
-        android:label="winding_road"
+        android:label="yurunavi"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

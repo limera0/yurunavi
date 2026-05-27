@@ -148,7 +148,7 @@ class _IntroScreenState extends State<IntroScreen>
                   child: Column(
                     children: [
                       const Text(
-                        'Winding Road',
+                        'YuruNavi',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 28,

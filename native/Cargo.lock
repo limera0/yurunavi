@@ -709,7 +709,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "winding_road_native"
+name = "yurunavi_native"
 version = "0.1.0"
 dependencies = [
  "flutter_rust_bridge",
