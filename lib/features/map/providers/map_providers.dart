@@ -170,9 +170,22 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
   void reset() => state = const MapInteractionState();
 }
 
+// ── Clock tick (drives time-dependent providers) ──────────────────────────────
+// Emits DateTime.now() every 30 s so daylight progress + BMNT/EENT labels
+// re-render even when the user's GPS position has not changed. Without this
+// the daylight gauge was computed once on first location fix and then stuck.
+final clockTickProvider = StreamProvider<DateTime>((ref) async* {
+  yield DateTime.now();
+  yield* Stream.periodic(
+    const Duration(seconds: 30),
+    (_) => DateTime.now(),
+  );
+});
+
 // ── Daylight ──────────────────────────────────────────────────────────────────
 
 final daylightProgressProvider = Provider<double>((ref) {
+  ref.watch(clockTickProvider); // re-fire on tick
   final loc = ref.watch(currentLocationProvider);
   if (loc == null) return 0.5;
   return DaylightService.daylightProgress(
@@ -184,6 +197,7 @@ final daylightProgressProvider = Provider<double>((ref) {
 
 final daylightTimesProvider =
     Provider<({DateTime bmnt, DateTime eent})?> ((ref) {
+  ref.watch(clockTickProvider); // re-fire on tick
   final loc = ref.watch(currentLocationProvider);
   if (loc == null) return null;
   return DaylightService.calculate(

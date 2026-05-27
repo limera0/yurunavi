@@ -11,7 +11,9 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../map/providers/map_providers.dart';
 
-const LatLng _kDefaultPos = LatLng(37.5665, 126.9780);
+/// Camera-framing default only — never treated as the rider's location.
+/// The real position arrives from the GPS stream below.
+const LatLng _kInitialMapView = LatLng(37.5665, 126.9780);
 
 // ── Navigation palette ────────────────────────────────────────────────────────
 const _kBg      = Color(0xFF0D0D0D);
@@ -40,12 +42,12 @@ class NavScreen extends ConsumerStatefulWidget {
 class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
-  LatLng _currentPos = _kDefaultPos;
+  // Nullable until the first real GPS fix arrives — prevents the position
+  // marker from rendering at a hardcoded mock location.
+  LatLng? _currentPos;
   double _speedKmh = 0;
   bool _isManualMode = false;
   Timer? _recenterTimer;
-  Timer? _speedTimer;
-  int _tick = 0;
   StreamSubscription<Position>? _locationSub;
 
   // Turn-by-turn demo steps
@@ -75,7 +77,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _startLocation();
-    _startSpeedSim();
   }
 
   @override
@@ -84,7 +85,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       statusBarIconBrightness: Brightness.dark,
     ));
     _recenterTimer?.cancel();
-    _speedTimer?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl.dispose();
@@ -105,24 +105,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ).listen((pos) {
       final loc = LatLng(pos.latitude, pos.longitude);
       ref.read(currentLocationProvider.notifier).set(loc);
+      // Raw device speed in m/s → km/h. Defaults to 0 when stationary,
+      // negative, or NaN. No simulator override.
+      final raw = pos.speed;
+      final kmh = (raw.isNaN || raw <= 0) ? 0.0 : raw * 3.6;
       setState(() {
         _currentPos = loc;
-        if (pos.speed > 0.5) _speedKmh = pos.speed * 3.6;
+        _speedKmh = kmh;
       });
       if (!_isManualMode) _recenter(loc);
-    });
-  }
-
-  void _startSpeedSim() {
-    _speedTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (_speedKmh > 1) return;
-      setState(() {
-        _tick++;
-        final phase = (_tick * 0.15) % (2 * 3.14159);
-        final norm = phase.clamp(0.0, 3.14159);
-        final wave = (norm < 1.57) ? norm / 1.57 : (3.14159 - norm) / 1.57;
-        _speedKmh = (60 + 40 * wave).clamp(0.0, 120.0);
-      });
     });
   }
 
@@ -132,8 +123,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isManualMode = true);
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
+      final pos = _currentPos;
       setState(() => _isManualMode = false);
-      _recenter(_currentPos);
+      if (pos != null) _recenter(pos);
     });
   }
 
@@ -151,8 +143,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
           FlutterMap(
             mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: widget.destination ?? _currentPos,
+              initialCenter: widget.destination ?? _currentPos ?? _kInitialMapView,
               initialZoom: 15,
+              // Lock north-up: rotation gestures during pinch-zoom were
+              // disorienting riders on the bar mount.
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
               onMapEvent: (event) {
                 if (event is MapEventMoveStart && event.source != MapEventSource.mapController) {
                   _onMapGesture();
@@ -160,20 +157,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
               },
             ),
             children: [
+              // Carto Dark Matter — clean, sunset/night-friendly basemap.
+              // Strips OSM micro-detail so route + turn cues dominate.
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.yurunavi.app',
+                urlTemplate:
+                    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
-              ),
-              // 야간 다크 오버레이
-              ColorFiltered(
-                colorFilter: ColorFilter.matrix([
-                  -0.88, 0, 0, 0, 255,
-                  0, -0.88, 0, 0, 255,
-                  0, 0, -0.88, 0, 255,
-                  0, 0, 0, 0.82, 0,
-                ]),
-                child: const SizedBox.expand(),
               ),
               // 경로 폴리라인
               if (widget.routePolyline.length >= 2)
@@ -188,22 +179,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 ]),
 
               MarkerLayer(markers: [
-                // 현위치
-                Marker(
-                  point: _currentPos,
-                  width: 24,
-                  height: 24,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: _kAccent,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
-                      boxShadow: [
-                        BoxShadow(color: _kAccent.withValues(alpha: 0.5), blurRadius: 12),
-                      ],
+                // 현위치 — only after a real GPS fix arrives.
+                if (_currentPos != null)
+                  Marker(
+                    point: _currentPos!,
+                    width: 24,
+                    height: 24,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _kAccent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(color: _kAccent.withValues(alpha: 0.5), blurRadius: 12),
+                        ],
+                      ),
                     ),
                   ),
-                ),
                 // 경유지
                 ...widget.waypoints.map(
                   (wp) => Marker(
@@ -370,9 +362,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 _NavIconBtn(
                   icon: _isManualMode ? Icons.gps_fixed : Icons.my_location,
                   onTap: () {
+                    final pos = _currentPos;
+                    if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(_currentPos);
+                    _recenter(pos);
                   },
                 ),
               ],

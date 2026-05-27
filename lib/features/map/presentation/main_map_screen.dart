@@ -13,13 +13,17 @@ import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/map_cache_provider.dart';
-import '../../../services/native_engine.dart';
+import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
 import '../../navigation/presentation/nav_screen.dart';
 
 export 'main_map_screen.dart';
 
-const LatLng kDefaultOrigin = LatLng(37.5665, 126.9780);
+/// Default *map framing* used before the first GPS fix arrives.
+/// This is the camera centre only — it is NOT treated as the rider's
+/// location: the origin marker, distance badge and tap-to-snap are all
+/// gated on a real GPS fix.
+const LatLng kInitialMapView = LatLng(37.5665, 126.9780);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid-based POI clustering
@@ -68,7 +72,9 @@ class MainMapScreen extends ConsumerStatefulWidget {
 class _MainMapScreenState extends ConsumerState<MainMapScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
-  LatLng _origin = kDefaultOrigin;
+  // Nullable until the device returns a real GPS fix — prevents the origin
+  // marker / distance badge from rendering at a hardcoded mock location.
+  LatLng? _origin;
   StreamSubscription<Position>? _locationSub;
   double _currentZoom = 11.0;
 
@@ -126,12 +132,20 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     ).listen((pos) {
       final loc = LatLng(pos.latitude, pos.longitude);
       ref.read(currentLocationProvider.notifier).set(loc);
+      final isFirstFix = _origin == null;
       setState(() => _origin = loc);
+      if (isFirstFix) {
+        // Snap the camera to the rider the moment GPS resolves.
+        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+      }
     });
   }
 
-  void _recenterMap() =>
-      _mapCtrl.move(_origin, _currentZoom.clamp(10.0, 14.0));
+  void _recenterMap() {
+    final o = _origin;
+    if (o == null) return;
+    _mapCtrl.move(o, _currentZoom.clamp(10.0, 14.0));
+  }
 
   // ── Haversine ─────────────────────────────────────────────────────────────
 
@@ -149,19 +163,29 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // ── Map tap ───────────────────────────────────────────────────────────────
 
   Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
+    final origin = _origin;
+    if (origin == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('GPS 위치를 기다리는 중입니다…'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
     final interaction = ref.read(mapInteractionProvider);
     if (interaction.isLoading) return;
 
     ref.read(mapInteractionProvider.notifier).setLoading(true);
     setState(() {
       _touchPoint = tapped;
-      _touchDistKm = _haversineKm(_origin, tapped);
+      _touchDistKm = _haversineKm(origin, tapped);
     });
 
     final poiSvc = ref.read(poiServiceProvider);
     try {
       final result = await poiSvc.snapDestination(
-        origin: _origin,
+        origin: origin,
         tapped: tapped,
         radiusKm: 1.0,
       );
@@ -176,7 +200,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         if (!mounted) return;
         if (expand == true) {
           final r2 = await poiSvc.snapDestination(
-            origin: _origin,
+            origin: origin,
             tapped: tapped,
             radiusKm: 3.0,
           );
@@ -196,19 +220,21 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   }
 
   void _applyDestination(LatLng dest) {
-    final dist = _haversineKm(_origin, dest);
+    final origin = _origin;
+    if (origin == null) return;
+    final dist = _haversineKm(origin, dest);
     ref.read(mapInteractionProvider.notifier).setDestination(dest, dist);
 
     final sw = LatLng(
-      _origin.latitude < dest.latitude ? _origin.latitude : dest.latitude,
-      _origin.longitude < dest.longitude
-          ? _origin.longitude
+      origin.latitude < dest.latitude ? origin.latitude : dest.latitude,
+      origin.longitude < dest.longitude
+          ? origin.longitude
           : dest.longitude,
     );
     final ne = LatLng(
-      _origin.latitude > dest.latitude ? _origin.latitude : dest.latitude,
-      _origin.longitude > dest.longitude
-          ? _origin.longitude
+      origin.latitude > dest.latitude ? origin.latitude : dest.latitude,
+      origin.longitude > dest.longitude
+          ? origin.longitude
           : dest.longitude,
     );
     _mapCtrl.fitCamera(
@@ -257,23 +283,35 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   }
 
   Future<void> _onRouteCardSelect(int idx) async {
+    final origin = _origin;
     final state = ref.read(mapInteractionProvider);
     final dest = state.destination;
-    if (dest == null) return;
+    if (origin == null || dest == null) return;
 
     ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
     ref.read(mapInteractionProvider.notifier).setLoading(true);
 
     try {
-      final points = await NativeEngine.calcDummyRoute(
-        origin: _origin,
+      final routes = await RoutingService.fetchRoutes(
+        origin: origin,
         destination: dest,
         waypoints: state.waypoints,
-        routeType: idx,
       );
-      if (mounted) {
-        ref.read(mapInteractionProvider.notifier).setRoutePolyline(points);
+      if (!mounted) return;
+      if (routes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('경로를 불러오지 못했습니다 — 잠시 후 다시 시도해주세요'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        ref.read(mapInteractionProvider.notifier).setRoutePolyline(const []);
+        return;
       }
+      // OSRM returns the primary route at [0] and up to two alternatives.
+      // Map the three course cards onto whichever alternatives exist.
+      final pick = idx.clamp(0, routes.length - 1);
+      ref.read(mapInteractionProvider.notifier).setRoutePolyline(routes[pick]);
     } finally {
       if (mounted) {
         ref.read(mapInteractionProvider.notifier).setLoading(false);
@@ -381,7 +419,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           FlutterMap(
             mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: _origin,
+              initialCenter: _origin ?? kInitialMapView,
               initialZoom: _currentZoom,
               // Disable rotation: lock North-up for motorcycle mount
               interactionOptions: const InteractionOptions(
@@ -395,10 +433,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               },
             ),
             children: [
+              // Carto Voyager — minimalist navigation-style basemap.
+              // Strips OSM micro-detail (utility poles, fences, etc.) and
+              // boosts road/POI legibility under sunlight.
               TileLayer(
                 urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.yurunavi.app',
+                    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
                 tileProvider: buildCachedTileProvider(),
               ),
@@ -429,10 +471,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               // ── ZOOM TIER 3 (zoom ≥ 13): detail overlays ───────────
               // Tap-radius circle and destination radius only at street
               // level; at wide zoom they cover too much of the screen.
-              if (_touchPoint != null && _currentZoom >= 13)
+              if (_touchPoint != null && _origin != null && _currentZoom >= 13)
                 CircleLayer(circles: [
                   CircleMarker(
-                    point: _origin,
+                    point: _origin!,
                     radius: _touchDistKm * 1000,
                     useRadiusInMeter: true,
                     color:
@@ -443,10 +485,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
                 ]),
 
-              if (dest != null && _currentZoom >= 10.5)
+              if (dest != null && _origin != null && _currentZoom >= 10.5)
                 CircleLayer(circles: [
                   CircleMarker(
-                    point: _origin,
+                    point: _origin!,
                     radius: interaction.distanceKm * 1000,
                     useRadiusInMeter: true,
                     color: AppColors.mapOrigin.withValues(alpha: 0.05),
@@ -456,17 +498,18 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
                 ]),
 
-              // Origin + destination + waypoint markers
-              // Origin dot is always visible; dest/waypoint pins shown
-              // only at zoom ≥ 10.5 where they are legible.
+              // Origin + destination + waypoint markers.
+              // Origin dot only renders once a real GPS fix has arrived;
+              // dest/waypoint pins shown at zoom ≥ 10.5 where legible.
               // Rider mode: markers scale up for glove-friendly visibility.
               MarkerLayer(markers: [
-                Marker(
-                  point: _origin,
-                  width: riderMode ? 28 : 22,
-                  height: riderMode ? 28 : 22,
-                  child: _OriginMarker(color: originColor),
-                ),
+                if (_origin != null)
+                  Marker(
+                    point: _origin!,
+                    width: riderMode ? 28 : 22,
+                    height: riderMode ? 28 : 22,
+                    child: _OriginMarker(color: originColor),
+                  ),
                 if (waypoint != null && _currentZoom >= 10.5)
                   Marker(
                     point: waypoint,

@@ -11,7 +11,9 @@ import 'package:latlong2/latlong.dart';
 import '../features/map/providers/map_providers.dart';
 import '../core/widgets/daylight_bar.dart';
 
-const LatLng kDefaultOrigin = LatLng(37.5665, 126.9780);
+/// Camera-framing default only — never treated as the rider's location.
+/// The real position arrives from the GPS stream below.
+const LatLng kInitialMapView = LatLng(37.5665, 126.9780);
 
 // ── 다크 모드 색상 팔레트 ─────────────────────────────────────
 const _kBg          = Color(0xFF0D0D0D);
@@ -33,10 +35,9 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
     with SingleTickerProviderStateMixin {
 
   final MapController _mapCtrl = MapController();
-  LatLng _currentPos = kDefaultOrigin;
+  // Nullable until the device returns a real GPS fix.
+  LatLng? _currentPos;
   double _speedKmh = 0;
-  Timer? _speedTimer;
-  int _tick = 0;
   bool _isManualMode = false;
   Timer? _autoRecenterTimer;
   static const _recenterDelay = Duration(seconds: 15);
@@ -70,13 +71,11 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
     );
 
     _startLocationTracking();
-    _startSpeedSimulation();
   }
 
   @override
   void dispose() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    _speedTimer?.cancel();
     _autoRecenterTimer?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
@@ -103,25 +102,15 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
     ).listen((pos) {
       final loc = LatLng(pos.latitude, pos.longitude);
       ref.read(currentLocationProvider.notifier).set(loc);
+      // Raw device speed (m/s) → km/h. Defaults to 0 when stationary,
+      // negative or NaN. No simulator override.
+      final raw = pos.speed;
+      final kmh = (raw.isNaN || raw <= 0) ? 0.0 : raw * 3.6;
       setState(() {
         _currentPos = loc;
-        if (pos.speed > 0.5) _speedKmh = pos.speed * 3.6;
+        _speedKmh = kmh;
       });
       if (!_isManualMode) _recenter(loc);
-    });
-  }
-
-  void _startSpeedSimulation() {
-    _speedTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (_speedKmh > 1) return;
-      setState(() {
-        _tick++;
-        final phase = (_tick * 0.15) % (2 * 3.14159);
-        final norm = phase.clamp(0.0, 3.14159);
-        final wave =
-            (norm < 1.57) ? norm / 1.57 : (3.14159 - norm) / 1.57;
-        _speedKmh = (60 + 40 * wave).clamp(0.0, 120.0).toDouble();
-      });
     });
   }
 
@@ -130,8 +119,9 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
     setState(() => _isManualMode = true);
     _autoRecenterTimer?.cancel();
     _autoRecenterTimer = Timer(_recenterDelay, () {
+      final pos = _currentPos;
       setState(() => _isManualMode = false);
-      _recenter(_currentPos);
+      if (pos != null) _recenter(pos);
     });
   }
 
@@ -160,8 +150,13 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
           FlutterMap(
             mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: widget.destination ?? _currentPos,
+              initialCenter: widget.destination ?? _currentPos ?? kInitialMapView,
               initialZoom: 15,
+              // Lock north-up: rotation gestures during pinch-zoom were
+              // disorienting riders on the bar mount.
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
               onMapEvent: (event) {
                 if (event is MapEventMoveStart) {
                   _onCameraMove(event.camera, true);
@@ -169,45 +164,37 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
               },
             ),
             children: [
-              // 다크 OSM 타일
+              // Carto Dark Matter — minimalist dark basemap for night riding.
               TileLayer(
                 urlTemplate:
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.windingroad.app',
+                    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
               ),
-              // 반투명 다크 오버레이 — 야간 가독성 향상
-              ColorFiltered(
-                colorFilter: ColorFilter.matrix([
-                  -0.9, 0, 0, 0, 255,
-                   0, -0.9, 0, 0, 255,
-                   0, 0, -0.9, 0, 255,
-                   0, 0, 0, 0.85, 0,
-                ]),
-                child: const SizedBox.expand(),
-              ),
-              // 현재 위치
+              // 현재 위치 — only after a real GPS fix arrives.
               MarkerLayer(
                 markers: [
-                  Marker(
-                    point: _currentPos,
-                    width: 22,
-                    height: 22,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: _kAccent,
-                        shape: BoxShape.circle,
-                        border:
-                            Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _kAccent.withValues(alpha: 0.5),
-                            blurRadius: 10,
-                          ),
-                        ],
+                  if (_currentPos != null)
+                    Marker(
+                      point: _currentPos!,
+                      width: 22,
+                      height: 22,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _kAccent,
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _kAccent.withValues(alpha: 0.5),
+                              blurRadius: 10,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                   if (widget.destination != null)
                     Marker(
                       point: widget.destination!,
@@ -418,9 +405,11 @@ class _DrivingScreenState extends ConsumerState<DrivingScreen>
                       ? Icons.gps_fixed
                       : Icons.my_location,
                   onTap: () {
+                    final pos = _currentPos;
+                    if (pos == null) return;
                     _autoRecenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(_currentPos);
+                    _recenter(pos);
                   },
                 ),
               ],
