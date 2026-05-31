@@ -157,12 +157,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
               },
             ),
             children: [
-              // Carto Dark Matter — clean, sunset/night-friendly basemap.
-              // Strips OSM micro-detail so route + turn cues dominate.
+              // OSM standard tiles — readable at all times of day.
               TileLayer(
                 urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
+                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c'],
                 userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
               ),

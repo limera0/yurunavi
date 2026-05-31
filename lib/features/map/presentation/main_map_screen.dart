@@ -433,13 +433,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               },
             ),
             children: [
-              // Carto Voyager — minimalist navigation-style basemap.
-              // Strips OSM micro-detail (utility poles, fences, etc.) and
-              // boosts road/POI legibility under sunlight.
+              // OSM standard tiles — full road/building/POI detail at all zoom levels.
               TileLayer(
                 urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
+                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                subdomains: const ['a', 'b', 'c'],
                 userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
                 tileProvider: buildCachedTileProvider(),
