@@ -28,7 +28,7 @@ class RoutingService {
         .join(';');
     final uri = Uri.parse(
       '$_osrmBase/$coords'
-      '?overview=full&geometries=geojson&alternatives=true&steps=false&exclude=motorway',
+      '?overview=full&geometries=geojson&alternatives=true&steps=false',
     );
 
     try {
