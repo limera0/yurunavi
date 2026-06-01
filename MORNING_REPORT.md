@@ -1,4 +1,4 @@
-# MORNING_REPORT — 3번째 밤 (2026-06-01)
+# MORNING_REPORT — 4번째 밤 (2026-06-01)
 
 오케스트레이터: Claude Sonnet 4.6
 
@@ -8,163 +8,90 @@
 
 | 모듈 | 내용 | 커밋 |
 |------|------|------|
-| 0 | Tailscale MagicDNS 주소 교체 | `1af76f9` |
-| 1 + 2 | Android cleartext 허용 + APK 빌드 성공 | `309c89e` |
-| 3 | 내비 버그 조사 (코드 수정 없음) | — (조사 전용) |
+| 체크포인트 | 모듈 1 시작 전 | `10653dc` |
+| 1 + 2 + 3 | 실제 Valhalla 거리 + 내비 초기화면 버그 수정 | `e612036` |
 
 ---
 
 ## 2. 완료 기준 체크 (모듈별)
 
-### 모듈 0 — 라우팅 주소 교체
-- [x] `routing_service.dart` 에 `192.168.0.57` 없음 → `westinx.tail2172f6.ts.net:8002` 로 교체됨
-- [x] `native_engine.dart` 에 `192.168.0.57` 없음 → `westinx.tail2172f6.ts.net:8003` 로 교체됨
-- [x] `grep -rn "192.168.0.57\|localhost:800" lib/` 결과 없음 (잔여 없음)
+### 모듈 1 — 카드 거리를 Valhalla 실제 거리로 교체
+- [x] 카드 거리 = Valhalla 실제 도로 거리 (`haversine × 배수` 코드 완전 삭제)
+- [x] 카드 시간(분)도 Valhalla 실제 time으로 표시
+- [x] `1.55 / 1.22 / 1.0` 배수 상수 완전 삭제됨
+- [x] 경로 미로드 시 `---` 플레이스홀더 표시 (크래시 없음)
+- [x] `flutter analyze` 0 issues
+
+변경된 파일:
+- `lib/services/routing_service.dart`: `RouteResult` 클래스 추가, `fetchRoutes()` 반환 타입을 `List<RouteResult>`로 변경, Valhalla 응답에서 `time`(초) 추출 후 분으로 변환
+- `lib/features/map/providers/map_providers.dart`: `allRouteMeta: List<({double km, int mins})>` 필드 추가, `setAllRouteMeta()` 메서드 추가
+- `lib/features/map/presentation/main_map_screen.dart`: `_fetchAndStoreAllRoutes()` / `_onRouteCardSelect()` 모두 실제 거리·시간 저장, `_CourseSheet` 에서 `haversine × 배수` 로직 제거 및 `routeMeta` 파라미터로 교체
+
+### 모듈 2 — 내비 화면 거리 하드코딩 제거
+- [x] `nav_screen.dart`의 `23.4km` 하드코딩 제거됨
+- [x] `_polylineKm()` Haversine 헬퍼 추가, 폴리라인 실제 길이 계산
+- [x] 폴리라인 비어 있을 때 `--` 표시 (크래시 없음)
+- [x] `flutter analyze` 0 issues
+
+### 모듈 3 — 내비 초기화면 / 현위치 버튼 버그 2건
+- [x] 버그 A 수정: `initialCenter`에서 `widget.destination` 제거 → `_currentPos ?? _kInitialMapView`
+- [x] 버그 B 확인: `nav_screen.dart:174`의 `onMapEvent` 핸들러에 이미 `event.source != MapEventSource.mapController` 체크 존재 → 수정 불요, 정상 동작 확인
+- [x] `flutter analyze` 0 issues
+
+### 빌드 검증
 - [x] `flutter analyze` → No issues found
-- 참고: 호스트명이 코드에 하드코딩되어 있음. **추후 `.env` 파일로 빼는 것을 권장** (예: `VALHALLA_HOST`, `RUST_HOST` 환경변수로 분리).
-
-### 모듈 1 — Android cleartext 허용
-- [x] `android/app/src/main/res/xml/network_security_config.xml` 생성됨
-- [x] `AndroidManifest.xml` → `<application>` 태그에 `android:networkSecurityConfig="@xml/network_security_config"` 속성 추가됨
-- [x] 기존 속성(android:label, android:icon, android:name) 전혀 변경 없음
-- [x] 매니페스트 XML 구조 이상 없음 (육안 확인 완료)
-
-### 모듈 2 — 빌드 검증
-- [x] `flutter clean` 완료
-- [x] `flutter analyze` → No issues found (0 errors, 0 warnings)
 - [x] `flutter build apk --debug` → **빌드 성공**
-  - APK 경로: `build/app/outputs/flutter-apk/app-debug.apk`
-  - 경고(warning) 2개 발생했으나 빌드 실패에는 영향 없음:
-    > Kotlin Gradle Plugin(KGP) 관련 경고 — 현재 버전에서는 빌드 가능. 미래 Flutter 버전에서 문제될 수 있음.
-    > 영향받는 플러그인: `device_info_plus`, `package_info_plus`, `shared_preferences_android`
-    > 지금 당장 수정 불필요 — 다음 플러그인 업그레이드 때 자연히 해결됩니다.
-- [x] 커밋 완료 (`309c89e`)
+  - APK: `build/app/outputs/flutter-apk/app-debug.apk`
 
 ---
 
 ## 3. 막힌 것 / 건너뛴 것
 
-없음. 모듈 0·1·2 모두 정상 완료.
+없음. 모듈 1·2·3 모두 정상 완료.
 
-모듈 3은 NIGHT_TASK 지시에 따라 코드 수정 없이 조사만 수행함.
-
----
-
-## 4. 사용자가 아침에 직접 할 일 (순서대로)
-
-### APK 설치
-1. 폰과 컴퓨터를 USB로 연결하거나, ADB over Wi-Fi를 사용하세요.
-2. 아래 명령어로 직접 설치할 수 있습니다:
-   ```bash
-   flutter run -d <기기ID>
-   ```
-   또는 빌드된 APK 파일을 폰에 복사 후 직접 설치:
-   ```
-   build/app/outputs/flutter-apk/app-debug.apk
-   ```
-   > "알 수 없는 출처에서 설치 허용" 설정이 필요합니다 (안드로이드 설정 → 보안).
-
-3. **폰에 Tailscale이 켜져 있는지 반드시 확인하세요.**
-
-### 폰에서 확인할 것
-- **경로 선 3개 테스트:** 지도에서 목적지를 터치 → 하단에 시골길·지방도로·국도 카드 3개가 나와야 함 → 각 카드를 누르면 지도에 경로 선이 그려지는지 확인
-- **거리 일치 확인:** 카드에 표시된 거리(km)와 지도에 그려진 경로 선 길이가 대략 맞는지 확인 (현재 두 숫자가 다른 건 알려진 버그 — 아래 버그 3 참조)
-- **"Start your Engine" 슬라이더:** 슬라이더를 밀어 내비 화면으로 진입되는지 확인
+`driving_screen.dart`는 NIGHT_TASK 지시에 따라 전혀 건드리지 않음.
 
 ---
 
-## 5. 모듈 3 — 내비 버그 조사 결과
+## 4. 사용자가 폰에서 확인할 것
 
-### 버그 1: 내비 화면이 목적지 중심으로 뜬다 (출발지/현위치가 아닌)
+폰에 Tailscale 켠 상태로 APK 설치 후:
 
-**의심 위치:**
-- `lib/features/navigation/presentation/nav_screen.dart:146`
-  ```dart
-  initialCenter: widget.destination ?? _currentPos ?? _kInitialMapView,
-  ```
-- `lib/screens/driving_screen.dart:153`
-  ```dart
-  initialCenter: widget.destination ?? _currentPos ?? kInitialMapView,
-  ```
+1. **카드 거리가 달라졌는지 확인**
+   - 목적지를 찍으면 하단에 시골길·지방도로·국도 카드 3장이 나옵니다.
+   - 이전에는 카드 거리가 직선거리에 고정 배수를 곱한 가짜 숫자였습니다.
+   - 이제는 Valhalla 서버가 실제 도로를 따라 계산한 거리와 시간이 표시됩니다.
+   - 3장의 거리가 이전과 다르고, 서로 다른 실제 거리(시골길이 제일 길고 국도가 제일 짧음)인지 확인해주세요.
 
-**이유:** 내비 화면이 처음 열릴 때 GPS 위치(`_currentPos`)가 아직 `null`입니다. 그래서 목적지(`widget.destination`)가 첫 번째로 선택되어 지도 중심이 목적지로 고정됩니다. GPS 스트림은 비동기로 늦게 도착합니다.
+2. **카드 거리 ≈ 내비 거리인지 확인**
+   - "Start your Engine" 슬라이더를 밀어 내비 화면 진입 후 하단 ETA 바의 거리를 확인합니다.
+   - 이제 카드에서 선택한 경로의 실제 폴리라인 길이가 표시됩니다.
+   - 카드 거리와 내비 거리가 대략 일치해야 합니다(완전 동일하지 않을 수 있지만 크게 차이 나면 안 됩니다).
 
-**다음 밤 수정 방향:** `widget.destination`을 초기 중심에서 제거하고 `_currentPos ?? _kInitialMapView`로 변경. 어차피 GPS 첫 신호가 오면 `_recenter(loc)`가 자동 호출되어 현위치로 이동합니다.
-
----
-
-### 버그 2: 현위치 버튼을 눌러도 현위치로 안 돌아온다
-
-**의심 위치 (핵심):**
-- `lib/screens/driving_screen.dart:160-162`
-  ```dart
-  onMapEvent: (event) {
-    if (event is MapEventMoveStart) {
-      _onCameraMove(event.camera, true);  // ← 출처 구분 없음
-    }
-  },
-  ```
-
-**이유:** `_mapCtrl.move()` (= 현위치 복귀 버튼이 호출하는 함수)를 실행하면 Flutter Map이 `MapEventMoveStart` 이벤트를 발생시킵니다. 위 코드는 이 이벤트의 출처(손가락으로 움직인 것인지, 코드로 움직인 것인지)를 구분하지 않습니다. 복귀 버튼을 눌러 지도가 이동하는 순간 다시 `_isManualMode = true`로 되돌아가 버튼 효과가 즉시 취소됩니다.
-
-**비교:** `nav_screen.dart:154`는 올바르게 처리합니다:
-```dart
-if (event is MapEventMoveStart && event.source != MapEventSource.mapController) {
-  _onMapGesture();
-}
-```
-
-**다음 밤 수정:** `driving_screen.dart:161`에 `&& event.source != MapEventSource.mapController` 조건 추가.
+3. **내비 켤 때 현위치 중심으로 뜨는지 확인**
+   - 이전에는 내비 화면이 열릴 때 목적지가 화면 중앙으로 왔습니다.
+   - 이제는 내 현재 위치(GPS) 중심으로 지도가 뜹니다.
+   - GPS 신호를 받자마자 자동으로 내 위치로 이동합니다.
 
 ---
 
-### 버그 3: 카드 거리(54~83km)와 내비 거리(23.4km)가 다르다
+## 5. driving_screen.dart 정리 건
 
-**의심 위치:**
+`lib/screens/driving_screen.dart`는 구버전 내비 화면으로 보입니다. 현재 `_startNavigation()`은 `NavScreen`(`lib/features/navigation/presentation/nav_screen.dart`)을 사용하며 `DrivingScreen`은 호출하지 않습니다.
 
-**(A) 카드 거리** — `lib/features/map/presentation/main_map_screen.dart:1167-1172, 1222`
-```dart
-static const _routes = [
-  _RouteInfo('시골길로\n느긋하게', 1.55, ...),  // 직선거리 × 1.55
-  _RouteInfo('지방도로\n여유롭게', 1.22, ...),   // 직선거리 × 1.22
-  _RouteInfo('국도로\n빠르게', 1.0, ...),        // 직선거리 × 1.0
-];
-// 카드 거리 = haversine(출발지→목적지) × 고정 배수
-```
-카드 거리는 **직선 거리 × 임의의 배수**로 계산됩니다. 실제 도로 거리가 아닙니다.
-
-**(B) 내비 화면 거리** — `lib/features/navigation/presentation/nav_screen.dart:409`
-```dart
-Text('23.4km', ...)  // ← 하드코딩된 임시 값
-```
-- `NavScreen`은 `routePolyline`을 파라미터로 받습니다 (`_startNavigation()`에서 전달됨, `main_map_screen.dart:302-309`).
-- 그러나 ETA 바에서 그 폴리라인의 실제 길이를 계산하지 않고 `23.4km`를 하드코딩했습니다.
-
-**(C) `DrivingScreen`(구버전으로 보이는 내비 화면)** — `lib/screens/driving_screen.dart:469`
-```dart
-Text('23.4km', ...)  // ← 동일하게 하드코딩
-```
-- `DrivingScreen`은 `destination`만 파라미터로 받고 `routePolyline`을 받지 않습니다.
-- 현재 `_startNavigation()`은 `DrivingScreen`이 아닌 `NavScreen`을 사용합니다. `DrivingScreen`은 별도 진입점이 있는 구버전 화면으로 보임 (추가 확인 필요).
-
-**결론:** 카드는 "직선거리×배수"를, 내비는 "하드코딩 23.4km"를 보여줌 — 서로 다른 소스. 실제 Valhalla 도로 거리(RoutingService가 반환하는 polyline 길이)는 두 화면 모두 사용하지 않고 있음.
-
-**다음 밤 수정 방향:**
-1. `NavScreen`의 ETA 바: `widget.routePolyline`으로 Haversine 누적 거리를 계산하여 표시.
-2. 카드 거리도 Valhalla 실제 거리(`allRoutes` 폴리라인 길이)로 교체하면 두 값이 일치하게 됩니다.
+이 파일은 **다음 밤 정리 후보**입니다. 삭제 전 `main.dart` 등 다른 파일에서 import하는지 최종 확인 필요.
 
 ---
 
 ## 6. 토큰/한도 메모
 
-모듈 0·1·2·3 모두 단일 세션에서 완료됨. 한도 초과 없음.
+모듈 1·2·3 + 빌드 검증 모두 단일 세션에서 완료됨. 한도 초과 없음.
 
 ---
 
 ## 7. 용어 설명
 
-- **Tailscale MagicDNS**: 인터넷을 통해 내 서버에 접속하기 위한 주소. `192.168.0.57`은 집 안 내부망에서만 쓰이는 주소라 밖에서 안 됩니다. `westinx.tail2172f6.ts.net`은 어디서든 접속 가능한 Tailscale 전용 주소입니다.
-- **cleartext(평문 HTTP)**: 암호화 없이 데이터를 주고받는 방식. 안드로이드 9 이상은 보안상 이걸 기본으로 차단합니다. 내부 서버 연결이라 신뢰할 수 있으므로 `.ts.net` 도메인에만 예외로 허용했습니다.
-- **APK**: 안드로이드 앱 설치 파일. 구글 플레이가 아닌 파일 직접 설치용입니다.
-- **Haversine 직선 거리**: 지구 표면 위 두 점의 최단 거리를 구하는 공식. 실제 도로 거리보다 항상 짧습니다.
-- **Valhalla**: 도로 지도 기반으로 실제 경로와 거리를 계산해주는 서버. 카드에 표시되는 거리는 아직 이것을 제대로 활용하지 않고 있습니다.
+- **Valhalla 실제 도로 거리**: 서버가 도로 지도를 따라 실제 경로를 계산한 거리. 이전의 "직선거리 × 배수" 와 달리 실제로 달려야 하는 거리입니다.
+- **Haversine**: 좌표 두 개 사이의 직선 거리를 구하는 공식. 내비 화면에서 경로 점들 사이의 거리를 모두 더해 전체 경로 길이를 계산하는 데 사용합니다.
+- **폴리라인**: 지도에 그려지는 경로 선. 수백~수천 개의 좌표 점들을 연결한 것입니다.
+- **ETA 바**: 내비 화면 하단의 "도착 예정 시각·거리·시간" 표시 영역.
