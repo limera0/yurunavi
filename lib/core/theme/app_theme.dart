@@ -106,6 +106,40 @@ class AppTextStyles {
       );
 }
 
+// ── Night Mode Design Tokens ─────────────────────────────────────────────────
+// Dark-navy palette for riding after EENT (civil dusk) — readable without
+// blinding the rider's night-adapted eyes. Less extreme than Rider Mode.
+
+class NightModeColors {
+  NightModeColors._();
+
+  static const background = Color(0xFF0F1923);     // dark navy scaffold
+  static const surface = Color(0xFF1A2535);        // card / panel
+  static const surfaceVariant = Color(0xFF1E2D40); // slightly elevated surface
+
+  static const primary = Color(0xFFF28C28);    // keep brand orange
+  static const secondary = Color(0xFF6BA3BE);  // muted slate blue
+  static const tertiary = Color(0xFF00B1F0);   // light blue accent (same as day)
+
+  static const textPrimary = Color(0xFFE0E8F0);
+  static const textSecondary = Color(0xFF8EA8BC);
+  static const textHint = Color(0xFF4A6070);
+
+  // Map overlays
+  static const mapRoute = Color(0xFFF28C28);
+  static const mapOrigin = Color(0xFF4CAF50);
+  static const mapDestination = Color(0xFFE53935);
+  static const mapCourse = Color(0xFF4CAF50);
+
+  static const error = Color(0xFFFF5252);
+  static const warning = Color(0xFFFFB300);
+  static const success = Color(0xFF4CAF50);
+
+  // Daylight bar
+  static const sunrise = Color(0xFFFFB300);
+  static const sunset = Color(0xFF90CAF9);
+}
+
 // ── Rider Mode Design Tokens ──────────────────────────────────────────────────
 // High-contrast palette optimised for direct sunlight on a handlebar mount.
 // Pitch-black background eliminates glare; neon green + safety orange provide
@@ -298,6 +332,64 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         contentTextStyle: AppTextStyles.bodyMD.copyWith(color: Colors.white),
+      ),
+    );
+  }
+
+  /// Night Mode — dark navy palette for riding after civil dusk.
+  /// Readable in the dark without blinding night-adapted eyes.
+  static ThemeData get night {
+    const cs = ColorScheme(
+      brightness: Brightness.dark,
+      primary: NightModeColors.primary,
+      onPrimary: NightModeColors.background,
+      secondary: NightModeColors.secondary,
+      onSecondary: NightModeColors.background,
+      tertiary: NightModeColors.tertiary,
+      onTertiary: NightModeColors.background,
+      surface: NightModeColors.surface,
+      onSurface: NightModeColors.textPrimary,
+      onSurfaceVariant: NightModeColors.textSecondary,
+      error: NightModeColors.error,
+      onError: NightModeColors.background,
+      outline: NightModeColors.surfaceVariant,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: cs,
+      scaffoldBackgroundColor: NightModeColors.background,
+      appBarTheme: const AppBarTheme(
+        elevation: 0,
+        backgroundColor: NightModeColors.surface,
+        foregroundColor: NightModeColors.textPrimary,
+        centerTitle: false,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: NightModeColors.primary,
+          foregroundColor: NightModeColors.background,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          elevation: 0,
+        ),
+      ),
+      cardTheme: const CardThemeData(
+        color: NightModeColors.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+      ),
+      dividerTheme: const DividerThemeData(
+        color: NightModeColors.surfaceVariant,
+        thickness: 1,
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
       ),
     );
   }

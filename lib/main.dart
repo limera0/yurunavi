@@ -24,13 +24,17 @@ class YuruNaviApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final riderMode = ref.watch(riderModeProvider);
-    final theme = riderMode ? AppTheme.rider : AppTheme.light;
+    final isNight = ref.watch(isNightProvider);
+    final theme = riderMode
+        ? AppTheme.rider
+        : (isNight ? AppTheme.night : AppTheme.light);
+    final isDark = riderMode || isNight;
 
     // Status bar brightness flips with theme.
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness:
-          riderMode ? Brightness.light : Brightness.dark,
+          isDark ? Brightness.light : Brightness.dark,
     ));
 
     return MaterialApp(

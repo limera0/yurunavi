@@ -214,6 +214,17 @@ final daylightTimesProvider =
   );
 });
 
+// ── Night mode (auto-detect via BMNT/EENT) ────────────────────────────────────
+
+/// True between EENT (civil dusk) and next day's BMNT (civil dawn).
+final isNightProvider = Provider<bool>((ref) {
+  ref.watch(clockTickProvider);
+  final times = ref.watch(daylightTimesProvider);
+  if (times == null) return false;
+  final now = DateTime.now();
+  return now.isBefore(times.bmnt) || now.isAfter(times.eent);
+});
+
 // ── POI ───────────────────────────────────────────────────────────────────────
 
 final poiServiceProvider = Provider((_) => PoiService());

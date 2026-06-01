@@ -15,14 +15,6 @@ import '../../map/providers/map_providers.dart';
 /// The real position arrives from the GPS stream below.
 const LatLng _kInitialMapView = LatLng(37.5665, 126.9780);
 
-// ── Navigation palette ────────────────────────────────────────────────────────
-const _kBg      = Color(0xFF0D0D0D);
-const _kCard    = Color(0xFF1E1E1E);
-const _kSurface = Color(0xFF242424);
-const _kAccent  = Color(0xFF00B1F0); // YuruNavi tertiary (light blue)
-const _kText    = Color(0xFFF0F0F0);
-const _kSub     = Color(0xFF888888);
-
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
@@ -134,9 +126,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final step = _steps[_stepIdx];
     final daylightProgress = ref.watch(daylightProgressProvider);
     final daylightTimes = ref.watch(daylightTimesProvider);
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           // ── 지도 ────────────────────────────────────────────────────────────
@@ -186,11 +179,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     height: 24,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: _kAccent,
+                        color: cs.tertiary,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
                         boxShadow: [
-                          BoxShadow(color: _kAccent.withValues(alpha: 0.5), blurRadius: 12),
+                          BoxShadow(color: cs.tertiary.withValues(alpha: 0.5), blurRadius: 12),
                         ],
                       ),
                     ),
@@ -231,15 +224,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.black87,
+                  color: cs.surface.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.gps_fixed, color: _kAccent, size: 14),
-                    SizedBox(width: 6),
-                    Text('10초 후 현위치 복귀', style: TextStyle(color: Colors.white, fontSize: 12)),
+                    Icon(Icons.gps_fixed, color: cs.tertiary, size: 14),
+                    const SizedBox(width: 6),
+                    Text('10초 후 현위치 복귀',
+                        style: TextStyle(color: cs.onSurface, fontSize: 12)),
                   ],
                 ),
               ),
@@ -259,11 +253,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 child: Container(
                   margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   decoration: BoxDecoration(
-                    color: _kCard,
+                    color: cs.surface,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
+                        color: Colors.black.withValues(alpha: 0.35),
                         blurRadius: 20,
                         offset: const Offset(0, 4),
                       ),
@@ -276,8 +270,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
                       children: [
                         LinearProgressIndicator(
                           value: (_stepIdx + 1) / _steps.length,
-                          backgroundColor: _kSurface,
-                          color: _kAccent,
+                          backgroundColor: cs.outline,
+                          color: cs.tertiary,
                           minHeight: 3,
                         ),
                         Padding(
@@ -288,7 +282,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                 width: 58,
                                 height: 58,
                                 decoration: BoxDecoration(
-                                  color: _kAccent,
+                                  color: cs.tertiary,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Icon(step.icon, color: Colors.white, size: 30),
@@ -301,16 +295,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                     if (step.dist.isNotEmpty)
                                       Text(
                                         step.dist,
-                                        style: const TextStyle(
-                                          color: _kAccent,
+                                        style: TextStyle(
+                                          color: cs.tertiary,
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                     Text(
                                       step.label,
-                                      style: const TextStyle(
-                                        color: _kText,
+                                      style: TextStyle(
+                                        color: cs.onSurface,
                                         fontSize: 20,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -378,9 +372,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
             left: 0,
             right: 0,
             child: Container(
-              decoration: const BoxDecoration(
-                color: _kCard,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              decoration: BoxDecoration(
+                color: cs.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
               ),
               child: SafeArea(
                 top: false,
@@ -393,25 +387,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text(
+                            Text(
                               '14:32 도착',
                               style: TextStyle(
-                                color: _kText,
+                                color: cs.onSurface,
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             Row(
                               children: [
-                                const Text('38분', style: TextStyle(color: _kAccent, fontSize: 15, fontWeight: FontWeight.w600)),
+                                Text('38분', style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
                                 const SizedBox(width: 8),
-                                Text('23.4km', style: TextStyle(color: _kSub, fontSize: 14)),
+                                Text('23.4km', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
                               ],
                             ),
                           ],
                         ),
                       ),
-                      Container(width: 1, height: 40, color: _kSurface, margin: const EdgeInsets.symmetric(horizontal: 16)),
+                      Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
                       GestureDetector(
                         onTap: () => Navigator.of(context).pop(),
                         child: Container(
@@ -450,23 +444,24 @@ class _Speedometer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: 88,
       height: 88,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: _kCard,
-        border: Border.all(color: _kAccent, width: 2.5),
-        boxShadow: [BoxShadow(color: _kAccent.withValues(alpha: 0.25), blurRadius: 16)],
+        color: cs.surface,
+        border: Border.all(color: cs.tertiary, width: 2.5),
+        boxShadow: [BoxShadow(color: cs.tertiary.withValues(alpha: 0.25), blurRadius: 16)],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
             speedKmh.toStringAsFixed(0),
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: _kAccent, height: 1.0),
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
           ),
-          const Text('km/h', style: TextStyle(fontSize: 10, color: _kSub)),
+          Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
         ],
       ),
     );
@@ -480,6 +475,7 @@ class _NavIconBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -487,11 +483,11 @@ class _NavIconBtn extends StatelessWidget {
         height: 44,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: _kCard,
-          border: Border.all(color: _kSurface, width: 1),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8)],
+          color: cs.surface,
+          border: Border.all(color: cs.outline, width: 1),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: Icon(icon, color: _kAccent, size: 20),
+        child: Icon(icon, color: cs.tertiary, size: 20),
       ),
     );
   }
