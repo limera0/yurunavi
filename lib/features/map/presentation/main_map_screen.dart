@@ -250,10 +250,36 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     });
     _sheetCtrl.forward();
 
-    // 기본 선택 경로(국도)로 즉시 경로 계산 시작
-    _onRouteCardSelect(
-      ref.read(mapInteractionProvider).selectedRouteIdx,
-    );
+    // OSRM 1회 호출로 alternatives 전부 페치 → 3카드 동시 표시
+    _fetchAndStoreAllRoutes(origin, dest);
+  }
+
+  Future<void> _fetchAndStoreAllRoutes(LatLng origin, LatLng dest) async {
+    final state = ref.read(mapInteractionProvider);
+    ref.read(mapInteractionProvider.notifier).setLoading(true);
+    try {
+      final routes = await RoutingService.fetchRoutes(
+        origin: origin,
+        destination: dest,
+        waypoints: state.waypoints,
+      );
+      if (!mounted) return;
+      if (routes.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('경로를 불러오지 못했습니다 — 잠시 후 다시 시도해주세요'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+      final notifier = ref.read(mapInteractionProvider.notifier);
+      notifier.setAllRoutes(routes);
+      final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
+      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)]);
+    } finally {
+      if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
+    }
   }
 
   void _clearDestination() {
@@ -283,14 +309,23 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   }
 
   Future<void> _onRouteCardSelect(int idx) async {
-    final origin = _origin;
     final state = ref.read(mapInteractionProvider);
+    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
+
+    final allRoutes = state.allRoutes;
+    if (allRoutes.isNotEmpty) {
+      // 이미 페치된 경로 즉시 사용 — OSRM 재호출 없음
+      ref.read(mapInteractionProvider.notifier)
+          .setRoutePolyline(allRoutes[idx.clamp(0, allRoutes.length - 1)]);
+      return;
+    }
+
+    // 저장된 경로가 없을 때만 fallback으로 OSRM 호출
+    final origin = _origin;
     final dest = state.destination;
     if (origin == null || dest == null) return;
 
-    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
     ref.read(mapInteractionProvider.notifier).setLoading(true);
-
     try {
       final routes = await RoutingService.fetchRoutes(
         origin: origin,
@@ -305,17 +340,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             duration: Duration(seconds: 3),
           ),
         );
-        ref.read(mapInteractionProvider.notifier).setRoutePolyline(const []);
         return;
       }
-      // OSRM returns the primary route at [0] and up to two alternatives.
-      // Map the three course cards onto whichever alternatives exist.
-      final pick = idx.clamp(0, routes.length - 1);
-      ref.read(mapInteractionProvider.notifier).setRoutePolyline(routes[pick]);
+      final notifier = ref.read(mapInteractionProvider.notifier);
+      notifier.setAllRoutes(routes);
+      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)]);
     } finally {
-      if (mounted) {
-        ref.read(mapInteractionProvider.notifier).setLoading(false);
-      }
+      if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
     }
   }
 
@@ -396,6 +427,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final dest = interaction.destination;
     final waypoint = interaction.waypoint;
     final routePolyline = interaction.routePolyline;
+    final allRoutes = interaction.allRoutes;
     final selectedRouteIdx = interaction.selectedRouteIdx;
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
@@ -443,10 +475,31 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 tileProvider: buildCachedTileProvider(),
               ),
 
-              // ── ZOOM TIER 1 (any zoom): route polyline ──────────────
-              // Always rendered — it's the primary navigation element.
-              // Stroke widens as the rider zooms in for precision.
-              // In rider mode the stroke is thicker for glove-hand legibility.
+              // ── ZOOM TIER 1 (any zoom): route polylines ─────────────
+              // 비선택 카드 경로: 흐릿하게 (alpha ~0.25)
+              // 선택 카드 경로: 진하게 (alpha ~0.92), 더 굵게
+              ...() {
+                const fadedColors = [
+                  AppColors.mapCourse,
+                  AppColors.tertiary,
+                  AppColors.primary,
+                ];
+                final layers = <Widget>[];
+                for (int i = 0; i < allRoutes.length; i++) {
+                  if (i == selectedRouteIdx) continue;
+                  if (allRoutes[i].length < 2) continue;
+                  layers.add(PolylineLayer(polylines: [
+                    Polyline(
+                      points: allRoutes[i],
+                      color: fadedColors[i.clamp(0, 2)].withValues(alpha: 0.25),
+                      strokeWidth: riderMode ? 4.0 : 2.5,
+                      strokeCap: StrokeCap.round,
+                      strokeJoin: StrokeJoin.round,
+                    ),
+                  ]));
+                }
+                return layers;
+              }(),
               if (routePolyline.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(
@@ -483,7 +536,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
                 ]),
 
-              if (dest != null && _origin != null && _currentZoom >= 10.5)
+              if (dest != null && _origin != null && _currentZoom >= 9.0)
                 CircleLayer(circles: [
                   CircleMarker(
                     point: _origin!,

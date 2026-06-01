@@ -80,7 +80,8 @@ class MapInteractionState {
   final List<LatLng> waypoints; // 다중 경유지
   final double distanceKm;
   final bool isLoading;
-  final List<LatLng> routePolyline; // 계산된 경로 좌표
+  final List<LatLng> routePolyline; // 선택된 카드의 경로 좌표
+  final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (OSRM 1회 페치)
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
 
   const MapInteractionState({
@@ -90,6 +91,7 @@ class MapInteractionState {
     this.distanceKm = 0,
     this.isLoading = false,
     this.routePolyline = const [],
+    this.allRoutes = const [],
     this.selectedRouteIdx = 2,
   });
 
@@ -103,6 +105,7 @@ class MapInteractionState {
     double? distanceKm,
     bool? isLoading,
     List<LatLng>? routePolyline,
+    List<List<LatLng>>? allRoutes,
     int? selectedRouteIdx,
     bool clearDestination = false,
     bool clearWaypoints = false,
@@ -115,6 +118,7 @@ class MapInteractionState {
       distanceKm: distanceKm ?? this.distanceKm,
       isLoading: isLoading ?? this.isLoading,
       routePolyline: clearRoute ? [] : routePolyline ?? this.routePolyline,
+      allRoutes: clearRoute ? [] : allRoutes ?? this.allRoutes,
       selectedRouteIdx: selectedRouteIdx ?? this.selectedRouteIdx,
     );
   }
@@ -163,6 +167,9 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
 
   void setRoutePolyline(List<LatLng> points) =>
       state = state.copyWith(routePolyline: points);
+
+  void setAllRoutes(List<List<LatLng>> routes) =>
+      state = state.copyWith(allRoutes: routes);
 
   void setSelectedRouteIdx(int idx) =>
       state = state.copyWith(selectedRouteIdx: idx);
