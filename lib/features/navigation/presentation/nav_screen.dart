@@ -68,6 +68,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
+    if (widget.destination == null) {
+      // 목적지 없이 진입하면 즉시 빠져나간다
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop();
+      });
+      return;
+    }
     _startLocation();
   }
 
@@ -323,21 +330,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 좌측 속도계 ─────────────────────────────────────────────────────
+          // ── 좌측 속도계 (ETA 바 위에 위치) ─────────────────────────────────
           Positioned(
             left: 12,
-            bottom: 110,
+            bottom: 160,
             child: ScaleTransition(
               scale: _pulseAnim,
               child: _Speedometer(speedKmh: _speedKmh),
             ),
           ),
 
-          // ── 우측: Daylight + 컨트롤 ─────────────────────────────────────────
+          // ── 우측: Daylight + 컨트롤 (ETA 바 위에 위치) ──────────────────────
           Positioned(
             right: 12,
             top: 200,
-            bottom: 110,
+            bottom: 160,
             child: Column(
               children: [
                 Expanded(
