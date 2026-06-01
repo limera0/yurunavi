@@ -736,7 +736,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             ),
 
           // ══════════════════════════════════════════════════════
-          // LAYER 7 · Bottom area (course sheet + ad banner)
+          // LAYER 7 · Bottom area (course sheet)
           //           SafeArea prevents overlap with gesture bar
           // ══════════════════════════════════════════════════════
           Positioned(
@@ -760,8 +760,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                       onClose: _clearDestination,
                     ),
                   ),
-                // Ad banner
-                const _AdBanner(),
               ],
             ),
             ),
@@ -1341,31 +1339,6 @@ class _RouteCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Ad Banner  (와이어프레임: 살구색 배경 + "Ads" 텍스트)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _AdBanner extends StatelessWidget {
-  const _AdBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: 50,
-      color: const Color(0xFFFFDFC4), // 살구색 (와이어프레임 일치)
-      alignment: Alignment.center,
-      child: Text(
-        'Ads',
-        style: AppTextStyles.labelMD.copyWith(
-          color: const Color(0xFFB08060),
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Map markers
