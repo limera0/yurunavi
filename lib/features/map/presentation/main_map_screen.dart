@@ -251,7 +251,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     });
     _sheetCtrl.forward();
 
-    // OSRM 1회 호출로 alternatives 전부 페치 → 3카드 동시 표시
+    // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
   }
 
@@ -315,13 +315,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
     final allRoutes = state.allRoutes;
     if (allRoutes.isNotEmpty) {
-      // 이미 페치된 경로 즉시 사용 — OSRM 재호출 없음
+      // 이미 페치된 경로 즉시 사용 — Valhalla 재호출 없음
       ref.read(mapInteractionProvider.notifier)
           .setRoutePolyline(allRoutes[idx.clamp(0, allRoutes.length - 1)]);
       return;
     }
 
-    // 저장된 경로가 없을 때만 fallback으로 OSRM 호출
+    // 저장된 경로가 없을 때만 fallback으로 Valhalla 호출
     final origin = _origin;
     final dest = state.destination;
     if (origin == null || dest == null) return;

@@ -81,7 +81,7 @@ class MapInteractionState {
   final double distanceKm;
   final bool isLoading;
   final List<LatLng> routePolyline; // 선택된 카드의 경로 좌표
-  final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (OSRM 1회 페치)
+  final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (Valhalla 3회 병렬 페치)
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
 
   const MapInteractionState({

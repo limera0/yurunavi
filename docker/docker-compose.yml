@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla:latest
+    container_name: yurunavi-valhalla
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      - /data/valhalla/custom_files:/custom_files
+    command: valhalla_service /custom_files/valhalla.json 1

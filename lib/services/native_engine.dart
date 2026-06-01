@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:developer' as dev;
+import 'package:http/http.dart' as http;
 import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
@@ -151,6 +153,70 @@ class NativeEngine {
             sinHalfLon *
             sinHalfLon;
     return 2 * R * math.asin(math.sqrt(h));
+  }
+
+  // ── Rust HTTP 엔진 연결 (port 8003) ──────────────────────────────
+  static const _rustBase = 'http://localhost:8003';
+
+  /// 경로 계산 — Rust HTTP 서버 우선, 실패 시 Dart fallback.
+  ///
+  /// routeType: 0=country(시골길), 1=provincial(지방도로), 2=national(국도)
+  static Future<List<LatLng>> calcRoute({
+    required LatLng origin,
+    required LatLng destination,
+    List<LatLng> waypoints = const [],
+    int routeType = 2,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'origin': {'lat': origin.latitude, 'lng': origin.longitude},
+        'destination': {
+          'lat': destination.latitude,
+          'lng': destination.longitude
+        },
+        'waypoints': waypoints
+            .map((w) => {'lat': w.latitude, 'lng': w.longitude})
+            .toList(),
+        'route_type': routeType,
+      });
+      final resp = await http
+          .post(
+            Uri.parse('$_rustBase/calc_route'),
+            headers: {'Content-Type': 'application/json'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 5));
+
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final pts = (data['points'] as List).cast<Map<String, dynamic>>();
+        dev.log(
+          '[YuruNavi/Dart] calcRoute: Rust 응답 ${pts.length}pts '
+          'dist=${(data['total_distance_m'] as num).toStringAsFixed(0)}m '
+          'winding=${(data['winding_score'] as num).toStringAsFixed(1)} '
+          'type=${data['road_type']}',
+          name: 'NativeEngine',
+        );
+        return pts
+            .map((p) => LatLng(
+                  (p['lat'] as num).toDouble(),
+                  (p['lng'] as num).toDouble(),
+                ))
+            .toList();
+      }
+    } catch (e) {
+      dev.log(
+        '[YuruNavi/Dart] calcRoute: Rust 서버 실패 ($e) → Dart fallback',
+        name: 'NativeEngine',
+        level: 900,
+      );
+    }
+    return calcDummyRoute(
+      origin: origin,
+      destination: destination,
+      waypoints: waypoints,
+      routeType: routeType,
+    );
   }
 
   // ── 경로 생성 ─────────────────────────────────────────────────
