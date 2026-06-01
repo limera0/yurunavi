@@ -1,41 +1,33 @@
 # CLAUDE.md - YuruNavi Core Autonomous Protocol
 
+## What we are building
+Motorcycle-tourer OSM navigation app. Flutter (UI) + Rust (fun-road scoring) + Valhalla (routing).
+
+## Module structure (keep independent)
+lib/core, lib/modules/{map,route_planning,navigation,daylight_bar,settings,auth,tour_summary},
+lib/services, rust/, docker/
+
 ## 🚨 SYSTEM CONSTRAINTS
-- **Execution Mode:** Running via `--dangerously-skip-permissions`. Direct execution authorized.
+- **Execution Mode:** Running via `--permission-mode auto`. Direct execution authorized.
 - **Scope:** Strictly locked to this repository (`yurunavi`). No external system modifications.
 - **Efficiency:** Maximize autonomy. Zero administrative or conversational overhead.
+
+## Hard rules (never violate)
+- NEVER commit secrets. All keys go in .env (which is gitignored).
+- NEVER run destructive commands: rm -rf, git push --force, dropping data, mass file deletion.
+- NEVER push to a remote unless explicitly told in the night's task.
+- Make a git commit BEFORE starting each subtask (checkpoint), and after each PASS.
+- One module per night. Do not expand scope beyond the night's assigned task.
+- If unsure, STOP and write it in the morning report instead of guessing.
 
 ---
 
 ## 🔄 AUTONOMOUS TDD & GIT WORKFLOW
 You MUST follow this atomic iteration loop for every feature or fix. Do not bundle tasks.
 
-1. **Plan:** Decompose the target objective into a minimalist checklist of atomic micro-tasks.
-2. **Execute:** Write clean, skeletal, production-ready code for one single task.
-3. **Verify:** Run linting and test suites immediately to ensure zero regressions:
-```bash
-   flutter analyze
-Persist: If verification passes, commit and push to remote repository immediately:
-
-Bash
-   git add .
-   git commit -m "feat(yurunavi): completed & verified micro-task"
-   git push origin main
-If verification fails, halt and perform root cause analysis. Never commit broken code.
-
-🛠️ CORE TOOLING COMMANDS
-Bash
-# Path Setup
-export PATH="$HOME/.pub-cache/bin:$HOME/development/flutter/bin:$PATH"
-
-# Test & Build
-flutter analyze
-flutter test
-flutter build apk --debug
-dart run build_runner build --delete-conflicting-outputs
-📐 ARCHITECTURAL PRINCIPLES
-Skeletal & Durable: High-contrast UI for outdoor riding conditions. Pure functional simplicity. No over-engineering.
-
-Stack: Flutter Frontend + OpenStreetMap (OSM) + Rust Routing Engine.
-
-Target: Linux desktop for development iteration, Android for deployment.
+1. Orchestrator reads the night's task (from NIGHT_TASK.md).
+2. Break into small steps. Checkpoint commit.
+3. Delegate to flutter-coder or rust-coder.
+4. Run code-auditor. If FAIL, fix and re-audit (max 3 loops, then stop & report).
+5. On PASS, commit. Move to next step.
+6. At end, write MORNING_REPORT.md: what was done, what passed, what's blocked, token usage note.
