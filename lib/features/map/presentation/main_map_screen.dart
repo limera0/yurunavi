@@ -993,17 +993,17 @@ class _RightPanel extends ConsumerWidget {
           // ── 내 위치 복귀 ────────────────────────────────────
           _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter),
 
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
 
           // ── 줌 인 ─────────────────────────────────────────
           _MapCtrlBtn(icon: Icons.add, onTap: onZoomIn, bold: true),
 
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
 
           // ── 줌 슬라이더 (시각 요소) ─────────────────────────
           _ZoomTrackDivider(),
 
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
 
           // ── 줌 아웃 ───────────────────────────────────────
           _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true),
