@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/daylight_bar.dart';
 import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
 import '../../../services/connectivity_service.dart';
@@ -978,28 +979,13 @@ class _RightPanel extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── 일출 ───────────────────────────────────────────
-          _DaylightLabel(
-            icon: Icons.wb_sunny_rounded,
-            label: sunriseLabel,
-            color: AppColors.sunrise,
-          ),
-
-          const SizedBox(height: 4),
-
-          // ── Daylight 게이지 바 ─────────────────────────────
+          // ── 공용 DaylightBar (메인/내비 동일 위젯) ──────────
           Flexible(
-            child: _DaylightTrack(progress: daylightProgress),
-          ),
-
-          const SizedBox(height: 4),
-
-          // ── 일몰 ───────────────────────────────────────────
-          _DaylightLabel(
-            icon: Icons.nightlight_round,
-            label: sunsetLabel,
-            color: AppColors.sunset,
-            iconFirst: false,
+            child: DaylightBar(
+              progress: daylightProgress,
+              sunriseLabel: sunriseLabel,
+              sunsetLabel: sunsetLabel,
+            ),
           ),
 
           const SizedBox(height: 14),
@@ -1022,102 +1008,6 @@ class _RightPanel extends ConsumerWidget {
           // ── 줌 아웃 ───────────────────────────────────────
           _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true),
         ],
-      ),
-    );
-  }
-}
-
-class _DaylightLabel extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final bool iconFirst;
-
-  const _DaylightLabel({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.iconFirst = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final iconW = Icon(icon, size: 16, color: color);
-    final labelW = Text(
-      label,
-      style: AppTextStyles.labelSM.copyWith(color: color, fontWeight: FontWeight.w700, fontSize: 8),
-    );
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: iconFirst
-          ? [iconW, const SizedBox(height: 1), labelW]
-          : [labelW, const SizedBox(height: 1), iconW],
-    );
-  }
-}
-
-/// 세로 그라디언트 트랙 + 현재 위치 핸들
-class _DaylightTrack extends StatelessWidget {
-  final double progress;
-  const _DaylightTrack({required this.progress});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 10,
-      constraints: const BoxConstraints(minHeight: 80),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final totalH = constraints.maxHeight;
-          final handleY = (totalH * progress.clamp(0.0, 1.0)) - 8;
-
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // 그라디언트 트랙
-              Container(
-                width: 10,
-                height: totalH,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(5),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFFFFD54F),
-                      Color(0xFFFFB300),
-                      Color(0xFF90CAF9),
-                      Color(0xFF3949AB),
-                    ],
-                    stops: [0.0, 0.4, 0.72, 1.0],
-                  ),
-                ),
-              ),
-
-              // 현재 위치 핸들 (주황 테두리 흰 원)
-              Positioned(
-                top: handleY.clamp(0.0, totalH - 16),
-                left: -5,
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.primary, width: 2.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
       ),
     );
   }
