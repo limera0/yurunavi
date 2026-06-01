@@ -10,7 +10,7 @@ import 'package:latlong2/latlong.dart';
 /// 거리 기준으로 정렬 후 시골길(긴 경로) / 지방도로(중간) / 국도(짧은 경로) 에 매핑한다.
 /// Valhalla 미응답 시 빈 리스트 반환 — 호출자가 처리.
 class RoutingService {
-  static const _valhallaBase = 'http://localhost:8002';
+  static const _valhallaBase = 'http://192.168.0.57:8002';
 
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.

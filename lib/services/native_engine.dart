@@ -156,7 +156,7 @@ class NativeEngine {
   }
 
   // ── Rust HTTP 엔진 연결 (port 8003) ──────────────────────────────
-  static const _rustBase = 'http://localhost:8003';
+  static const _rustBase = 'http://192.168.0.57:8003';
 
   /// 경로 계산 — Rust HTTP 서버 우선, 실패 시 Dart fallback.
   ///
