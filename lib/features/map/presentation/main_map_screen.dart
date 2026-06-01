@@ -275,9 +275,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         return;
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
-      notifier.setAllRoutes(routes);
+      notifier.setAllRoutes(routes.map((r) => r.points).toList());
+      notifier.setAllRouteMeta(routes.map((r) => (km: r.distanceKm, mins: r.durationMin)).toList());
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
-      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)]);
+      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
       if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
     }
@@ -344,8 +345,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         return;
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
-      notifier.setAllRoutes(routes);
-      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)]);
+      notifier.setAllRoutes(routes.map((r) => r.points).toList());
+      notifier.setAllRouteMeta(routes.map((r) => (km: r.distanceKm, mins: r.durationMin)).toList());
+      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
       if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
     }
@@ -751,7 +753,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   SlideTransition(
                     position: _sheetSlide,
                     child: _CourseSheet(
-                      distanceKm: interaction.distanceKm,
+                      routeMeta: interaction.allRouteMeta,
                       selectedIdx: selectedRouteIdx,
                       onSelect: _onRouteCardSelect,
                       onStart: _startNavigation,
@@ -1150,14 +1152,14 @@ class _FloatingActionLabel extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CourseSheet extends StatelessWidget {
-  final double distanceKm;
+  final List<({double km, int mins})> routeMeta;
   final int selectedIdx;
   final ValueChanged<int> onSelect;
   final VoidCallback onStart;
   final VoidCallback onClose;
 
   const _CourseSheet({
-    required this.distanceKm,
+    required this.routeMeta,
     required this.selectedIdx,
     required this.onSelect,
     required this.onStart,
@@ -1165,9 +1167,9 @@ class _CourseSheet extends StatelessWidget {
   });
 
   static const _routes = [
-    _RouteInfo('시골길로\n느긋하게', 1.55, 38, AppColors.mapCourse),
-    _RouteInfo('지방도로\n여유롭게', 1.22, 52, AppColors.tertiary),
-    _RouteInfo('국도로\n빠르게', 1.0, 68, AppColors.primary),
+    _RouteInfo('시골길로\n느긋하게', AppColors.mapCourse),
+    _RouteInfo('지방도로\n여유롭게', AppColors.tertiary),
+    _RouteInfo('국도로\n빠르게', AppColors.primary),
   ];
 
   @override
@@ -1219,7 +1221,11 @@ class _CourseSheet extends StatelessWidget {
             child: Row(
               children: List.generate(_routes.length, (i) {
                 final r = _routes[i];
-                final dist = distanceKm * r.multiplier;
+                final hasMeta = routeMeta.length > i;
+                final distKm = hasMeta ? routeMeta[i].km : 0.0;
+                final mins = hasMeta ? routeMeta[i].mins : 0;
+                final distStr = hasMeta ? '${distKm.toStringAsFixed(0)}km' : '---';
+                final durStr = hasMeta ? _durFromMins(mins) : '---';
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -1228,8 +1234,8 @@ class _CourseSheet extends StatelessWidget {
                     ),
                     child: _RouteCard(
                       info: r,
-                      distKm: dist,
-                      duration: _dur(dist, r.avgKmh),
+                      distStr: distStr,
+                      duration: durStr,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -1246,8 +1252,7 @@ class _CourseSheet extends StatelessWidget {
     );
   }
 
-  String _dur(double km, double avgKmh) {
-    final m = (km / avgKmh * 60).round();
+  String _durFromMins(int m) {
     final h = m ~/ 60;
     final min = m % 60;
     return h > 0 ? '$h시간 $min분' : '$min분';
@@ -1256,22 +1261,20 @@ class _CourseSheet extends StatelessWidget {
 
 class _RouteInfo {
   final String label;
-  final double multiplier;
-  final double avgKmh;
   final Color color;
-  const _RouteInfo(this.label, this.multiplier, this.avgKmh, this.color);
+  const _RouteInfo(this.label, this.color);
 }
 
 class _RouteCard extends StatelessWidget {
   final _RouteInfo info;
-  final double distKm;
+  final String distStr;
   final String duration;
   final bool isSelected;
   final VoidCallback onTap;
 
   const _RouteCard({
     required this.info,
-    required this.distKm,
+    required this.distStr,
     required this.duration,
     required this.isSelected,
     required this.onTap,
@@ -1317,7 +1320,7 @@ class _RouteCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '${distKm.toStringAsFixed(0)}km',
+              distStr,
               style: AppTextStyles.titleSM.copyWith(
                 color: color,
                 fontWeight: FontWeight.w800,

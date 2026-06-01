@@ -4,6 +4,18 @@ import 'dart:developer' as dev;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+/// Valhalla 라우팅 결과 단위.
+class RouteResult {
+  final List<LatLng> points;
+  final double distanceKm;
+  final int durationMin; // round(total_seconds / 60)
+  const RouteResult({
+    required this.points,
+    required this.distanceKm,
+    required this.durationMin,
+  });
+}
+
 /// Valhalla 로컬 라우팅 클라이언트.
 ///
 /// `alternates: 2`로 고속도로·자동차전용도로를 배제한 3개 대안 경로를 한 번에 받아
@@ -14,7 +26,7 @@ class RoutingService {
 
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
-  static Future<List<List<LatLng>>> fetchRoutes({
+  static Future<List<RouteResult>> fetchRoutes({
     required LatLng origin,
     required LatLng destination,
     List<LatLng> waypoints = const [],
@@ -52,7 +64,7 @@ class RoutingService {
           name: 'RoutingService',
           level: 900,
         );
-        return const [];
+        return const <RouteResult>[];
       }
 
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -64,10 +76,10 @@ class RoutingService {
         final t = (alt as Map<String, dynamic>)['trip'];
         if (t != null) rawTrips.add(t as Map<String, dynamic>);
       }
-      if (rawTrips.isEmpty) return const [];
+      if (rawTrips.isEmpty) return const <RouteResult>[];
 
-      // 각 trip에서 폴리라인과 거리 추출
-      final routes = <({List<LatLng> pts, double km})>[];
+      // 각 trip에서 폴리라인, 거리, 시간 추출
+      final routes = <({List<LatLng> pts, double km, int mins})>[];
       for (final trip in rawTrips) {
         final legs = (trip['legs'] as List?) ?? [];
         if (legs.isEmpty) continue;
@@ -76,9 +88,14 @@ class RoutingService {
           0,
           (sum, leg) => sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
         );
-        if (pts.isNotEmpty) routes.add((pts: pts, km: km));
+        final secs = legs.fold<double>(
+          0,
+          (sum, leg) => sum + ((leg['summary']?['time'] as num?)?.toDouble() ?? 0),
+        );
+        final mins = (secs / 60).round();
+        if (pts.isNotEmpty) routes.add((pts: pts, km: km, mins: mins));
       }
-      if (routes.isEmpty) return const [];
+      if (routes.isEmpty) return const <RouteResult>[];
 
       // 거리 내림차순 정렬 → 시골길(멀리/구불) … 국도(짧고 효율적)
       routes.sort((a, b) => b.km.compareTo(a.km));
@@ -89,15 +106,19 @@ class RoutingService {
       final courseNames = ['시골길', '지방도로', '국도'];
       for (int i = 0; i < 3; i++) {
         dev.log(
-          'Valhalla [${courseNames[i]}] ${routes[i].pts.length}pts ${routes[i].km.toStringAsFixed(1)}km',
+          'Valhalla [${courseNames[i]}] ${routes[i].pts.length}pts ${routes[i].km.toStringAsFixed(1)}km ${routes[i].mins}min',
           name: 'RoutingService',
         );
       }
 
-      return [routes[0].pts, routes[1].pts, routes[2].pts];
+      return [
+        RouteResult(points: routes[0].pts, distanceKm: routes[0].km, durationMin: routes[0].mins),
+        RouteResult(points: routes[1].pts, distanceKm: routes[1].km, durationMin: routes[1].mins),
+        RouteResult(points: routes[2].pts, distanceKm: routes[2].km, durationMin: routes[2].mins),
+      ];
     } catch (e) {
       dev.log('Valhalla fetchRoutes 실패: $e', name: 'RoutingService', level: 900);
-      return const [];
+      return const <RouteResult>[];
     }
   }
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +54,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
+
+  /// Haversine 합산으로 폴리라인 총 거리(km)를 계산한다.
+  static double _polylineKm(List<LatLng> pts) {
+    if (pts.length < 2) return 0;
+    const r = 6371.0; // Earth radius km
+    const deg2rad = 0.017453292519943295; // pi / 180
+    double total = 0;
+    for (int i = 0; i < pts.length - 1; i++) {
+      final lat1 = pts[i].latitude * deg2rad;
+      final lat2 = pts[i + 1].latitude * deg2rad;
+      final dLat = (pts[i + 1].latitude - pts[i].latitude) * deg2rad;
+      final dLon = (pts[i + 1].longitude - pts[i].longitude) * deg2rad;
+      final a = sin(dLat / 2) * sin(dLat / 2) +
+          cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2);
+      total += 2 * r * asin(sqrt(a));
+    }
+    return total;
+  }
 
   @override
   void initState() {
@@ -134,6 +153,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final daylightProgress = ref.watch(daylightProgressProvider);
     final daylightTimes = ref.watch(daylightTimesProvider);
     final cs = Theme.of(context).colorScheme;
+    final routeKm = _polylineKm(widget.routePolyline);
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -143,7 +163,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           FlutterMap(
             mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: widget.destination ?? _currentPos ?? _kInitialMapView,
+              initialCenter: _currentPos ?? _kInitialMapView,
               initialZoom: 15,
               // Lock north-up: rotation gestures during pinch-zoom were
               // disorienting riders on the bar mount.
@@ -406,7 +426,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                               children: [
                                 Text('38분', style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
                                 const SizedBox(width: 8),
-                                Text('23.4km', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+                                Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
                               ],
                             ),
                           ],
