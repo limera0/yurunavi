@@ -1,131 +1,170 @@
-# 아침 보고서 — 2026-06-01
+# MORNING_REPORT — 3번째 밤 (2026-06-01)
 
-**요약:** 오늘 밤 모든 5개 모듈을 완료했습니다. 모두 `flutter analyze` 이상 없음으로 통과.
+오케스트레이터: Claude Sonnet 4.6
 
 ---
 
-## 1. 완료한 모듈 & 커밋 해시
+## 1. 완료 모듈 + 커밋 해시
 
 | 모듈 | 내용 | 커밋 |
 |------|------|------|
-| 모듈 0 | 베이스라인 진단 | `dee20c9` |
-| 모듈 1 | 경로 탐색·스냅·반투명 원 복구 | `20ddf93` |
-| 모듈 2 | 테마 독립 모듈화 (낮/밤/라이더) | `9ad8af3` |
-| 모듈 3 | 지도 표시 다듬기 | `3637d4a` |
-| 모듈 4 | 내비게이션 화면 UI 버그 수정 | `8700479` |
-| 모듈 5 | 일출일몰 인디케이터 통일 | `30d3d86` |
+| 0 | Tailscale MagicDNS 주소 교체 | `1af76f9` |
+| 1 + 2 | Android cleartext 허용 + APK 빌드 성공 | `309c89e` |
+| 3 | 내비 버그 조사 (코드 수정 없음) | — (조사 전용) |
 
 ---
 
-## 2. 각 모듈 완료 기준 충족 여부
+## 2. 완료 기준 체크 (모듈별)
 
-### 모듈 0 — 베이스라인 진단
-- [x] 경로 탐색이 언제/왜 깨졌는지 진단 완료
-- [x] 깨끗한 체크포인트 커밋 존재
+### 모듈 0 — 라우팅 주소 교체
+- [x] `routing_service.dart` 에 `192.168.0.57` 없음 → `westinx.tail2172f6.ts.net:8002` 로 교체됨
+- [x] `native_engine.dart` 에 `192.168.0.57` 없음 → `westinx.tail2172f6.ts.net:8003` 로 교체됨
+- [x] `grep -rn "192.168.0.57\|localhost:800" lib/` 결과 없음 (잔여 없음)
+- [x] `flutter analyze` → No issues found
+- 참고: 호스트명이 코드에 하드코딩되어 있음. **추후 `.env` 파일로 빼는 것을 권장** (예: `VALHALLA_HOST`, `RUST_HOST` 환경변수로 분리).
 
-**진단 결론:** `fba4054` 커밋에서 `&exclude=motorway` 파라미터를 OSRM에 추가했는데, OSRM 공용 데모 서버가 이 파라미터를 지원하지 않아 HTTP 400 오류 → 경로 탐색 전면 실패. 다음 커밋 `8d0da1a`에서 이미 수정 완료. 판단: (b) 현재 코드에서 앞으로 진행.
+### 모듈 1 — Android cleartext 허용
+- [x] `android/app/src/main/res/xml/network_security_config.xml` 생성됨
+- [x] `AndroidManifest.xml` → `<application>` 태그에 `android:networkSecurityConfig="@xml/network_security_config"` 속성 추가됨
+- [x] 기존 속성(android:label, android:icon, android:name) 전혀 변경 없음
+- [x] 매니페스트 XML 구조 이상 없음 (육안 확인 완료)
 
----
-
-### 모듈 1 — 회귀 복구 ★
-- [x] 지도 타일 = OSM (그대로 유지)
-- [x] 목적지를 찍으면 3개 카드 각각 실제 도로 경로가 그려진다
-- [x] 편의점/카페 스냅 동작 (기존 코드 정상, 검증 완료)
-- [x] 반투명 원 표시 동작 (zoom 조건 9.0으로 완화)
-- [x] `flutter analyze` 통과
-
-**무엇이 바뀌었나:**
-- OSRM을 1회만 호출해 모든 대안 경로를 `allRoutes`에 저장 (기존: 카드 탭할 때마다 새 요청)
-- 지도에 3개 경로 동시 표시: 선택 카드는 진하게(alpha 0.92), 나머지 흐릿하게(alpha 0.25)
-- 카드 전환 시 저장된 경로 즉시 사용 → 빠른 반응
-
----
-
-### 모듈 2 — 테마 독립 모듈화
-- [x] 테마 파일 한 곳(`app_theme.dart`)만 바꾸면 모든 화면 색이 바뀐다
-- [x] 내비게이션 화면이 더 이상 검지 않고 메인 화면과 같은 톤
-- [x] `flutter analyze` 통과
-
-**무엇이 바뀌었나:**
-- `NightModeColors` 팔레트 추가 (어두운 남색, 낮처럼 눈부시지 않음)
-- `AppTheme.night` ThemeData 추가
-- `isNightProvider` 추가: EENT~BMNT 사이면 자동으로 야간 모드 테마 적용
-- `nav_screen.dart`의 하드코딩 색상(`_kBg`, `_kCard` 등) 전부 제거 → `Theme.of(context).colorScheme`으로 교체
-
----
-
-### 모듈 3 — 지도 표시 다듬기
-- [x] 상태바 안 가림 (SafeArea 적용)
-- [x] 로고 정돈 (JPEG 배경에 테두리 컨테이너 추가로 구분)
-- [x] 목적지/경유지 핀 zoom 9.0부터 표시
-- [x] 내 위치 복귀 버튼: `explore_outlined` → `my_location` 아이콘
-
-**무엇이 바뀌었나:**
-- 하단 코스시트 + 광고 배너를 `SafeArea(top: false)`로 감싸 제스처 내비게이션 바 침범 방지
-- 로고 배지에 반투명 주황 테두리 컨테이너 추가 → JPEG 흰 배경이 헤더에 녹아들지 않음
-- 목적지/경유지 핀 표시 zoom 임계값: 10.5 → 9.0
-
----
-
-### 모듈 4 — 내비게이션 화면 UI 버그
-- [x] 목적지 없으면 내비 진입 차단 (NavScreen.initState 가드)
-- [x] 속도계 위치: `bottom: 110` → `bottom: 160` (ETA 바 위로 이동)
-- [x] 줌/현위치 아이콘: `bottom: 110` → `bottom: 160` (ETA 바와 겹침 해소)
-- [x] `flutter analyze` 통과
-
-**참고:** 10초 복귀 타이머 로직은 이미 정상이었음 (별도 수정 불필요).
-
----
-
-### 모듈 5 — 일출일몰 인디케이터 통일
-- [x] 메인 화면과 내비 화면에서 동일한 `DaylightBar` 위젯 사용
-- [x] 밤 테마(Brightness.dark)면 야간 색 반전: 달이 위, 해가 아래, 청색 그라디언트
-- [x] SafeArea 침범 없음
-- [x] `flutter analyze` 통과
-
-**무엇이 바뀌었나:**
-- `DaylightBar`에 `Theme.of(context).brightness` 기반 색상 분기 추가
-- `main_map_screen.dart`의 `_DaylightLabel`, `_DaylightTrack` 인라인 구현 제거 → `DaylightBar` 사용으로 통일
+### 모듈 2 — 빌드 검증
+- [x] `flutter clean` 완료
+- [x] `flutter analyze` → No issues found (0 errors, 0 warnings)
+- [x] `flutter build apk --debug` → **빌드 성공**
+  - APK 경로: `build/app/outputs/flutter-apk/app-debug.apk`
+  - 경고(warning) 2개 발생했으나 빌드 실패에는 영향 없음:
+    > Kotlin Gradle Plugin(KGP) 관련 경고 — 현재 버전에서는 빌드 가능. 미래 Flutter 버전에서 문제될 수 있음.
+    > 영향받는 플러그인: `device_info_plus`, `package_info_plus`, `shared_preferences_android`
+    > 지금 당장 수정 불필요 — 다음 플러그인 업그레이드 때 자연히 해결됩니다.
+- [x] 커밋 완료 (`309c89e`)
 
 ---
 
 ## 3. 막힌 것 / 건너뛴 것
 
-없음. 모든 모듈 완료.
+없음. 모듈 0·1·2 모두 정상 완료.
+
+모듈 3은 NIGHT_TASK 지시에 따라 코드 수정 없이 조사만 수행함.
 
 ---
 
-## 4. 폰에서 직접 확인할 체크리스트
+## 4. 사용자가 아침에 직접 할 일 (순서대로)
 
-1. **경로 탐색**: 지도에서 아무 곳이나 탭 → "목적지" 버튼 → 코스시트가 올라오면서 지도에 1~3개 경로선이 표시되는지 확인 (선택된 카드 경로는 진하게, 나머지는 흐릿하게)
-2. **편의점 스냅**: 도심 지역을 목적지로 탭 → "근처 편의점으로 목적지를 조정했어요" 안내 메시지가 뜨는지 확인
-3. **반투명 원**: 목적지 확정 후 줌 아웃 시 현 위치~목적지 거리를 나타내는 반투명 원이 보이는지 확인 (zoom 9 이상)
-4. **내비 화면 색**: 내비게이션 시작 후 화면 배경이 흰색/밝은 색인지 확인 (기존 검은색 아님 — 낮 테마 기준)
-5. **속도계 위치**: 내비 주행 화면에서 속도계 원이 하단 ETA 바에 가려지지 않고 위에 표시되는지 확인
-6. **일출일몰 바**: 메인 화면과 내비 화면 우측의 세로 바가 동일하게 생겼는지 확인
-7. **야간 자동전환**: 해가 지고 나면 (EENT 이후) 앱 전체가 어두운 남색 테마로 자동 전환되는지 확인
+### APK 설치
+1. 폰과 컴퓨터를 USB로 연결하거나, ADB over Wi-Fi를 사용하세요.
+2. 아래 명령어로 직접 설치할 수 있습니다:
+   ```bash
+   flutter run -d <기기ID>
+   ```
+   또는 빌드된 APK 파일을 폰에 복사 후 직접 설치:
+   ```
+   build/app/outputs/flutter-apk/app-debug.apk
+   ```
+   > "알 수 없는 출처에서 설치 허용" 설정이 필요합니다 (안드로이드 설정 → 보안).
+
+3. **폰에 Tailscale이 켜져 있는지 반드시 확인하세요.**
+
+### 폰에서 확인할 것
+- **경로 선 3개 테스트:** 지도에서 목적지를 터치 → 하단에 시골길·지방도로·국도 카드 3개가 나와야 함 → 각 카드를 누르면 지도에 경로 선이 그려지는지 확인
+- **거리 일치 확인:** 카드에 표시된 거리(km)와 지도에 그려진 경로 선 길이가 대략 맞는지 확인 (현재 두 숫자가 다른 건 알려진 버그 — 아래 버그 3 참조)
+- **"Start your Engine" 슬라이더:** 슬라이더를 밀어 내비 화면으로 진입되는지 확인
 
 ---
 
-## 5. 다음 밤에 이어서 할 것 (제안)
+## 5. 모듈 3 — 내비 버그 조사 결과
 
-1. **Valhalla 전환**: OSRM 데모 서버는 alternatives를 1개만 반환하는 경우가 많아 3카드 경로가 실질적으로 다르지 않을 수 있음. 자체 Valhalla 서버 연결 시 motorcycle 프로필 + curviness 스코어링으로 진짜 "시골길/지방도로/국도" 구분 가능.
-2. **Rust 경로 점수 엔진 통합**: `rust/` 에 있는 fun-road scoring 결과를 코스 카드에 표시.
-3. **실제 내비 방향 안내**: 현재 내비 화면의 "17m 후 우회전" 등은 고정 더미 데이터. OSRM steps API를 연동해 실제 회전 안내 구현.
-4. **광고 배너 실제 구현**: 현재 살구색 "Ads" 플레이스홀더.
+### 버그 1: 내비 화면이 목적지 중심으로 뜬다 (출발지/현위치가 아닌)
+
+**의심 위치:**
+- `lib/features/navigation/presentation/nav_screen.dart:146`
+  ```dart
+  initialCenter: widget.destination ?? _currentPos ?? _kInitialMapView,
+  ```
+- `lib/screens/driving_screen.dart:153`
+  ```dart
+  initialCenter: widget.destination ?? _currentPos ?? kInitialMapView,
+  ```
+
+**이유:** 내비 화면이 처음 열릴 때 GPS 위치(`_currentPos`)가 아직 `null`입니다. 그래서 목적지(`widget.destination`)가 첫 번째로 선택되어 지도 중심이 목적지로 고정됩니다. GPS 스트림은 비동기로 늦게 도착합니다.
+
+**다음 밤 수정 방향:** `widget.destination`을 초기 중심에서 제거하고 `_currentPos ?? _kInitialMapView`로 변경. 어차피 GPS 첫 신호가 오면 `_recenter(loc)`가 자동 호출되어 현위치로 이동합니다.
+
+---
+
+### 버그 2: 현위치 버튼을 눌러도 현위치로 안 돌아온다
+
+**의심 위치 (핵심):**
+- `lib/screens/driving_screen.dart:160-162`
+  ```dart
+  onMapEvent: (event) {
+    if (event is MapEventMoveStart) {
+      _onCameraMove(event.camera, true);  // ← 출처 구분 없음
+    }
+  },
+  ```
+
+**이유:** `_mapCtrl.move()` (= 현위치 복귀 버튼이 호출하는 함수)를 실행하면 Flutter Map이 `MapEventMoveStart` 이벤트를 발생시킵니다. 위 코드는 이 이벤트의 출처(손가락으로 움직인 것인지, 코드로 움직인 것인지)를 구분하지 않습니다. 복귀 버튼을 눌러 지도가 이동하는 순간 다시 `_isManualMode = true`로 되돌아가 버튼 효과가 즉시 취소됩니다.
+
+**비교:** `nav_screen.dart:154`는 올바르게 처리합니다:
+```dart
+if (event is MapEventMoveStart && event.source != MapEventSource.mapController) {
+  _onMapGesture();
+}
+```
+
+**다음 밤 수정:** `driving_screen.dart:161`에 `&& event.source != MapEventSource.mapController` 조건 추가.
+
+---
+
+### 버그 3: 카드 거리(54~83km)와 내비 거리(23.4km)가 다르다
+
+**의심 위치:**
+
+**(A) 카드 거리** — `lib/features/map/presentation/main_map_screen.dart:1167-1172, 1222`
+```dart
+static const _routes = [
+  _RouteInfo('시골길로\n느긋하게', 1.55, ...),  // 직선거리 × 1.55
+  _RouteInfo('지방도로\n여유롭게', 1.22, ...),   // 직선거리 × 1.22
+  _RouteInfo('국도로\n빠르게', 1.0, ...),        // 직선거리 × 1.0
+];
+// 카드 거리 = haversine(출발지→목적지) × 고정 배수
+```
+카드 거리는 **직선 거리 × 임의의 배수**로 계산됩니다. 실제 도로 거리가 아닙니다.
+
+**(B) 내비 화면 거리** — `lib/features/navigation/presentation/nav_screen.dart:409`
+```dart
+Text('23.4km', ...)  // ← 하드코딩된 임시 값
+```
+- `NavScreen`은 `routePolyline`을 파라미터로 받습니다 (`_startNavigation()`에서 전달됨, `main_map_screen.dart:302-309`).
+- 그러나 ETA 바에서 그 폴리라인의 실제 길이를 계산하지 않고 `23.4km`를 하드코딩했습니다.
+
+**(C) `DrivingScreen`(구버전으로 보이는 내비 화면)** — `lib/screens/driving_screen.dart:469`
+```dart
+Text('23.4km', ...)  // ← 동일하게 하드코딩
+```
+- `DrivingScreen`은 `destination`만 파라미터로 받고 `routePolyline`을 받지 않습니다.
+- 현재 `_startNavigation()`은 `DrivingScreen`이 아닌 `NavScreen`을 사용합니다. `DrivingScreen`은 별도 진입점이 있는 구버전 화면으로 보임 (추가 확인 필요).
+
+**결론:** 카드는 "직선거리×배수"를, 내비는 "하드코딩 23.4km"를 보여줌 — 서로 다른 소스. 실제 Valhalla 도로 거리(RoutingService가 반환하는 polyline 길이)는 두 화면 모두 사용하지 않고 있음.
+
+**다음 밤 수정 방향:**
+1. `NavScreen`의 ETA 바: `widget.routePolyline`으로 Haversine 누적 거리를 계산하여 표시.
+2. 카드 거리도 Valhalla 실제 거리(`allRoutes` 폴리라인 길이)로 교체하면 두 값이 일치하게 됩니다.
 
 ---
 
 ## 6. 토큰/한도 메모
 
-모든 5개 모듈을 한 세션에 완료했습니다. 현재 한도 도달 없이 정상 종료.
+모듈 0·1·2·3 모두 단일 세션에서 완료됨. 한도 초과 없음.
 
 ---
 
-## 7. 용어 설명 (비개발자용)
+## 7. 용어 설명
 
-- **OSRM**: 지도 경로 계산을 해주는 외부 서버 (구글 맵처럼 A→B 길을 알려줌)
-- **OSM 타일**: 지도 배경 이미지를 OpenStreetMap(오픈소스 지도)에서 가져오는 것
-- **SafeArea**: 아이폰 노치나 안드로이드 하단 제스처 바에 버튼이 가려지지 않게 하는 처리
-- **Riverpod 상태**: 앱 내 데이터(현재 위치, 목적지 등)를 여러 화면이 공유하는 방식
-- **flutter analyze**: 코드에 문법/논리 오류가 있는지 자동으로 검사하는 도구
+- **Tailscale MagicDNS**: 인터넷을 통해 내 서버에 접속하기 위한 주소. `192.168.0.57`은 집 안 내부망에서만 쓰이는 주소라 밖에서 안 됩니다. `westinx.tail2172f6.ts.net`은 어디서든 접속 가능한 Tailscale 전용 주소입니다.
+- **cleartext(평문 HTTP)**: 암호화 없이 데이터를 주고받는 방식. 안드로이드 9 이상은 보안상 이걸 기본으로 차단합니다. 내부 서버 연결이라 신뢰할 수 있으므로 `.ts.net` 도메인에만 예외로 허용했습니다.
+- **APK**: 안드로이드 앱 설치 파일. 구글 플레이가 아닌 파일 직접 설치용입니다.
+- **Haversine 직선 거리**: 지구 표면 위 두 점의 최단 거리를 구하는 공식. 실제 도로 거리보다 항상 짧습니다.
+- **Valhalla**: 도로 지도 기반으로 실제 경로와 거리를 계산해주는 서버. 카드에 표시되는 거리는 아직 이것을 제대로 활용하지 않고 있습니다.
