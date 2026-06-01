@@ -561,7 +561,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     height: riderMode ? 28 : 22,
                     child: _OriginMarker(color: originColor),
                   ),
-                if (waypoint != null && _currentZoom >= 10.5)
+                if (waypoint != null && _currentZoom >= 9.0)
                   Marker(
                     point: waypoint,
                     width: riderMode ? 48 : 36,
@@ -573,7 +573,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                             : const Color(0xFFFFB300),
                         size: riderMode ? 48 : 36),
                   ),
-                if (dest != null && _currentZoom >= 10.5)
+                if (dest != null && _currentZoom >= 9.0)
                   Marker(
                     point: dest,
                     width: riderMode ? 48 : 36,
@@ -734,12 +734,15 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
           // ══════════════════════════════════════════════════════
           // LAYER 7 · Bottom area (course sheet + ad banner)
+          //           SafeArea prevents overlap with gesture bar
           // ══════════════════════════════════════════════════════
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
-            child: Column(
+            child: SafeArea(
+              top: false,
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Course selection sheet (슬라이드 업)
@@ -757,6 +760,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 // Ad banner
                 const _AdBanner(),
               ],
+            ),
             ),
           ),
         ],
@@ -829,34 +833,50 @@ class _LogoBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      'assets/images/yuru_2line.jpeg',
-      height: 40,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) {
-        return RichText(
-          text: TextSpan(
-            children: [
-              TextSpan(
-                text: 'YURU',
-                style: GoogleFontsHelper.logoStyle.copyWith(
-                  color: riderMode
-                      ? RiderModeColors.primary
-                      : AppColors.primary,
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: riderMode
+            ? RiderModeColors.surface
+            : AppColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: riderMode
+              ? RiderModeColors.primary.withValues(alpha: 0.4)
+              : AppColors.primary.withValues(alpha: 0.18),
+          width: 1,
+        ),
+      ),
+      child: Image.asset(
+        'assets/images/yuru_2line.jpeg',
+        height: 32,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: 'YURU',
+                  style: GoogleFontsHelper.logoStyle.copyWith(
+                    color: riderMode
+                        ? RiderModeColors.primary
+                        : AppColors.primary,
+                  ),
                 ),
-              ),
-              TextSpan(
-                text: 'NAVI',
-                style: GoogleFontsHelper.logoStyle.copyWith(
-                  color: riderMode
-                      ? RiderModeColors.secondary
-                      : AppColors.secondary,
+                TextSpan(
+                  text: 'NAVI',
+                  style: GoogleFontsHelper.logoStyle.copyWith(
+                    color: riderMode
+                        ? RiderModeColors.secondary
+                        : AppColors.secondary,
+                  ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -984,8 +1004,8 @@ class _RightPanel extends ConsumerWidget {
 
           const SizedBox(height: 14),
 
-          // ── 나침반 (GPS 복귀) ──────────────────────────────
-          _MapCtrlBtn(icon: Icons.explore_outlined, onTap: onRecenter),
+          // ── 내 위치 복귀 ────────────────────────────────────
+          _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter),
 
           const SizedBox(height: 8),
 
