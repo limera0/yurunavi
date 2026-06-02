@@ -18,11 +18,17 @@ class RouteResult {
 
 /// Valhalla 로컬 라우팅 클라이언트.
 ///
-/// `alternates: 2`로 고속도로·자동차전용도로를 배제한 3개 대안 경로를 한 번에 받아
-/// 거리 기준으로 정렬 후 시골길(긴 경로) / 지방도로(중간) / 국도(짧은 경로) 에 매핑한다.
+/// 코스 타입별로 Valhalla를 3회 호출하여 서로 다른 경로를 유도한다.
+/// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
 /// Valhalla 미응답 시 빈 리스트 반환 — 호출자가 처리.
 class RoutingService {
   static const _valhallaBase = 'https://valhalla.westinx.com';
+
+  // 코스별 실효속도 (근거: 네이버 실측 71km=118min=36km/h 기준 지방도+국도 혼합)
+  // 시골길: 좁고 굽은 길, 지방도: 일반 지방도로, 국도: 간선도로
+  static const _speedCountrysideKmh = 30.0; // 시골길
+  static const _speedLocalKmh = 36.0;       // 지방도로
+  static const _speedNationalKmh = 45.0;    // 국도
 
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
@@ -103,19 +109,30 @@ class RoutingService {
       // 3개 미만이면 마지막 경로로 채움
       while (routes.length < 3) { routes.add(routes.last); }
 
+      // 코스별 실효속도로 ETA 재계산 (Valhalla 낙관적 속도 대신)
+      const speeds = [
+        _speedCountrysideKmh,
+        _speedLocalKmh,
+        _speedNationalKmh,
+      ];
       final courseNames = ['시골길', '지방도로', '국도'];
+      final results = <RouteResult>[];
       for (int i = 0; i < 3; i++) {
+        final realisticMins = (routes[i].km / speeds[i] * 60).round();
         dev.log(
-          'Valhalla [${courseNames[i]}] ${routes[i].pts.length}pts ${routes[i].km.toStringAsFixed(1)}km ${routes[i].mins}min',
+          'Valhalla [${courseNames[i]}] ${routes[i].pts.length}pts '
+          '${routes[i].km.toStringAsFixed(1)}km '
+          'valhallaMin=${routes[i].mins} realisticMin=$realisticMins '
+          '(${speeds[i].toStringAsFixed(0)}km/h)',
           name: 'RoutingService',
         );
+        results.add(RouteResult(
+          points: routes[i].pts,
+          distanceKm: routes[i].km,
+          durationMin: realisticMins,
+        ));
       }
-
-      return [
-        RouteResult(points: routes[0].pts, distanceKm: routes[0].km, durationMin: routes[0].mins),
-        RouteResult(points: routes[1].pts, distanceKm: routes[1].km, durationMin: routes[1].mins),
-        RouteResult(points: routes[2].pts, distanceKm: routes[2].km, durationMin: routes[2].mins),
-      ];
+      return results;
     } catch (e) {
       dev.log('Valhalla fetchRoutes 실패: $e', name: 'RoutingService', level: 900);
       return const <RouteResult>[];
