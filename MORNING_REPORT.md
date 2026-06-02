@@ -1,97 +1,122 @@
-# MORNING_REPORT — 4번째 밤 (2026-06-01)
+# MORNING_REPORT — Valhalla Base URL 진단 (2026-06-02)
 
 오케스트레이터: Claude Sonnet 4.6
 
 ---
 
-## 1. 완료 모듈 + 커밋 해시
+## 오늘 밤 작업 요약
 
-| 모듈 | 내용 | 커밋 |
-|------|------|------|
-| 체크포인트 | 모듈 1 시작 전 | `10653dc` |
-| 1 + 2 + 3 | 실제 Valhalla 거리 + 내비 초기화면 버그 수정 | `e612036` |
+**목표:** routing_service.dart의 Tailscale 주소(`westinx.tail2172f6.ts.net:8002`)를
+`navi.westinx.com` 기반 URL로 교체하여 DNS NODATA 라우팅 실패 해소.
 
----
-
-## 2. 완료 기준 체크 (모듈별)
-
-### 모듈 1 — 카드 거리를 Valhalla 실제 거리로 교체
-- [x] 카드 거리 = Valhalla 실제 도로 거리 (`haversine × 배수` 코드 완전 삭제)
-- [x] 카드 시간(분)도 Valhalla 실제 time으로 표시
-- [x] `1.55 / 1.22 / 1.0` 배수 상수 완전 삭제됨
-- [x] 경로 미로드 시 `---` 플레이스홀더 표시 (크래시 없음)
-- [x] `flutter analyze` 0 issues
-
-변경된 파일:
-- `lib/services/routing_service.dart`: `RouteResult` 클래스 추가, `fetchRoutes()` 반환 타입을 `List<RouteResult>`로 변경, Valhalla 응답에서 `time`(초) 추출 후 분으로 변환
-- `lib/features/map/providers/map_providers.dart`: `allRouteMeta: List<({double km, int mins})>` 필드 추가, `setAllRouteMeta()` 메서드 추가
-- `lib/features/map/presentation/main_map_screen.dart`: `_fetchAndStoreAllRoutes()` / `_onRouteCardSelect()` 모두 실제 거리·시간 저장, `_CourseSheet` 에서 `haversine × 배수` 로직 제거 및 `routeMeta` 파라미터로 교체
-
-### 모듈 2 — 내비 화면 거리 하드코딩 제거
-- [x] `nav_screen.dart`의 `23.4km` 하드코딩 제거됨
-- [x] `_polylineKm()` Haversine 헬퍼 추가, 폴리라인 실제 길이 계산
-- [x] 폴리라인 비어 있을 때 `--` 표시 (크래시 없음)
-- [x] `flutter analyze` 0 issues
-
-### 모듈 3 — 내비 초기화면 / 현위치 버튼 버그 2건
-- [x] 버그 A 수정: `initialCenter`에서 `widget.destination` 제거 → `_currentPos ?? _kInitialMapView`
-- [x] 버그 B 확인: `nav_screen.dart:174`의 `onMapEvent` 핸들러에 이미 `event.source != MapEventSource.mapController` 체크 존재 → 수정 불요, 정상 동작 확인
-- [x] `flutter analyze` 0 issues
-
-### 빌드 검증
-- [x] `flutter analyze` → No issues found
-- [x] `flutter build apk --debug` → **빌드 성공**
-  - APK: `build/app/outputs/flutter-apk/app-debug.apk`
+**결과: STOP — 수정하지 않음.**
 
 ---
 
-## 3. 막힌 것 / 건너뛴 것
+## STEP 1 진단 결과
 
-없음. 모듈 1·2·3 모두 정상 완료.
+### 1-a. routing_service.dart 호출 경로
 
-`driving_screen.dart`는 NIGHT_TASK 지시에 따라 전혀 건드리지 않음.
+```
+lib/services/routing_service.dart:25:  static const _valhallaBase = 'http://westinx.tail2172f6.ts.net:8002';
+lib/services/routing_service.dart:55:            Uri.parse('$_valhallaBase/route'),
+```
 
----
+- Valhalla 호출: `http://westinx.tail2172f6.ts.net:8002/route`
+- 수정 대상 확인 완료.
 
-## 4. 사용자가 폰에서 확인할 것
+### 1-b. 서버 프록시 설정 탐색 결과
 
-폰에 Tailscale 켠 상태로 APK 설치 후:
+```
+# /etc/nginx/ → 존재하지 않음 (nginx 미설치)
+# /etc/caddy/ → 존재하지 않음 (caddy 미설치)
+# docker/docker-compose.yml 탐색 결과:
+```
 
-1. **카드 거리가 달라졌는지 확인**
-   - 목적지를 찍으면 하단에 시골길·지방도로·국도 카드 3장이 나옵니다.
-   - 이전에는 카드 거리가 직선거리에 고정 배수를 곱한 가짜 숫자였습니다.
-   - 이제는 Valhalla 서버가 실제 도로를 따라 계산한 거리와 시간이 표시됩니다.
-   - 3장의 거리가 이전과 다르고, 서로 다른 실제 거리(시골길이 제일 길고 국도가 제일 짧음)인지 확인해주세요.
+```yaml
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla:latest
+    container_name: yurunavi-valhalla
+    ports:
+      - "8002:8002"
+    command: valhalla_service /custom_files/valhalla.json 1
+```
 
-2. **카드 거리 ≈ 내비 거리인지 확인**
-   - "Start your Engine" 슬라이더를 밀어 내비 화면 진입 후 하단 ETA 바의 거리를 확인합니다.
-   - 이제 카드에서 선택한 경로의 실제 폴리라인 길이가 표시됩니다.
-   - 카드 거리와 내비 거리가 대략 일치해야 합니다(완전 동일하지 않을 수 있지만 크게 차이 나면 안 됩니다).
-
-3. **내비 켤 때 현위치 중심으로 뜨는지 확인**
-   - 이전에는 내비 화면이 열릴 때 목적지가 화면 중앙으로 왔습니다.
-   - 이제는 내 현재 위치(GPS) 중심으로 지도가 뜹니다.
-   - GPS 신호를 받자마자 자동으로 내 위치로 이동합니다.
-
----
-
-## 5. driving_screen.dart 정리 건
-
-`lib/screens/driving_screen.dart`는 구버전 내비 화면으로 보입니다. 현재 `_startNavigation()`은 `NavScreen`(`lib/features/navigation/presentation/nav_screen.dart`)을 사용하며 `DrivingScreen`은 호출하지 않습니다.
-
-이 파일은 **다음 밤 정리 후보**입니다. 삭제 전 `main.dart` 등 다른 파일에서 import하는지 최종 확인 필요.
+- docker-compose에 Valhalla 단독 서비스만 존재.
+- nginx, caddy, traefik 등 리버스 프록시 서비스 **전혀 없음**.
+- `navi.westinx.com → 8002(Valhalla)` 라우팅 규칙 **미발견**.
 
 ---
 
-## 6. 토큰/한도 메모
+## STEP 2 판단: **STOP**
 
-모듈 1·2·3 + 빌드 검증 모두 단일 세션에서 완료됨. 한도 초과 없음.
+**근거:**
+
+1. `navi.westinx.com`이 Valhalla(8002)를 뒤로 노출하는 프록시 규칙이 서버 어디에도 없음.
+2. native_engine.dart의 Rust 백엔드(`navi.westinx.com/calc_route`)는 어딘가에 프록시가
+   존재한다는 뜻인데, 이는 이 서버가 아닌 외부(클라우드/서버) 프록시일 가능성이 높음.
+3. `_valhallaBase`를 `https://navi.westinx.com`으로 바꾸면 해당 도메인에 `/route` 엔드포인트가
+   없어 404/502 에러가 남. 오히려 기존 Tailscale 오류보다 디버그가 어려워질 수 있음.
+4. 프록시 설정 추가는 인프라 변경이므로 사람 확인 필요.
 
 ---
 
-## 7. 용어 설명
+## 수정 내용
 
-- **Valhalla 실제 도로 거리**: 서버가 도로 지도를 따라 실제 경로를 계산한 거리. 이전의 "직선거리 × 배수" 와 달리 실제로 달려야 하는 거리입니다.
-- **Haversine**: 좌표 두 개 사이의 직선 거리를 구하는 공식. 내비 화면에서 경로 점들 사이의 거리를 모두 더해 전체 경로 길이를 계산하는 데 사용합니다.
-- **폴리라인**: 지도에 그려지는 경로 선. 수백~수천 개의 좌표 점들을 연결한 것입니다.
-- **ETA 바**: 내비 화면 하단의 "도착 예정 시각·거리·시간" 표시 영역.
+**없음.** routing_service.dart를 포함해 어떤 파일도 수정하지 않음.
+
+---
+
+## 다음 단계 (사람이 해야 할 일)
+
+### 옵션 A: 리버스 프록시 경유 (권장)
+
+`navi.westinx.com` 앞단 프록시(Caddy/nginx/Cloudflare Worker 등)에
+Valhalla 경로 규칙 추가 후 `_valhallaBase` 수정:
+
+```
+# Caddy 예시
+navi.westinx.com {
+    handle /valhalla/* {
+        reverse_proxy localhost:8002
+    }
+    handle /calc_route* {
+        reverse_proxy localhost:8001   # (Rust 백엔드 포트 확인 필요)
+    }
+}
+```
+
+추가 확인 필요: `calc_route`가 어느 프록시를 타고 `navi.westinx.com`에 연결되는지.
+
+그 후 코드 변경:
+```dart
+// lib/services/routing_service.dart:25
+static const _valhallaBase = 'https://navi.westinx.com/valhalla';  // prefix 확인 후
+```
+
+### 옵션 B: Tailscale 복원
+
+Tailscale MagicDNS가 다시 동작하도록 `westinx.tail2172f6.ts.net` 주소를 살리는 것.
+임시 해결책이지만 프록시 없이 즉시 동작.
+
+### 빌드/설치 시 주의
+
+수정 후 재빌드:
+```bash
+flutter build apk --release
+```
+폰 설치 시 **기존 앱 완전 삭제 후 재설치** (캐시된 URL 설정 초기화 목적).
+
+---
+
+## 블록커
+
+- `calc_route`가 navi.westinx.com을 통해 어떻게 라우팅되는지 불명확.
+  → 확인 방법: `navi.westinx.com`이 호스팅되는 서버의 프록시 설정 열람.
+- Valhalla에 대한 외부 공개 경로가 전혀 없음.
+  → 프록시 규칙 추가 또는 Tailscale 복원 중 하나를 사람이 선택해야 함.
+
+---
+
+_체크포인트 커밋: a62d54d — 파일 수정 없이 진단만 수행_
