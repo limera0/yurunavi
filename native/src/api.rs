@@ -30,6 +30,17 @@ pub struct WindingScore {
     pub road_type: String,
 }
 
+/// 후보 경로 순위 (fun-road v1: 곡률만, 숲/고도는 다음 모듈 몫)
+#[derive(Debug, Clone)]
+pub struct RouteRank {
+    /// routes 입력 배열에서의 원래 인덱스
+    pub original_index: usize,
+    /// 종합 fun 점수 (0.0~100.0, 높을수록 재미있는 길)
+    pub fun_score: f64,
+    /// 곡률 τ = 궤적길이 L / 직선거리 C (≥1.0)
+    pub curvature_tau: f64,
+}
+
 /// 경로 계산 결과 (Flutter ↔ Rust 전달 단위)
 #[flutter_rust_bridge::frb(dart_metadata = ("freezed"))]
 #[derive(Debug, Clone)]
@@ -164,6 +175,54 @@ fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
         * b.lat.to_radians().cos()
         * sin_half_lon * sin_half_lon;
     2.0 * R * h.sqrt().asin()
+}
+
+/// 경로 곡률 τ = 궤적 전체 길이(L) / 출발~도착 직선 거리(C).
+///
+/// - τ = 1.0 : 완전한 직선 도로
+/// - τ > 1.0 : 꼬불꼬불할수록 증가
+/// - 포인트 수 < 2 또는 직선거리 < 1m 이면 1.0 반환 (나눗셈 방지)
+pub fn calc_tortuosity(route: &[GpsPoint]) -> f64 {
+    if route.len() < 2 {
+        return 1.0;
+    }
+    let straight = haversine_m(&route[0], &route[route.len() - 1]);
+    if straight < 1.0 {
+        return 1.0;
+    }
+    let path_len: f64 = route.windows(2).map(|w| haversine_m(&w[0], &w[1])).sum();
+    (path_len / straight).max(1.0)
+}
+
+/// Fun-road 점수 v1 — 곡률(τ) 항만 반영.
+///
+/// 향후 숲 근접도, 교통량, 도로 등급 항이 추가될 예정.
+/// τ 기준: 1.0→0점, 2.0→50점, 3.0+→100점(상한).
+pub fn fun_score_v1(route: &[GpsPoint]) -> f64 {
+    let tau = calc_tortuosity(route);
+    ((tau - 1.0) * 50.0).clamp(0.0, 100.0)
+}
+
+/// 후보 경로 목록을 fun_score 기준으로 내림차순 정렬해 반환한다.
+///
+/// 입력: Valhalla 또는 Rust가 생성한 경로 목록 (각 경로 = Vec<GpsPoint>).
+/// 반환: fun_score 높은 순. original_index 로 원본 배열 참조 가능.
+pub fn rank_candidates(routes: Vec<Vec<GpsPoint>>) -> Vec<RouteRank> {
+    let mut ranks: Vec<RouteRank> = routes
+        .iter()
+        .enumerate()
+        .map(|(i, route)| RouteRank {
+            original_index: i,
+            fun_score: fun_score_v1(route),
+            curvature_tau: calc_tortuosity(route),
+        })
+        .collect();
+    ranks.sort_by(|a, b| {
+        b.fun_score
+            .partial_cmp(&a.fun_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    ranks
 }
 
 // ── 경로 계산 (Flutter → Rust 진입점) ────────────────────────────
@@ -630,5 +689,58 @@ mod tests {
         let t_rural = 1290.0_f64;
         let t_prov = 1000.0_f64;
         assert!(t_rural / t_prov < 1.3, "1290/1000 must NOT trigger fallback");
+    }
+
+    #[test]
+    fn tortuosity_straight_road_is_one() {
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let tau = calc_tortuosity(&route);
+        assert!((tau - 1.0).abs() < 0.02, "직선도로 τ≈1.0 예상, 실제 {tau}");
+    }
+
+    #[test]
+    fn tortuosity_winding_road_above_one() {
+        // 사인파 경로: 실제 궤적이 직선보다 길어야 함
+        let route: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let tau = calc_tortuosity(&route);
+        assert!(tau > 1.05, "굽이길 τ > 1.05 예상, 실제 {tau}");
+    }
+
+    #[test]
+    fn fun_score_straight_road_near_zero() {
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let score = fun_score_v1(&route);
+        assert!(score < 5.0, "직선도로 fun_score < 5.0 예상, 실제 {score}");
+    }
+
+    #[test]
+    fn rank_candidates_winding_first() {
+        let straight: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let winding: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let ranks = rank_candidates(vec![straight, winding]);
+        assert_eq!(ranks[0].original_index, 1, "굽이길(인덱스 1)이 1위 예상");
+        assert!(ranks[0].fun_score > ranks[1].fun_score);
     }
 }
