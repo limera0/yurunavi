@@ -617,4 +617,18 @@ mod tests {
         let result = is_off_route(GpsPoint { lat: 37.05, lng: 127.0 }, route, 0.0);
         assert_eq!(result.threshold_m, 150.0, "zero threshold should default to 150m");
     }
+
+    #[test]
+    fn fallback_ratio_triggers_at_1_3() {
+        let t_rural = 1300.0_f64;
+        let t_prov = 1000.0_f64;
+        assert!(t_rural / t_prov >= 1.3, "1300/1000 must trigger fallback");
+    }
+
+    #[test]
+    fn fallback_ratio_no_trigger_below_1_3() {
+        let t_rural = 1290.0_f64;
+        let t_prov = 1000.0_f64;
+        assert!(t_rural / t_prov < 1.3, "1290/1000 must NOT trigger fallback");
+    }
 }

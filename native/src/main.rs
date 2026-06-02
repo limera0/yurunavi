@@ -1,9 +1,16 @@
 mod api;
 use api::{
-    calc_route, calc_winding_score, check_destination_reachable,
+    calc_winding_score, check_destination_reachable,
     check_gps_accuracy, check_route_similarity, is_off_route,
-    GpsPoint, GpsQuality,
+    GpsPoint, GpsQuality, WindingScore,
 };
+
+const VALHALLA_URL: &str = "http://localhost:8002/route";
+
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(reqwest::Client::new)
+}
 
 use axum::{
     extract::Json,
@@ -33,6 +40,52 @@ impl From<GpsPoint> for GpsPointDto {
     }
 }
 
+// ── Valhalla polyline6 decoder ─────────────────────────────────
+
+fn decode_polyline6(encoded: &str) -> Vec<GpsPointDto> {
+    let mut result = Vec::new();
+    let bytes = encoded.as_bytes();
+    let mut i = 0usize;
+    let mut lat = 0i64;
+    let mut lng = 0i64;
+    while i < bytes.len() {
+        for coord in [&mut lat, &mut lng] {
+            let mut acc = 0i64;
+            let mut shift = 0u32;
+            loop {
+                if i >= bytes.len() { break; }
+                let b = bytes[i] as i64 - 63;
+                i += 1;
+                acc |= (b & 0x1f) << shift;
+                shift += 5;
+                if b < 0x20 { break; }
+            }
+            let delta = if acc & 1 != 0 { !(acc >> 1) } else { acc >> 1 };
+            *coord += delta;
+        }
+        result.push(GpsPointDto { lat: lat as f64 / 1e6, lng: lng as f64 / 1e6 });
+    }
+    result
+}
+
+fn extract_trip_points(resp: &serde_json::Value) -> Vec<GpsPointDto> {
+    let legs = match resp["trip"]["legs"].as_array() {
+        Some(l) => l,
+        None => return Vec::new(),
+    };
+    let mut pts: Vec<GpsPointDto> = Vec::new();
+    for (i, leg) in legs.iter().enumerate() {
+        let shape = leg["shape"].as_str().unwrap_or("");
+        let decoded = decode_polyline6(shape);
+        if i == 0 {
+            pts.extend(decoded);
+        } else {
+            pts.extend(decoded.into_iter().skip(1));
+        }
+    }
+    pts
+}
+
 // ── /calc_route ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -56,17 +109,104 @@ struct CalcRouteResp {
 async fn handle_calc_route(
     Json(req): Json<CalcRouteReq>,
 ) -> Result<Json<CalcRouteResp>, StatusCode> {
-    let result = calc_route(
-        req.origin.into(),
-        req.destination.into(),
-        req.waypoints.into_iter().map(Into::into).collect(),
-        req.route_type,
-    );
+    let client = http_client();
+
+    // Build Valhalla locations array
+    let locs: serde_json::Value = {
+        let mut v = vec![serde_json::json!({"lat": req.origin.lat, "lon": req.origin.lng})];
+        for w in &req.waypoints {
+            v.push(serde_json::json!({"lat": w.lat, "lon": w.lng}));
+        }
+        v.push(serde_json::json!({"lat": req.destination.lat, "lon": req.destination.lng}));
+        serde_json::Value::Array(v)
+    };
+
+    // Valhalla payloads (matching routing_service.dart profiles)
+    let rural_payload = serde_json::json!({
+        "locations": locs.clone(),
+        "costing": "motorcycle",
+        "costing_options": { "motorcycle": {
+            "use_highways": 0.0, "use_living_streets": 1.0, "use_tracks": 0.8, "top_speed": 40,
+            "class_factors": {"1": 100.0, "2": 5.0, "3": 2.5, "4": 1.0, "5": 0.2},
+            "urban_penalty": 50.0
+        }}
+    });
+    let prov_payload = serde_json::json!({
+        "locations": locs.clone(),
+        "costing": "motorcycle",
+        "costing_options": { "motorcycle": {
+            "use_highways": 0.0, "use_living_streets": 0.5, "use_tracks": 0.2,
+            "class_factors": {"1": 100.0, "2": 2.0, "3": 0.5, "4": 0.7, "5": 1.5}
+        }}
+    });
+    let natl_payload = serde_json::json!({
+        "locations": locs.clone(),
+        "costing": "motorcycle",
+        "costing_options": { "motorcycle": {
+            "use_highways": 0.0, "use_living_streets": 0.0, "use_tracks": 0.0, "shortest": true,
+            "class_factors": {"1": 100.0, "2": 0.4, "3": 1.0, "4": 2.0, "5": 10.0}
+        }}
+    });
+
+    let winner: serde_json::Value = if req.route_type == 0 {
+        // 시골길: parallel rural + provincial, then 1.3x fallback check
+        let (r_res, p_res) = tokio::try_join!(
+            client.post(VALHALLA_URL).json(&rural_payload).send(),
+            client.post(VALHALLA_URL).json(&prov_payload).send(),
+        ).map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+        let r_json: serde_json::Value = r_res.json().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        let p_json: serde_json::Value = p_res.json().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+        let t_rural = r_json["trip"]["summary"]["time"].as_f64().unwrap_or(f64::MAX);
+        let t_prov  = p_json["trip"]["summary"]["time"].as_f64().unwrap_or(1.0);
+
+        if t_rural / t_prov >= 1.3 {
+            // Balanced: soften rural FC constraints toward provincial
+            let balanced = serde_json::json!({
+                "locations": locs,
+                "costing": "motorcycle",
+                "costing_options": { "motorcycle": {
+                    "use_highways": 0.0,
+                    "class_factors": {"1": 100.0, "2": 4.0, "3": 1.2, "4": 0.8, "5": 0.5}
+                }}
+            });
+            client.post(VALHALLA_URL).json(&balanced).send().await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?
+                .json().await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?
+        } else {
+            r_json
+        }
+    } else {
+        let payload = if req.route_type == 1 { prov_payload } else { natl_payload };
+        client.post(VALHALLA_URL).json(&payload).send().await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?
+            .json().await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?
+    };
+
+    let pts = extract_trip_points(&winner);
+    let km: f64 = winner["trip"]["legs"].as_array()
+        .map(|legs| {
+            legs.iter()
+                .map(|l| l["summary"]["length"].as_f64().unwrap_or(0.0))
+                .sum()
+        })
+        .unwrap_or(0.0);
+
+    let api_pts: Vec<GpsPoint> = pts.iter().map(|p| GpsPoint { lat: p.lat, lng: p.lng }).collect();
+    let winding = if api_pts.len() >= 3 {
+        calc_winding_score(api_pts)
+    } else {
+        WindingScore { score: 0.0, road_type: "national".to_string() }
+    };
+
     Ok(Json(CalcRouteResp {
-        points: result.points.into_iter().map(Into::into).collect(),
-        total_distance_m: result.total_distance_m,
-        winding_score: result.winding_score,
-        road_type: result.road_type,
+        points: pts,
+        total_distance_m: km * 1000.0,
+        winding_score: winding.score,
+        road_type: winding.road_type,
     }))
 }
 
