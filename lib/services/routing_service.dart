@@ -8,7 +8,7 @@ import 'package:latlong2/latlong.dart';
 class RouteResult {
   final List<LatLng> points;
   final double distanceKm;
-  final int durationMin; // round(total_seconds / 60)
+  final int durationMin; // round(distance / realistic_speed_kmh * 60)
   const RouteResult({
     required this.points,
     required this.distanceKm,
@@ -18,17 +18,26 @@ class RouteResult {
 
 /// Valhalla 로컬 라우팅 클라이언트.
 ///
-/// 코스 타입별로 Valhalla를 3회 호출하여 서로 다른 경로를 유도한다.
+/// 코스 타입별로 Valhalla를 3회 병렬 호출하여 서로 다른 geometry를 유도한다.
 /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
 /// Valhalla 미응답 시 빈 리스트 반환 — 호출자가 처리.
 class RoutingService {
   static const _valhallaBase = 'https://valhalla.westinx.com';
 
-  // 코스별 실효속도 (근거: 네이버 실측 71km=118min=36km/h 기준 지방도+국도 혼합)
-  // 시골길: 좁고 굽은 길, 지방도: 일반 지방도로, 국도: 간선도로
-  static const _speedCountrysideKmh = 30.0; // 시골길
-  static const _speedLocalKmh = 36.0;       // 지방도로
-  static const _speedNationalKmh = 45.0;    // 국도
+  // 코스별 실효속도 (근거: 네이버 실측 71km=118min=36km/h, 지방도+국도 혼합)
+  // Valhalla 응답 time은 ~57-88km/h 낙관치이므로 거리 기반으로 재계산
+  static const _speedCountrysideKmh = 30.0; // 시골길: 좁고 굽은 길
+  static const _speedLocalKmh = 36.0;       // 지방도로: 지방 국도 혼합
+  static const _speedNationalKmh = 45.0;    // 국도: 간선도로 위주
+
+  // 코스별 Valhalla costing_options (인덱스: 0=시골길, 1=지방도로, 2=국도)
+  // use_highways: 0.0 전 코스 공통 (앱 존재 이유: 고속도로 배제)
+  static const _courseNames = ['시골길', '지방도로', '국도'];
+  static const _courseSpeeds = [
+    _speedCountrysideKmh,
+    _speedLocalKmh,
+    _speedNationalKmh,
+  ];
 
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
@@ -44,91 +53,88 @@ class RoutingService {
       {'lon': destination.longitude, 'lat': destination.latitude},
     ];
 
+    // 코스별 costing_options — 서로 다른 geometry를 유도
+    final costingOptions = <Map<String, dynamic>>[
+      // 시골길: 생활도로·비포장 선호, top_speed 제한 → 간선도로 자연 회피
+      {
+        'use_highways': 0.0,
+        'use_living_streets': 1.0,
+        'use_tracks': 0.8,
+        'top_speed': 40,
+      },
+      // 지방도로: 중간 설정, 주요 국도 의존 낮춤
+      {
+        'use_highways': 0.0,
+        'use_living_streets': 0.5,
+        'use_tracks': 0.2,
+      },
+      // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
+      {
+        'use_highways': 0.0,
+        'use_living_streets': 0.0,
+        'use_tracks': 0.0,
+        'shortest': true,
+      },
+    ];
+
     try {
-      final body = jsonEncode({
-        'locations': locations,
-        'costing': 'motorcycle',
-        'costing_options': {
-          'motorcycle': {
-            'use_highways': 0.0,  // 고속도로·자동차전용도로 배제
-          },
-        },
-        'alternates': 2,  // 기본 + 대안 2개 = 총 3개 경로
-      });
+      // 3개 코스 병렬 요청
+      final futures = costingOptions.map(
+        (opts) => http
+            .post(
+              Uri.parse('$_valhallaBase/route'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'locations': locations,
+                'costing': 'motorcycle',
+                'costing_options': {'motorcycle': opts},
+              }),
+            )
+            .timeout(const Duration(seconds: 20)),
+      );
 
-      final resp = await http
-          .post(
-            Uri.parse('$_valhallaBase/route'),
-            headers: {'Content-Type': 'application/json'},
-            body: body,
-          )
-          .timeout(const Duration(seconds: 15));
+      final responses = await Future.wait(futures);
 
-      if (resp.statusCode != 200) {
-        dev.log(
-          'Valhalla ${resp.statusCode}: ${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
-          name: 'RoutingService',
-          level: 900,
-        );
-        return const <RouteResult>[];
-      }
-
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-
-      // primary + alternates 수집
-      final rawTrips = <Map<String, dynamic>>[];
-      if (data['trip'] != null) rawTrips.add(data['trip'] as Map<String, dynamic>);
-      for (final alt in (data['alternates'] as List? ?? [])) {
-        final t = (alt as Map<String, dynamic>)['trip'];
-        if (t != null) rawTrips.add(t as Map<String, dynamic>);
-      }
-      if (rawTrips.isEmpty) return const <RouteResult>[];
-
-      // 각 trip에서 폴리라인, 거리, 시간 추출
-      final routes = <({List<LatLng> pts, double km, int mins})>[];
-      for (final trip in rawTrips) {
-        final legs = (trip['legs'] as List?) ?? [];
-        if (legs.isEmpty) continue;
-        final pts = _extractPoints(legs);
-        final km = legs.fold<double>(
-          0,
-          (sum, leg) => sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
-        );
-        final secs = legs.fold<double>(
-          0,
-          (sum, leg) => sum + ((leg['summary']?['time'] as num?)?.toDouble() ?? 0),
-        );
-        final mins = (secs / 60).round();
-        if (pts.isNotEmpty) routes.add((pts: pts, km: km, mins: mins));
-      }
-      if (routes.isEmpty) return const <RouteResult>[];
-
-      // 거리 내림차순 정렬 → 시골길(멀리/구불) … 국도(짧고 효율적)
-      routes.sort((a, b) => b.km.compareTo(a.km));
-
-      // 3개 미만이면 마지막 경로로 채움
-      while (routes.length < 3) { routes.add(routes.last); }
-
-      // 코스별 실효속도로 ETA 재계산 (Valhalla 낙관적 속도 대신)
-      const speeds = [
-        _speedCountrysideKmh,
-        _speedLocalKmh,
-        _speedNationalKmh,
-      ];
-      final courseNames = ['시골길', '지방도로', '국도'];
       final results = <RouteResult>[];
       for (int i = 0; i < 3; i++) {
-        final realisticMins = (routes[i].km / speeds[i] * 60).round();
+        final resp = responses.elementAt(i);
+        if (resp.statusCode != 200) {
+          dev.log(
+            'Valhalla [${_courseNames[i]}] ${resp.statusCode}: '
+            '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
+            name: 'RoutingService',
+            level: 900,
+          );
+          return const <RouteResult>[];
+        }
+
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final trip = data['trip'] as Map<String, dynamic>?;
+        if (trip == null) return const <RouteResult>[];
+
+        final legs = (trip['legs'] as List?) ?? [];
+        if (legs.isEmpty) return const <RouteResult>[];
+
+        final pts = _extractPoints(legs);
+        if (pts.isEmpty) return const <RouteResult>[];
+
+        final km = legs.fold<double>(
+          0,
+          (sum, leg) =>
+              sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
+        );
+        final realisticMins = (km / _courseSpeeds[i] * 60).round();
+
         dev.log(
-          'Valhalla [${courseNames[i]}] ${routes[i].pts.length}pts '
-          '${routes[i].km.toStringAsFixed(1)}km '
-          'valhallaMin=${routes[i].mins} realisticMin=$realisticMins '
-          '(${speeds[i].toStringAsFixed(0)}km/h)',
+          'Valhalla [${_courseNames[i]}] ${pts.length}pts '
+          '${km.toStringAsFixed(1)}km '
+          'realisticMin=$realisticMins (${_courseSpeeds[i].toStringAsFixed(0)}km/h)',
           name: 'RoutingService',
         );
+
         results.add(RouteResult(
-          points: routes[i].pts,
-          distanceKm: routes[i].km,
+          points: pts,
+          distanceKm: km,
           durationMin: realisticMins,
         ));
       }
