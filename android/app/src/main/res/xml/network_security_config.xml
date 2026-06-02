@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- 기본: 모든 도메인 https 강제, 시스템 인증서 신뢰 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- Tailscale 직접 접속 (레거시, 평문 허용) -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">ts.net</domain>
     </domain-config>
