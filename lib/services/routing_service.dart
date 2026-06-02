@@ -61,12 +61,27 @@ class RoutingService {
         'use_living_streets': 1.0,
         'use_tracks': 0.8,
         'top_speed': 40,
+        'class_factors': {
+          '1': 100.0, // FC1: 고속국도 강한 회피
+          '2': 5.0,   // FC2: 일반국도 회피
+          '3': 2.5,   // FC3: 지방도 중간
+          '4': 1.0,   // FC4: 군도 기준
+          '5': 0.2,   // FC5: 생활도로 강한 선호
+        },
+        'urban_penalty': 50.0, // 도심 관통 방지
       },
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
       {
         'use_highways': 0.0,
         'use_living_streets': 0.5,
         'use_tracks': 0.2,
+        'class_factors': {
+          '1': 100.0, // FC1: 고속국도 강한 회피
+          '2': 2.0,   // FC2: 일반국도 약한 회피
+          '3': 0.5,   // FC3: 지방도 선호
+          '4': 0.7,   // FC4: 군도 약한 선호
+          '5': 1.5,   // FC5: 생활도로 약한 회피
+        },
       },
       // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
       {
@@ -74,6 +89,13 @@ class RoutingService {
         'use_living_streets': 0.0,
         'use_tracks': 0.0,
         'shortest': true,
+        'class_factors': {
+          '1': 100.0, // FC1: 고속국도 강한 회피
+          '2': 0.4,   // FC2: 일반국도 강한 선호
+          '3': 1.0,   // FC3: 지방도 기준
+          '4': 2.0,   // FC4: 군도 회피
+          '5': 10.0,  // FC5: 생활도로 강한 회피
+        },
       },
     ];
 
