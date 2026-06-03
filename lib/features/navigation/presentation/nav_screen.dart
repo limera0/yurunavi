@@ -55,6 +55,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
 
+  // 이탈 재탐색
+  List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
+  bool _isRerouting = false;
+  Timer? _offRouteDebounce;
+  static const _kOffRouteM = 20.0; // 이탈 판정 거리 (미터)
+  static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
+
   late final List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
 
@@ -93,6 +100,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
+    _routePoints = List<LatLng>.of(widget.routePolyline);
     // Valhalla maneuvers → _TurnStep 변환 (없으면 더미 폴백)
     _steps = widget.maneuvers.isNotEmpty
         ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
@@ -117,6 +125,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       statusBarIconBrightness: Brightness.dark,
     ));
     _recenterTimer?.cancel();
+    _offRouteDebounce?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl.dispose();
@@ -170,6 +179,62 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
 
     _checkArrival(loc);
+    if (!_arrived && _routePoints.length >= 2) _checkOffRoute(loc);
+  }
+
+  void _checkOffRoute(LatLng loc) {
+    if (_isRerouting) return;
+    var minDist = double.maxFinite;
+    for (int i = 0; i < _routePoints.length - 1; i++) {
+      final d = _segmentDistM(loc, _routePoints[i], _routePoints[i + 1]);
+      if (d < minDist) minDist = d;
+    }
+    if (minDist > _kOffRouteM) {
+      // 디바운스: 3초 연속 이탈 확인 후 재탐색
+      _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
+        _offRouteDebounce = null;
+        // 타이머 발화 시점의 현재 위치로 재탐색 (생성 시점 loc보다 최신)
+        final current = _currentPos;
+        if (current != null) _reroute(current);
+      });
+    } else {
+      _offRouteDebounce?.cancel();
+      _offRouteDebounce = null;
+    }
+  }
+
+  // 점-선분 최단거리 (미터)
+  double _segmentDistM(LatLng p, LatLng a, LatLng b) {
+    final ax = b.latitude - a.latitude;
+    final ay = b.longitude - a.longitude;
+    final lenSq = ax * ax + ay * ay;
+    final t = lenSq < 1e-12
+        ? 0.0
+        : (((p.latitude - a.latitude) * ax + (p.longitude - a.longitude) * ay) / lenSq)
+            .clamp(0.0, 1.0);
+    return _distanceM(
+      LatLng(a.latitude + t * ax, a.longitude + t * ay),
+      p,
+    );
+  }
+
+  Future<void> _reroute(LatLng origin) async {
+    if (_isRerouting || !mounted) return;
+    final dest = widget.destination;
+    if (dest == null) return;
+    setState(() => _isRerouting = true);
+    try {
+      final routes = await RoutingService.fetchRoutes(
+        origin: origin,
+        destination: dest,
+        waypoints: widget.waypoints,
+      );
+      if (mounted && routes.isNotEmpty) setState(() => _routePoints = routes[0].points);
+    } on RoutingException {
+      // 재탐색 실패 — 기존 경로 유지
+    } finally {
+      if (mounted) setState(() => _isRerouting = false);
+    }
   }
 
   void _checkArrival(LatLng loc) {
@@ -270,11 +335,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 userAgentPackageName: 'com.westinx.yurunavi',
                 maxZoom: 19,
               ),
-              // 경로 폴리라인
-              if (widget.routePolyline.length >= 2)
+              // 경로 폴리라인 (_routePoints: 재탐색 시 자동 갱신)
+              if (_routePoints.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(
-                    points: widget.routePolyline,
+                    points: _routePoints,
                     color: const Color(0xFFF28C28).withValues(alpha: 0.9),
                     strokeWidth: 4.5,
                     strokeCap: StrokeCap.round,
