@@ -79,6 +79,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   LatLng? _origin;
   LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
   StreamSubscription<Position>? _locationSub;
+
+  // 마지막으로 페치한 3경로 전체 — 카드 전환 시 maneuvers 참조용
+  List<RouteResult> _fetchedRoutes = const [];
+  // 선택된 경로의 턴바이턴 maneuvers — NavScreen 으로 전달
+  List<ManeuverStep> _selectedManeuvers = const [];
   double _currentZoom = 11.0;
 
   // Course sheet
@@ -353,7 +358,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         windingScore: scores[i].funScoreV2,
       )));
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
-      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
+      final selIdx = idx.clamp(0, routes.length - 1);
+      notifier.setRoutePolyline(routes[selIdx].points);
+      if (mounted) {
+        setState(() {
+          _fetchedRoutes = routes;
+          _selectedManeuvers = routes[selIdx].maneuvers;
+        });
+      }
     } on RoutingException catch (e) {
       if (mounted) _showRoutingError(e, origin, dest);
     } finally {
@@ -411,6 +423,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           destination: dest,
           waypoints: state.waypoints,
           routePolyline: state.routePolyline,
+          maneuvers: _selectedManeuvers,
         ),
       ),
     );
@@ -423,8 +436,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final allRoutes = state.allRoutes;
     if (allRoutes.isNotEmpty) {
       // 이미 페치된 경로 즉시 사용 — Valhalla 재호출 없음
-      ref.read(mapInteractionProvider.notifier)
-          .setRoutePolyline(allRoutes[idx.clamp(0, allRoutes.length - 1)]);
+      final selIdx = idx.clamp(0, allRoutes.length - 1);
+      ref.read(mapInteractionProvider.notifier).setRoutePolyline(allRoutes[selIdx]);
+      // 카드 전환 시 maneuvers도 선택된 경로로 동기화
+      if (selIdx < _fetchedRoutes.length) {
+        setState(() => _selectedManeuvers = _fetchedRoutes[selIdx].maneuvers);
+      }
       return;
     }
 

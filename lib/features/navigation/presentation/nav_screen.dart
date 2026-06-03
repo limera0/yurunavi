@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
@@ -20,12 +21,14 @@ class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
   final List<LatLng> routePolyline;
+  final List<ManeuverStep> maneuvers;
 
   const NavScreen({
     super.key,
     this.destination,
     this.waypoints = const [],
     this.routePolyline = const [],
+    this.maneuvers = const [],
   });
 
   @override
@@ -48,13 +51,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kBufSize = 3; // 이동평균 샘플 수
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
 
-  // Turn-by-turn demo steps
-  final List<_TurnStep> _steps = const [
-    _TurnStep(Icons.turn_right_rounded, '17m 후 우회전', '300m'),
-    _TurnStep(Icons.straight_rounded,   '직진',         '1.2km'),
-    _TurnStep(Icons.turn_left_rounded,  '좌회전',       '500m'),
-    _TurnStep(Icons.flag_rounded,       '목적지 도착',  ''),
-  ];
+  late final List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
 
   late final AnimationController _pulseCtrl;
@@ -92,6 +89,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.06).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
+    // Valhalla maneuvers → _TurnStep 변환 (없으면 더미 폴백)
+    _steps = widget.maneuvers.isNotEmpty
+        ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
+        : const [
+            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', ''),
+            _TurnStep(Icons.straight_rounded,   '직진',         ''),
+            _TurnStep(Icons.flag_rounded,        '목적지 도착',  ''),
+          ];
     if (widget.destination == null) {
       // 목적지 없이 진입하면 즉시 빠져나간다
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -551,4 +556,56 @@ class _TurnStep {
   final String label;
   final String dist;
   const _TurnStep(this.icon, this.label, this.dist);
+
+  factory _TurnStep.fromManeuver(ManeuverStep m) {
+    return _TurnStep(
+      _iconForType(m.type),
+      _labelForType(m.type),
+      _formatDist(m.distanceKm),
+    );
+  }
+
+  static IconData _iconForType(int type) {
+    switch (type) {
+      case 1: case 2: case 3: return Icons.play_arrow_rounded;
+      case 4: case 5: case 6: return Icons.flag_rounded;
+      case 8: return Icons.straight_rounded;
+      case 9: case 17: return Icons.turn_slight_right;
+      case 10: case 25: return Icons.turn_right_rounded;
+      case 11: return Icons.turn_right_rounded; // sharp right
+      case 12: case 13: return Icons.u_turn_right_rounded;
+      case 14: return Icons.turn_left_rounded;  // sharp left
+      case 15: case 26: return Icons.turn_left_rounded;
+      case 16: case 18: return Icons.turn_slight_left;
+      default: return Icons.straight_rounded;
+    }
+  }
+
+  static String _labelForType(int type) {
+    switch (type) {
+      case 1: case 2: case 3: return '출발';
+      case 4: case 5: case 6: return '목적지 도착';
+      case 7: return '도로명 변경';
+      case 8: return '직진';
+      case 9: return '약간 우회전';
+      case 10: return '우회전';
+      case 11: return '급우회전';
+      case 12: case 13: return '유턴';
+      case 14: return '급좌회전';
+      case 15: return '좌회전';
+      case 16: return '약간 좌회전';
+      case 17: return '진출로 직진';
+      case 25: return '진출로 우측';
+      case 26: return '진출로 좌측';
+      case 27: return '우측 출구';
+      case 28: return '좌측 출구';
+      default: return '직진';
+    }
+  }
+
+  static String _formatDist(double km) {
+    if (km <= 0) return '';
+    if (km < 1.0) return '${(km * 1000).round()}m';
+    return '${km.toStringAsFixed(1)}km';
+  }
 }

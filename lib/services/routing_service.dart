@@ -27,17 +27,34 @@ class RoutingException implements Exception {
       'RoutingException(${type.name}${detail != null ? ': $detail' : ''})';
 }
 
+/// Valhalla maneuver 한 단계 (턴바이턴).
+class ManeuverStep {
+  /// Valhalla maneuver type integer (e.g. 10=우회전, 15=좌회전, 4=도착).
+  final int type;
+  /// Valhalla가 반환한 영문 instruction.
+  final String instruction;
+  /// 이 구간 거리 (km).
+  final double distanceKm;
+  const ManeuverStep({
+    required this.type,
+    required this.instruction,
+    required this.distanceKm,
+  });
+}
+
 /// Valhalla 라우팅 결과 단위.
 class RouteResult {
   final List<LatLng> points;
   final double distanceKm;
   final int durationMin; // round(distance / realistic_speed_kmh * 60)
   final double windingScore; // 0~100 from NativeEngine.calcWindingScore
+  final List<ManeuverStep> maneuvers; // Valhalla 턴바이턴 단계
   const RouteResult({
     required this.points,
     required this.distanceKm,
     required this.durationMin,
     this.windingScore = 0.0,
+    this.maneuvers = const [],
   });
 }
 
@@ -257,10 +274,23 @@ class RoutingService {
       );
       final realisticMins = (km / _courseSpeeds[i] * 60).round();
 
+      // maneuvers 수집 — 전 leg 이어붙임
+      final maneuvers = <ManeuverStep>[];
+      for (final leg in legs) {
+        for (final m in (leg['maneuvers'] as List? ?? [])) {
+          maneuvers.add(ManeuverStep(
+            type: (m['type'] as num?)?.toInt() ?? 0,
+            instruction: (m['instruction'] as String?) ?? '',
+            distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
+          ));
+        }
+      }
+
       dev.log(
         'Valhalla [${_courseNames[i]}] ${pts.length}pts '
         '${km.toStringAsFixed(1)}km '
-        'realisticMin=$realisticMins (${_courseSpeeds[i].toStringAsFixed(0)}km/h)',
+        'realisticMin=$realisticMins (${_courseSpeeds[i].toStringAsFixed(0)}km/h) '
+        'maneuvers=${maneuvers.length}',
         name: 'RoutingService',
       );
 
@@ -268,6 +298,7 @@ class RoutingService {
         points: pts,
         distanceKm: km,
         durationMin: realisticMins,
+        maneuvers: maneuvers,
       ));
     }
     return results;
