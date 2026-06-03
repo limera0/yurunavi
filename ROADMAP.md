@@ -1,0 +1,11 @@
+# 유루나비 ROADMAP — 위에서부터 처리. 완료 시 [x]로 바꾼다.
+- [ ] 1. trace_attributes로 avg_fc 계산 → Rust /calc_route 응답에 fun_score_v2 포함 → Flutter route card가 windingScore 대신 fun_score 표시 (night9 추천사항)
+- [ ] 2. 자전거전용/하천공원도로 하드배제 필터 검증·강화 + 테스트 (핵심가치: 네이버 자전거길에서 차량진입금지 길 빼기)
+- [ ] 3. fun_score에 교통량 대리지표(lanes/maxspeed) 항 추가 + 테스트
+- [ ] 4. fun_score에 숲 근접도(landuse=forest/natural=wood) 항 추가 — OSM 폴리곤 인덱스 전처리 포함 (큰 작업, 안전히 하위분할)
+- [ ] 5. 다중 코스 비교 UI: 3경로를 한 화면에서 거리/시간/재미점수로 비교
+- [ ] 6. 지도 한 지점 터치 → 출발/도착/경유지 설정 → 코스 재검색 UI
+- [ ] 7. validate_rural_route.py를 동탄 외 3개 지역(서울 강남, 대전, 부산)으로 확장해 도심관통 회귀 자동검출
+- [ ] 8. 경로 검색 결과 캐싱(같은 출발-도착 재호출 시 Valhalla 부하 감소)
+- [ ] 9. 에러 핸들링: Valhalla/Rust 서버 다운 시 사용자에게 보이는 graceful 메시지 + 재시도
+- [ ] 10. 통합 점검: flutter analyze + 전체 cargo test + validate 스크립트를 한 번에 돌리는 scripts/check_all.sh 작성
