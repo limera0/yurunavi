@@ -1,7 +1,7 @@
 mod api;
 use api::{
     calc_tortuosity, calc_winding_score, check_destination_reachable,
-    check_gps_accuracy, check_route_similarity, fun_score_v2, is_off_route,
+    check_gps_accuracy, check_route_similarity, fun_score_v2, fun_score_v3, is_off_route,
     GpsPoint, GpsQuality, WindingScore,
 };
 
@@ -115,8 +115,24 @@ fn weighted_avg_fc(ta_resp: &serde_json::Value) -> f64 {
     if total_len > 0.0 { weighted / total_len } else { 3.0 }
 }
 
-async fn trace_attributes_fc(client: &reqwest::Client, pts: &[GpsPointDto]) -> f64 {
-    if pts.is_empty() { return 3.0; }
+fn weighted_avg_speed(ta_resp: &serde_json::Value) -> f64 {
+    let edges = match ta_resp["edges"].as_array() {
+        Some(e) => e,
+        None => return 50.0,
+    };
+    let mut total_len = 0.0_f64;
+    let mut weighted = 0.0_f64;
+    for edge in edges {
+        let speed = edge["speed"].as_f64().unwrap_or(50.0);
+        let len   = edge["length"].as_f64().unwrap_or(0.1);
+        weighted += speed * len;
+        total_len += len;
+    }
+    if total_len > 0.0 { weighted / total_len } else { 50.0 }
+}
+
+async fn trace_attributes_fc(client: &reqwest::Client, pts: &[GpsPointDto]) -> (f64, f64) {
+    if pts.is_empty() { return (3.0, 50.0); }
     let step = (pts.len() / 80).max(1);
     let shape: Vec<serde_json::Value> = pts.iter().step_by(step)
         .map(|p| serde_json::json!({"lat": p.lat, "lon": p.lng}))
@@ -126,7 +142,7 @@ async fn trace_attributes_fc(client: &reqwest::Client, pts: &[GpsPointDto]) -> f
         "costing": "motorcycle",
         "shape_match": "map_snap",
         "filters": {
-            "attributes": ["edge.road_class", "edge.length"],
+            "attributes": ["edge.road_class", "edge.length", "edge.speed"],
             "action": "include"
         }
     });
@@ -137,9 +153,9 @@ async fn trace_attributes_fc(client: &reqwest::Client, pts: &[GpsPointDto]) -> f
         .await
     {
         Ok(r) => r.json().await.unwrap_or_default(),
-        Err(_) => return 3.0,
+        Err(_) => return (3.0, 50.0),
     };
-    weighted_avg_fc(&ta_resp)
+    (weighted_avg_fc(&ta_resp), weighted_avg_speed(&ta_resp))
 }
 
 // ── /calc_route ────────────────────────────────────────────────
@@ -160,8 +176,10 @@ struct CalcRouteResp {
     total_distance_m: f64,
     winding_score: f64,
     road_type: String,
-    fun_score_v2: f64,  // NEW: curvature 60% + FC road class 40%
-    avg_fc: f64,        // NEW: Valhalla Functional Class average (1.0-5.0)
+    fun_score_v2: f64,    // curvature 60% + FC road class 40%
+    avg_fc: f64,          // Valhalla Functional Class average (1.0-5.0)
+    avg_speed_kmh: f64,   // edge speed weighted average (km/h)
+    fun_score_v3: f64,    // curvature 50% + FC 30% + traffic(speed) 20%
 }
 
 #[derive(Deserialize)]
@@ -172,7 +190,9 @@ struct ScoreRouteReq {
 #[derive(Serialize)]
 struct ScoreRouteResp {
     fun_score_v2: f64,
+    fun_score_v3: f64,
     avg_fc: f64,
+    avg_speed_kmh: f64,
     curvature_tau: f64,
 }
 
@@ -272,8 +292,9 @@ async fn handle_calc_route(
         WindingScore { score: 0.0, road_type: "national".to_string() }
     };
 
-    let avg_fc = trace_attributes_fc(client, &pts).await;
+    let (avg_fc, avg_speed) = trace_attributes_fc(client, &pts).await;
     let f_score_v2 = fun_score_v2(&api_pts, avg_fc);
+    let f_score_v3 = fun_score_v3(&api_pts, avg_fc, avg_speed);
 
     Ok(Json(CalcRouteResp {
         points: pts,
@@ -282,6 +303,8 @@ async fn handle_calc_route(
         road_type: winding.road_type,
         fun_score_v2: f_score_v2,
         avg_fc,
+        avg_speed_kmh: avg_speed,
+        fun_score_v3: f_score_v3,
     }))
 }
 
@@ -291,7 +314,7 @@ async fn handle_score_route(
     Json(req): Json<ScoreRouteReq>,
 ) -> Json<ScoreRouteResp> {
     let client = http_client();
-    let avg_fc = trace_attributes_fc(client, &req.points).await;
+    let (avg_fc, avg_speed) = trace_attributes_fc(client, &req.points).await;
     let api_pts: Vec<GpsPoint> = req.points.iter()
         .map(|p| GpsPoint { lat: p.lat, lng: p.lng })
         .collect();
@@ -300,12 +323,23 @@ async fn handle_score_route(
     } else {
         0.0
     };
+    let f_score_v3 = if api_pts.len() >= 2 {
+        fun_score_v3(&api_pts, avg_fc, avg_speed)
+    } else {
+        0.0
+    };
     let tau = if api_pts.len() >= 2 {
         calc_tortuosity(&api_pts)
     } else {
         1.0
     };
-    Json(ScoreRouteResp { fun_score_v2: f_score_v2, avg_fc, curvature_tau: tau })
+    Json(ScoreRouteResp {
+        fun_score_v2: f_score_v2,
+        fun_score_v3: f_score_v3,
+        avg_fc,
+        avg_speed_kmh: avg_speed,
+        curvature_tau: tau,
+    })
 }
 
 // ── /calc_winding_score ────────────────────────────────────────

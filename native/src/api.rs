@@ -264,6 +264,25 @@ pub fn rank_candidates_v2(routes: Vec<(Vec<GpsPoint>, f64)>) -> Vec<RouteRank> {
     ranks
 }
 
+/// 교통량 대리지표: 도로 제한속도 기반 재미 점수 (0~100).
+///
+/// 낮은 속도 = 좁고 조용한 도로 = 높은 재미.
+/// 20km/h → 100pts, 50km/h → 50pts, ≥80km/h → 0pts.
+pub fn traffic_score(avg_speed_kmh: f64) -> f64 {
+    let clamped = avg_speed_kmh.clamp(20.0, 80.0);
+    (80.0 - clamped) / 60.0 * 100.0
+}
+
+/// Fun-road 점수 v3 — 곡률(τ) 50% + 도로등급(FC) 30% + 교통량(speed) 20%.
+///
+/// avg_speed_kmh: trace_attributes 에서 취득한 엣지 속도 가중평균 (km/h).
+pub fn fun_score_v3(route: &[GpsPoint], avg_fc: f64, avg_speed_kmh: f64) -> f64 {
+    let tau_score     = fun_score_v1(route);
+    let fc_score      = road_class_score(avg_fc);
+    let t_score       = traffic_score(avg_speed_kmh);
+    (0.5 * tau_score + 0.3 * fc_score + 0.2 * t_score).clamp(0.0, 100.0)
+}
+
 // ── 경로 계산 (Flutter → Rust 진입점) ────────────────────────────
 
 /// Flutter에서 호출하는 실제 경로 계산 함수.
@@ -833,5 +852,49 @@ mod tests {
         assert_eq!(ranks[0].original_index, 1,
             "굽이진 시골길(인덱스 1)이 1위여야 함");
         assert!(ranks[0].fun_score > ranks[1].fun_score);
+    }
+
+    #[test]
+    fn traffic_score_slow_road_is_high() {
+        let s = traffic_score(20.0);
+        assert!((s - 100.0).abs() < 0.01, "20km/h should be 100pts, got {s}");
+    }
+
+    #[test]
+    fn traffic_score_fast_road_is_zero() {
+        let s = traffic_score(80.0);
+        assert!(s.abs() < 0.01, "80km/h should be 0pts, got {s}");
+    }
+
+    #[test]
+    fn fun_score_v3_rural_quiet_beats_national_fast() {
+        let winding: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let straight: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let rural    = fun_score_v3(&winding, 5.0, 25.0); // FC5, 25km/h
+        let national = fun_score_v3(&straight, 2.0, 70.0); // FC2, 70km/h
+        assert!(rural > national,
+            "시골길(v3)={rural:.1} should beat 국도(v3)={national:.1}");
+    }
+
+    #[test]
+    fn fun_score_v3_speed_bonus_differentiates_same_route() {
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        // 같은 경로라도 낮은 속도 도로가 높은 점수여야 함
+        let slow = fun_score_v3(&route, 3.0, 20.0);
+        let fast = fun_score_v3(&route, 3.0, 70.0);
+        assert!(slow > fast,
+            "같은 경로: slow(20km/h)={slow:.1} > fast(70km/h)={fast:.1} 기대");
     }
 }
