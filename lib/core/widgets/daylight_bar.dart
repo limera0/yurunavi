@@ -4,18 +4,21 @@ import '../theme/app_theme.dart';
 
 /// 우측 세로 Daylight 인디케이터 — 메인 화면과 내비 화면 모두 이 위젯을 사용한다.
 ///
-/// 낮(Brightness.light) : 흰 컨테이너, 태양(황금)→달(남색) 그라디언트, 주황 핸들
-/// 밤/라이더(Brightness.dark): 어두운 컨테이너, 남색→하늘 그라디언트, 청색 핸들
+/// isNightMode=false (낮): 상단=해 아이콘, 하단=달 아이콘
+/// isNightMode=true  (밤): 상단=달 아이콘, 하단=해 아이콘
+/// isNightMode=null  : 테마 밝기로 자동 결정 (기존 동작 유지)
 class DaylightBar extends StatelessWidget {
-  final double progress; // 0.0(BMNT) ~ 1.0(EENT)
+  final double progress; // 0.0(구간 시작) ~ 1.0(구간 끝)
   final String sunriseLabel;
   final String sunsetLabel;
+  final bool? isNightMode; // null=테마 자동, true=밤, false=낮
 
   const DaylightBar({
     super.key,
     required this.progress,
     required this.sunriseLabel,
     required this.sunsetLabel,
+    this.isNightMode,
   });
 
   factory DaylightBar.legacy({
@@ -34,7 +37,7 @@ class DaylightBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final isNight = cs.brightness == Brightness.dark;
+    final isNight = isNightMode ?? (cs.brightness == Brightness.dark);
 
     final containerBg = isNight
         ? cs.surface.withValues(alpha: 0.95)

@@ -198,15 +198,28 @@ final clockTickProvider = StreamProvider<DateTime>((ref) async* {
 
 // ── Daylight ──────────────────────────────────────────────────────────────────
 
-final daylightProgressProvider = Provider<double>((ref) {
-  ref.watch(clockTickProvider); // re-fire on tick
+/// API 원격 fetch 트리거 — 위치 변화 시 백그라운드로 nautical twilight 캐시
+final _daylightApiFetchProvider = Provider<void>((ref) {
   final loc = ref.watch(currentLocationProvider);
-  if (loc == null) return 0.5;
-  return DaylightService.daylightProgress(
+  if (loc == null) return;
+  final now = DateTime.now();
+  DaylightService.fetchRemote(loc.latitude, loc.longitude, now);
+});
+
+final daylightCycleProvider = Provider<DaylightCycleState?>((ref) {
+  ref.watch(clockTickProvider);
+  ref.watch(_daylightApiFetchProvider); // API 캐시 갱신 연동
+  final loc = ref.watch(currentLocationProvider);
+  if (loc == null) return null;
+  return DaylightService.cycleState(
     lat: loc.latitude,
     lng: loc.longitude,
     now: DateTime.now(),
   );
+});
+
+final daylightProgressProvider = Provider<double>((ref) {
+  return ref.watch(daylightCycleProvider)?.progress ?? 0.5;
 });
 
 final daylightTimesProvider =
@@ -221,10 +234,15 @@ final daylightTimesProvider =
   );
 });
 
+/// 현재 낮/밤 여부 — DaylightBar isNightMode 연동
+final isDayProvider = Provider<bool>((ref) {
+  return ref.watch(daylightCycleProvider)?.isDay ?? true;
+});
+
 // ── Night mode (auto-detect via BMNT/EENT) ────────────────────────────────────
 
-/// Always false — night mode disabled, hardwired to daytime.
-final isNightProvider = Provider<bool>((ref) => false);
+/// 현재 밤 여부 — isDayProvider 의 역수. 야간 UI 연동 시 사용.
+final isNightProvider = Provider<bool>((ref) => !ref.watch(isDayProvider));
 
 // ── POI ───────────────────────────────────────────────────────────────────────
 

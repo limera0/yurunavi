@@ -316,8 +316,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   @override
   Widget build(BuildContext context) {
     final step = _steps[_stepIdx];
-    final daylightProgress = ref.watch(daylightProgressProvider);
-    final daylightTimes = ref.watch(daylightTimesProvider);
+    final daylightCycle = ref.watch(daylightCycleProvider);
+    final daylightProgress = daylightCycle?.progress ?? 0.5;
+    final isDay = daylightCycle?.isDay ?? true;
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
 
@@ -536,12 +537,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 Expanded(
                   child: DaylightBar(
                     progress: daylightProgress,
-                    sunriseLabel: daylightTimes != null
-                        ? DateFormat('HH:mm').format(daylightTimes.bmnt)
+                    sunriseLabel: daylightCycle != null
+                        ? DateFormat('HH:mm').format(daylightCycle.topTime)
                         : '--:--',
-                    sunsetLabel: daylightTimes != null
-                        ? DateFormat('HH:mm').format(daylightTimes.eent)
+                    sunsetLabel: daylightCycle != null
+                        ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
                         : '--:--',
+                    isNightMode: !isDay,
                   ),
                 ),
                 const SizedBox(height: 10),

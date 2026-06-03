@@ -1060,14 +1060,15 @@ class _RightPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final daylightProgress = ref.watch(daylightProgressProvider);
-    final daylightTimes = ref.watch(daylightTimesProvider);
+    final daylightCycle = ref.watch(daylightCycleProvider);
+    final daylightProgress = daylightCycle?.progress ?? 0.5;
+    final isDay = daylightCycle?.isDay ?? true;
 
-    final sunriseLabel = daylightTimes != null
-        ? DateFormat('HH:mm').format(daylightTimes.bmnt)
+    final topLabel = daylightCycle != null
+        ? DateFormat('HH:mm').format(daylightCycle.topTime)
         : '--:--';
-    final sunsetLabel = daylightTimes != null
-        ? DateFormat('HH:mm').format(daylightTimes.eent)
+    final bottomLabel = daylightCycle != null
+        ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
         : '--:--';
 
     // 코스 시트가 올라왔을 때 패널 하단 여유 조절
@@ -1083,8 +1084,9 @@ class _RightPanel extends ConsumerWidget {
           Flexible(
             child: DaylightBar(
               progress: daylightProgress,
-              sunriseLabel: sunriseLabel,
-              sunsetLabel: sunsetLabel,
+              sunriseLabel: topLabel,
+              sunsetLabel: bottomLabel,
+              isNightMode: !isDay,
             ),
           ),
 
