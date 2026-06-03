@@ -283,6 +283,29 @@ pub fn fun_score_v3(route: &[GpsPoint], avg_fc: f64, avg_speed_kmh: f64) -> f64 
     (0.5 * tau_score + 0.3 * fc_score + 0.2 * t_score).clamp(0.0, 100.0)
 }
 
+/// 숲 근접도 점수 (0~100).
+/// forest_proximity: 0.0 = 숲 없음, 1.0 = 경로 전체가 숲 속.
+/// OSM landuse=forest / natural=wood 폴리곤으로부터 전처리 필요.
+pub fn forest_score(forest_proximity: f64) -> f64 {
+    forest_proximity.clamp(0.0, 1.0) * 100.0
+}
+
+/// Fun-road 점수 v4 — 4개 항 합산.
+/// 가중치: τ×40% + FC×25% + speed×15% + forest×20%.
+/// forest_proximity: 0.0~1.0 (OSM 전처리 인덱스에서 취득).
+pub fn fun_score_v4(
+    route: &[GpsPoint],
+    avg_fc: f64,
+    avg_speed_kmh: f64,
+    forest_proximity: f64,
+) -> f64 {
+    let tau_score = fun_score_v1(route);
+    let fc_s      = road_class_score(avg_fc);
+    let t_s       = traffic_score(avg_speed_kmh);
+    let f_s       = forest_score(forest_proximity);
+    (0.40 * tau_score + 0.25 * fc_s + 0.15 * t_s + 0.20 * f_s).clamp(0.0, 100.0)
+}
+
 // ── 경로 계산 (Flutter → Rust 진입점) ────────────────────────────
 
 /// Flutter에서 호출하는 실제 경로 계산 함수.
@@ -896,5 +919,49 @@ mod tests {
         let fast = fun_score_v3(&route, 3.0, 70.0);
         assert!(slow > fast,
             "같은 경로: slow(20km/h)={slow:.1} > fast(70km/h)={fast:.1} 기대");
+    }
+
+    #[test]
+    fn forest_score_no_forest_is_zero() {
+        assert!(forest_score(0.0).abs() < 0.01, "forest=0 should be 0pts");
+    }
+
+    #[test]
+    fn forest_score_full_forest_is_hundred() {
+        assert!((forest_score(1.0) - 100.0).abs() < 0.01, "forest=1 should be 100pts");
+    }
+
+    #[test]
+    fn fun_score_v4_forest_route_beats_open() {
+        let route: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let forested = fun_score_v4(&route, 4.0, 30.0, 1.0);
+        let open     = fun_score_v4(&route, 4.0, 30.0, 0.0);
+        assert!(forested > open,
+            "숲속 경로={forested:.1} > 개활지={open:.1} 기대");
+    }
+
+    #[test]
+    fn fun_score_v4_all_terms_contribute() {
+        // 시골길: 굽이+FC5+저속+숲 → 높은 점수
+        let winding: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let rural = fun_score_v4(&winding, 5.0, 25.0, 0.8);
+        // 국도: 직선+FC2+고속+숲없음 → 낮은 점수
+        let straight: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let national = fun_score_v4(&straight, 2.0, 70.0, 0.0);
+        assert!(rural > national,
+            "시골숲길 v4={rural:.1} > 국도 v4={national:.1} 기대");
+        assert!(rural > 50.0, "시골숲길 점수가 50점 이상이어야 함, 실제: {rural:.1}");
     }
 }
