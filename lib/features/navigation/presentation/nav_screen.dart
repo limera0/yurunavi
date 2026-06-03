@@ -194,6 +194,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
     });
 
+    // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
+    if (pos.heading >= 0 && _speedKmh > 2.0) {
+      _mapCtrl.rotate(-pos.heading); // north-up 기준 counter-clockwise 보정
+    }
+
     _checkArrival(loc);
     if (!_arrived && _routePoints.length >= 2) _checkOffRoute(loc);
   }
