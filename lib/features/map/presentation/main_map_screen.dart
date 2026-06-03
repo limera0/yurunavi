@@ -277,12 +277,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      notifier.setAllRouteMeta(routes.asMap().entries.map((e) {
-        final r = e.value;
-        final pts = r.points.map((p) => GpsPoint(p.latitude, p.longitude)).toList();
-        final ws = NativeEngine.calcWindingScore(pts);
-        return (km: r.distanceKm, mins: r.durationMin, windingScore: ws.score);
-      }).toList());
+      final scores = await Future.wait(
+        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
+      );
+      notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
+        km: routes[i].distanceKm,
+        mins: routes[i].durationMin,
+        windingScore: scores[i].funScoreV2,
+      )));
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
       notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
@@ -352,12 +354,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      notifier.setAllRouteMeta(routes.asMap().entries.map((e) {
-        final r = e.value;
-        final pts = r.points.map((p) => GpsPoint(p.latitude, p.longitude)).toList();
-        final ws = NativeEngine.calcWindingScore(pts);
-        return (km: r.distanceKm, mins: r.durationMin, windingScore: ws.score);
-      }).toList());
+      final scores = await Future.wait(
+        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
+      );
+      notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
+        km: routes[i].distanceKm,
+        mins: routes[i].durationMin,
+        windingScore: scores[i].funScoreV2,
+      )));
       notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
       if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);

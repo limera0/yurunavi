@@ -48,6 +48,17 @@ class ReachabilityResult {
   const ReachabilityResult({required this.isReachable, required this.reason});
 }
 
+class FunScoreResult {
+  final double funScoreV2;
+  final double avgFc;
+  final double curvatureTau;
+  const FunScoreResult({
+    required this.funScoreV2,
+    required this.avgFc,
+    required this.curvatureTau,
+  });
+}
+
 /// Rust native engine의 Dart fallback 구현.
 ///
 /// flutter_rust_bridge codegen 완료 후 native 바인딩으로 교체 가능.
@@ -217,6 +228,40 @@ class NativeEngine {
       waypoints: waypoints,
       routeType: routeType,
     );
+  }
+
+  /// Rust /score_route でtrace_attributesからfun_score_v2を計算する.
+  /// Rustサーバーが落ちていた場合はcalcWindingScoreにfallback.
+  static Future<FunScoreResult> scoreFunV2(List<LatLng> points) async {
+    try {
+      final body = jsonEncode({
+        'points': points
+            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+            .toList(),
+      });
+      final resp = await http
+          .post(
+            Uri.parse('$_rustBase/score_route'),
+            headers: {'Content-Type': 'application/json'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (resp.statusCode == 200) {
+        final d = jsonDecode(resp.body) as Map<String, dynamic>;
+        return FunScoreResult(
+          funScoreV2: (d['fun_score_v2'] as num?)?.toDouble() ?? 0.0,
+          avgFc: (d['avg_fc'] as num?)?.toDouble() ?? 3.0,
+          curvatureTau: (d['curvature_tau'] as num?)?.toDouble() ?? 1.0,
+        );
+      }
+    } catch (e) {
+      dev.log('scoreFunV2 failed: $e', name: 'NativeEngine');
+    }
+    // Fallback: use local winding score
+    final ws = calcWindingScore(
+        points.map((p) => GpsPoint(p.latitude, p.longitude)).toList());
+    return FunScoreResult(
+        funScoreV2: ws.score, avgFc: 3.0, curvatureTau: 1.0);
   }
 
   // ── 경로 생성 ─────────────────────────────────────────────────
