@@ -12,6 +12,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
+import '../../../models/saved_place.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/map_cache_provider.dart';
 import '../../../services/native_engine.dart';
@@ -402,6 +403,34 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     );
   }
 
+  // ── 내 장소 (즐겨찾기 + 최근 경로) ─────────────────────────────────────────
+
+  void _showPlacesSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _PlacesSheet(
+        onSelectDest: (lat, lng) {
+          Navigator.pop(ctx);
+          _applyDestination(LatLng(lat, lng));
+        },
+        onAddFavorite: (lat, lng, name) async {
+          await ref.read(favoritePlacesProvider.notifier).add(
+                FavoritePlace(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  name: name,
+                  lat: lat,
+                  lng: lng,
+                ),
+              );
+        },
+        onRemoveFavorite: (id) =>
+            ref.read(favoritePlacesProvider.notifier).remove(id),
+      ),
+    );
+  }
+
   void _clearDestination() {
     ref.read(mapInteractionProvider.notifier).reset();
     ref.read(poiListProvider.notifier).clear();
@@ -417,6 +446,18 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final state = ref.read(mapInteractionProvider);
     final dest = state.destination;
     if (dest == null) return;
+    final origin = _origin;
+    // 최근 경로 저장
+    if (origin != null) {
+      ref.read(recentRoutesProvider.notifier).add(RecentRoute(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            originLat: origin.latitude,
+            originLng: origin.longitude,
+            destLat: dest.latitude,
+            destLng: dest.longitude,
+            at: DateTime.now(),
+          ));
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavScreen(
@@ -758,7 +799,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     ref.read(riderModeProvider.notifier).toggle(),
                 onCourseRegister: () {},
                 onTourSummary: () {},
-                onSavedCourses: () {},
+                onSavedCourses: _showPlacesSheet,
                 onSettings: () {},
               ),
             ),
@@ -1659,4 +1700,120 @@ class _ClusterDot extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 내 장소 시트 (즐겨찾기 + 최근 경로)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PlacesSheet extends ConsumerWidget {
+  final void Function(double lat, double lng) onSelectDest;
+  final Future<void> Function(double lat, double lng, String name) onAddFavorite;
+  final void Function(String id) onRemoveFavorite;
+
+  const _PlacesSheet({
+    required this.onSelectDest,
+    required this.onAddFavorite,
+    required this.onRemoveFavorite,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final favAsync = ref.watch(favoritePlacesProvider);
+    final recentAsync = ref.watch(recentRoutesProvider);
+
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // ── 즐겨찾기 ────────────────────────────────────────────────────
+              const Text('즐겨찾기',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              favAsync.when(
+                data: (favs) => favs.isEmpty
+                    ? const Text('저장된 장소 없음',
+                        style: TextStyle(fontSize: 12, color: Colors.grey))
+                    : Column(
+                        children: favs.map((p) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.place_rounded,
+                              color: AppColors.primary, size: 22),
+                          title: Text(p.name,
+                              style: const TextStyle(fontSize: 14)),
+                          subtitle: Text(
+                              '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}',
+                              style: const TextStyle(fontSize: 10)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            onPressed: () => onRemoveFavorite(p.id),
+                          ),
+                          onTap: () => onSelectDest(p.lat, p.lng),
+                        )).toList(),
+                      ),
+                loading: () => const LinearProgressIndicator(),
+                error: (e, _) =>
+                    const Text('불러오기 실패', style: TextStyle(color: Colors.red)),
+              ),
+
+              const Divider(),
+
+              // ── 최근 경로 ─────────────────────────────────────────────────────
+              const Text('최근 경로',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              recentAsync.when(
+                data: (recents) => recents.isEmpty
+                    ? const Text('최근 경로 없음',
+                        style: TextStyle(fontSize: 12, color: Colors.grey))
+                    : Column(
+                        children: recents.map((r) {
+                          final date = '${r.at.month}/${r.at.day} ${r.at.hour.toString().padLeft(2,'0')}:${r.at.minute.toString().padLeft(2,'0')}';
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.history_rounded,
+                                color: AppColors.secondary, size: 22),
+                            title: Text(
+                              '→ ${r.destLat.toStringAsFixed(3)}, ${r.destLng.toStringAsFixed(3)}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            subtitle: Text(date,
+                                style: const TextStyle(fontSize: 10)),
+                            onTap: () => onSelectDest(r.destLat, r.destLng),
+                          );
+                        }).toList(),
+                      ),
+                loading: () => const LinearProgressIndicator(),
+                error: (e, _) =>
+                    const Text('불러오기 실패', style: TextStyle(color: Colors.red)),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

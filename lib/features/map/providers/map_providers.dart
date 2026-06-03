@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../models/poi.dart';
+import '../../../models/saved_place.dart';
 import '../../../models/saved_route.dart';
 import '../../../models/user_profile.dart';
 import '../../../services/daylight_service.dart';
+import '../../../services/places_service.dart';
 import '../../../services/poi_service.dart';
 import '../../../services/profile_service.dart';
 import '../../../services/route_service.dart';
@@ -256,6 +258,45 @@ class _PoiListNotifier extends Notifier<List<Poi>> {
   List<Poi> build() => [];
   void set(List<Poi> pois) => state = pois;
   void clear() => state = [];
+}
+
+// ── Places (즐겨찾기 + 최근 경로) ────────────────────────────────────────────
+
+final placesServiceProvider = Provider((_) => PlacesService());
+
+final favoritePlacesProvider =
+    AsyncNotifierProvider<FavoritePlacesNotifier, List<FavoritePlace>>(
+        FavoritePlacesNotifier.new);
+
+class FavoritePlacesNotifier extends AsyncNotifier<List<FavoritePlace>> {
+  @override
+  Future<List<FavoritePlace>> build() =>
+      ref.read(placesServiceProvider).loadFavorites();
+
+  Future<void> add(FavoritePlace p) async {
+    await ref.read(placesServiceProvider).addFavorite(p);
+    ref.invalidateSelf();
+  }
+
+  Future<void> remove(String id) async {
+    await ref.read(placesServiceProvider).removeFavorite(id);
+    ref.invalidateSelf();
+  }
+}
+
+final recentRoutesProvider =
+    AsyncNotifierProvider<RecentRoutesNotifier, List<RecentRoute>>(
+        RecentRoutesNotifier.new);
+
+class RecentRoutesNotifier extends AsyncNotifier<List<RecentRoute>> {
+  @override
+  Future<List<RecentRoute>> build() =>
+      ref.read(placesServiceProvider).loadRecent();
+
+  Future<void> add(RecentRoute r) async {
+    await ref.read(placesServiceProvider).addRecent(r);
+    ref.invalidateSelf();
+  }
 }
 
 // ── Route type filter ─────────────────────────────────────────────────────────
