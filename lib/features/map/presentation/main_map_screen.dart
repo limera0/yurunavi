@@ -23,11 +23,9 @@ export 'main_map_screen.dart';
 
 enum _TapAction { destination, waypoint }
 
-/// Default *map framing* used before the first GPS fix arrives.
-/// This is the camera centre only — it is NOT treated as the rider's
-/// location: the origin marker, distance badge and tap-to-snap are all
-/// gated on a real GPS fix.
-const LatLng kInitialMapView = LatLng(37.5665, 126.9780);
+/// Last-resort map framing: first install + no last-known position.
+/// Camera only — never treated as the rider's location.
+const LatLng kInitialMapView = LatLng(36.5, 127.5); // 한국 지리 중심 (서울 아님)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid-based POI clustering
@@ -79,6 +77,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // Nullable until the device returns a real GPS fix — prevents the origin
   // marker / distance badge from rendering at a hardcoded mock location.
   LatLng? _origin;
+  LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
   StreamSubscription<Position>? _locationSub;
   double _currentZoom = 11.0;
 
@@ -127,6 +126,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         perm == LocationPermission.deniedForever) {
       return;
     }
+
+    // 캐시된 마지막 위치를 즉시 표시 — GPS 콜드스타트 대기 없이 지도 이동
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && mounted && _origin == null) {
+        final loc = LatLng(last.latitude, last.longitude);
+        setState(() => _lastKnown = loc);
+        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+      }
+    } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -528,7 +537,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           FlutterMap(
             mapController: _mapCtrl,
             options: MapOptions(
-              initialCenter: _origin ?? kInitialMapView,
+              initialCenter: _origin ?? _lastKnown ?? kInitialMapView,
               initialZoom: _currentZoom,
               // Disable rotation: lock North-up for motorcycle mount
               interactionOptions: const InteractionOptions(
