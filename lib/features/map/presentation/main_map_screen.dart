@@ -1243,6 +1243,10 @@ class _CourseSheet extends StatelessWidget {
                 // best fun score among loaded routes
                 final bestWs = routeMeta.isEmpty ? 0.0
                     : routeMeta.map((m) => m.windingScore).reduce((a, b) => a > b ? a : b);
+                final bestDist = routeMeta.isEmpty ? double.infinity
+                    : routeMeta.map((m) => m.km).reduce((a, b) => a < b ? a : b);
+                final bestTime = routeMeta.isEmpty ? double.infinity
+                    : routeMeta.map((m) => m.mins.toDouble()).reduce((a, b) => a < b ? a : b);
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -1255,6 +1259,8 @@ class _CourseSheet extends StatelessWidget {
                       duration: durStr,
                       windingScore: ws,
                       isBestFun: hasMeta && ws >= bestWs && ws > 0,
+                      isBestDist: hasMeta && distKm <= bestDist && distKm > 0,
+                      isBestTime: hasMeta && mins.toDouble() <= bestTime && mins > 0,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -1290,6 +1296,8 @@ class _RouteCard extends StatelessWidget {
   final String duration;
   final double windingScore;
   final bool isBestFun;
+  final bool isBestDist;
+  final bool isBestTime;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -1299,6 +1307,8 @@ class _RouteCard extends StatelessWidget {
     required this.duration,
     this.windingScore = 0.0,
     this.isBestFun = false,
+    this.isBestDist = false,
+    this.isBestTime = false,
     required this.isSelected,
     required this.onTap,
   });
@@ -1350,6 +1360,22 @@ class _RouteCard extends StatelessWidget {
                 fontSize: 15,
               ),
             ),
+            if (isBestDist || isBestTime)
+              Padding(
+                padding: const EdgeInsets.only(top: 3, bottom: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isBestDist)
+                      _CompChip(label: '최단', color: info.color),
+                    if (isBestDist && isBestTime)
+                      const SizedBox(width: 3),
+                    if (isBestTime)
+                      _CompChip(label: '최속', color: info.color),
+                  ],
+                ),
+              ),
             Text(
               duration,
               style: AppTextStyles.labelSM.copyWith(
@@ -1387,6 +1413,32 @@ class _RouteCard extends StatelessWidget {
   }
 }
 
+
+class _CompChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _CompChip({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Map markers
