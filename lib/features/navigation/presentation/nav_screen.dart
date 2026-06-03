@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' show sin, cos, sqrt, asin;
 
+import 'package:wakelock_plus/wakelock_plus.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -104,6 +106,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _routePoints = List<LatLng>.of(widget.routePolyline);
+    // 주행 중 화면 꺼짐 방지
+    WakelockPlus.enable();
     // Valhalla maneuvers → _TurnStep 변환 (없으면 더미 폴백)
     _steps = widget.maneuvers.isNotEmpty
         ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
@@ -132,6 +136,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl.dispose();
+    WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
   }
 
