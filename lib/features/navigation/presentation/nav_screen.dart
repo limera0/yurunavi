@@ -51,6 +51,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kBufSize = 3; // 이동평균 샘플 수
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
 
+  // 도착 감지
+  bool _arrived = false;
+  static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
+
   late final List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
 
@@ -164,6 +168,56 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _currentPos = loc;
       _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
     });
+
+    _checkArrival(loc);
+  }
+
+  void _checkArrival(LatLng loc) {
+    if (_arrived) return;
+    final dest = widget.destination;
+    if (dest == null) return;
+    if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
+      _arrived = true;
+      _showArrivalDialog();
+    }
+  }
+
+  double _distanceM(LatLng a, LatLng b) {
+    const r = 6371000.0;
+    const deg2rad = 0.017453292519943295;
+    final lat1 = a.latitude * deg2rad;
+    final lat2 = b.latitude * deg2rad;
+    final dLat = (b.latitude - a.latitude) * deg2rad;
+    final dLon = (b.longitude - a.longitude) * deg2rad;
+    final h = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2);
+    return 2 * r * asin(sqrt(h));
+  }
+
+  void _showArrivalDialog() {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.flag_rounded, color: Color(0xFF008080)),
+          SizedBox(width: 8),
+          Text('도착했습니다!'),
+        ]),
+        content: const Text('목적지에 도착했습니다.\n내비게이션을 종료합니다.'),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // 다이얼로그 닫기
+              if (mounted) Navigator.of(context).pop(); // 내비 화면 종료 → 홈
+            },
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _recenter(LatLng loc) => _mapCtrl.move(loc, 15.0);
