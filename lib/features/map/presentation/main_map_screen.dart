@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' show cos, sqrt, asin;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -80,6 +81,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   LatLng? _origin;
   LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
   StreamSubscription<Position>? _locationSub;
+
+  // 뒤로 연타 종료
+  DateTime? _lastBackPress;
 
   // 마지막으로 페치한 3경로 전체 — 카드 전환 시 maneuvers 참조용
   List<RouteResult> _fetchedRoutes = const [];
@@ -585,9 +589,27 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final destColor =
         riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination;
 
-    return Scaffold(
-      backgroundColor:
-          riderMode ? RiderModeColors.background : AppColors.background,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastBackPress != null &&
+            now.difference(_lastBackPress!) < const Duration(seconds: 2)) {
+          SystemNavigator.pop(); // Android 완전 종료
+          return;
+        }
+        _lastBackPress = now;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('뒤로 한 번 더 누르면 앱이 종료됩니다'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      },
+      child: Scaffold(
+        backgroundColor:
+            riderMode ? RiderModeColors.background : AppColors.background,
       body: Stack(
         children: [
           // ══════════════════════════════════════════════════════
@@ -922,7 +944,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             ),
         ],
       ),
-    );
+      ), // Scaffold
+    ); // PopScope
   }
 }
 
