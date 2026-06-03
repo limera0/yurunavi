@@ -225,6 +225,45 @@ pub fn rank_candidates(routes: Vec<Vec<GpsPoint>>) -> Vec<RouteRank> {
     ranks
 }
 
+/// FC1~FC5 도로 등급을 0~100 재미 점수로 변환.
+///
+/// - FC1 (motorway/고속) → 0점 (재미없음)
+/// - FC5 (tertiary/residential/소로) → 100점 (최고 재미)
+/// - avg_fc 범위: 1.0~5.0 (Valhalla Functional Class 평균)
+pub fn road_class_score(avg_fc: f64) -> f64 {
+    (avg_fc.clamp(1.0, 5.0) - 1.0) / 4.0 * 100.0
+}
+
+/// Fun-road 점수 v2 — 곡률(τ) 60% + 도로등급(FC) 40% 합산.
+///
+/// avg_fc: Valhalla FC 평균 (1.0=FC1 국도·고속, 5.0=FC5 소로·농도).
+/// 반환: 0.0~100.0.
+pub fn fun_score_v2(route: &[GpsPoint], avg_fc: f64) -> f64 {
+    let tau_score = fun_score_v1(route);
+    let fc_score  = road_class_score(avg_fc);
+    (0.6 * tau_score + 0.4 * fc_score).clamp(0.0, 100.0)
+}
+
+/// v2 후보 순위: (경로 포인트, Valhalla FC 평균) 쌍을 받아
+/// fun_score_v2 기준 내림차순 정렬.
+pub fn rank_candidates_v2(routes: Vec<(Vec<GpsPoint>, f64)>) -> Vec<RouteRank> {
+    let mut ranks: Vec<RouteRank> = routes
+        .iter()
+        .enumerate()
+        .map(|(i, (route, avg_fc))| RouteRank {
+            original_index: i,
+            fun_score: fun_score_v2(route, *avg_fc),
+            curvature_tau: calc_tortuosity(route),
+        })
+        .collect();
+    ranks.sort_by(|a, b| {
+        b.fun_score
+            .partial_cmp(&a.fun_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    ranks
+}
+
 // ── 경로 계산 (Flutter → Rust 진입점) ────────────────────────────
 
 /// Flutter에서 호출하는 실제 경로 계산 함수.
@@ -741,6 +780,58 @@ mod tests {
             .collect();
         let ranks = rank_candidates(vec![straight, winding]);
         assert_eq!(ranks[0].original_index, 1, "굽이길(인덱스 1)이 1위 예상");
+        assert!(ranks[0].fun_score > ranks[1].fun_score);
+    }
+
+    #[test]
+    fn road_class_score_fc1_is_zero() {
+        let s = road_class_score(1.0);
+        assert!(s.abs() < 0.01, "FC1 should be 0 pts, got {s}");
+    }
+
+    #[test]
+    fn road_class_score_fc5_is_hundred() {
+        let s = road_class_score(5.0);
+        assert!((s - 100.0).abs() < 0.01, "FC5 should be 100 pts, got {s}");
+    }
+
+    #[test]
+    fn fun_score_v2_rural_beats_national() {
+        let winding: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let straight: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let rural   = fun_score_v2(&winding, 5.0);
+        let national = fun_score_v2(&straight, 2.0);
+        assert!(rural > national,
+            "시골길 v2={rural:.1} should beat 국도 v2={national:.1}");
+    }
+
+    #[test]
+    fn rank_candidates_v2_rural_first() {
+        let straight: Vec<GpsPoint> = (0..10)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let winding: Vec<GpsPoint> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 40.0;
+                GpsPoint {
+                    lat: 37.0 + t * 0.1 + (t * std::f64::consts::PI * 6.0).sin() * 0.02,
+                    lng: 127.0 + t * 0.1,
+                }
+            })
+            .collect();
+        let ranks = rank_candidates_v2(vec![(straight, 2.0), (winding, 5.0)]);
+        assert_eq!(ranks[0].original_index, 1,
+            "굽이진 시골길(인덱스 1)이 1위여야 함");
         assert!(ranks[0].fun_score > ranks[1].fun_score);
     }
 }
