@@ -55,6 +55,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
 
+  // 속도 연동 줌
+  double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
+
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
   bool _isRerouting = false;
@@ -285,7 +288,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
-  void _recenter(LatLng loc) => _mapCtrl.move(loc, 15.0);
+  /// 속도→줌 선형 보간: 0 km/h→18, 20→16, 60+→14
+  double _zoomForSpeed(double kmh) {
+    if (kmh <= 20) return 18.0 - (kmh / 20.0) * 2.0;
+    if (kmh <= 60) return 16.0 - ((kmh - 20.0) / 40.0) * 2.0;
+    return 14.0;
+  }
+
+  void _recenter(LatLng loc) {
+    final target = _zoomForSpeed(_speedKmh);
+    // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
+    final diff = target - _navZoom;
+    _navZoom += diff.clamp(-0.5, 0.5);
+    _mapCtrl.move(loc, _navZoom);
+  }
 
   void _onMapGesture() {
     setState(() => _isManualMode = true);
