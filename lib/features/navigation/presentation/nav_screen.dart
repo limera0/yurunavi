@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' show sin, cos, sqrt, asin;
 
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
@@ -57,6 +58,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
 
+  // 음성 안내
+  FlutterTts? _tts;
+  int _lastAnnouncedIdx = -1; // 중복 발화 방지
+
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
 
@@ -108,6 +113,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _routePoints = List<LatLng>.of(widget.routePolyline);
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
+    // TTS 초기화 + 첫 안내
+    _initTts();
     // Valhalla maneuvers → _TurnStep 변환 (없으면 더미 폴백)
     _steps = widget.maneuvers.isNotEmpty
         ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
@@ -136,6 +143,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _mapCtrl.dispose();
+    _tts?.stop();
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
   }
@@ -243,6 +251,26 @@ class _NavScreenState extends ConsumerState<NavScreen>
     } finally {
       if (mounted) setState(() => _isRerouting = false);
     }
+  }
+
+  Future<void> _initTts() async {
+    _tts = FlutterTts();
+    await _tts!.setLanguage('ko-KR');
+    await _tts!.setSpeechRate(0.5);
+    await _tts!.setVolume(1.0);
+    // 첫 번째 안내 발화
+    _announceStep(0);
+  }
+
+  void _announceStep(int idx) {
+    if (idx < 0 || idx >= _steps.length) return;
+    if (idx == _lastAnnouncedIdx) return; // 중복 방지
+    _lastAnnouncedIdx = idx;
+    final step = _steps[idx];
+    final text = step.dist.isNotEmpty
+        ? '${step.dist} 앞 ${step.label}'
+        : step.label;
+    _tts?.speak(text);
   }
 
   void _checkArrival(LatLng loc) {
@@ -447,7 +475,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
               bottom: false,
               child: GestureDetector(
                 onTap: () {
-                  if (_stepIdx < _steps.length - 1) setState(() => _stepIdx++);
+                  if (_stepIdx < _steps.length - 1) {
+                    setState(() => _stepIdx++);
+                    _announceStep(_stepIdx);
+                  }
                 },
                 child: Container(
                   margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),

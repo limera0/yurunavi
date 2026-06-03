@@ -27,6 +27,7 @@ dependencies:
   path_provider: ^2.1.5
   connectivity_plus: ^6.1.4
   wakelock_plus: ^1.2.10
+  flutter_tts: ^4.2.0
 
 dev_dependencies:
   flutter_test:
