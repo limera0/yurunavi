@@ -333,15 +333,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         waypoints: state.waypoints,
       );
       if (!mounted) return;
-      if (routes.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('경로를 불러오지 못했습니다 — 잠시 후 다시 시도해주세요'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        return;
-      }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
       final scores = await Future.wait(
@@ -354,9 +345,40 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       )));
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
       notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
+    } on RoutingException catch (e) {
+      if (mounted) _showRoutingError(e, origin, dest);
     } finally {
       if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
     }
+  }
+
+  /// 라우팅 오류 유형별 메시지 + 재시도 버튼.
+  void _showRoutingError(RoutingException error, LatLng origin, LatLng dest) {
+    final String message;
+    final bool canRetry;
+    switch (error.type) {
+      case RoutingError.serverDown:
+        message = '라우팅 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.';
+        canRetry = true;
+      case RoutingError.serverError:
+        message = '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+        canRetry = true;
+      case RoutingError.noRoute:
+        message = '이 구간의 경로를 찾을 수 없습니다.';
+        canRetry = false;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: Duration(seconds: canRetry ? 8 : 4),
+        action: canRetry
+            ? SnackBarAction(
+                label: '다시 시도',
+                onPressed: () => _fetchAndStoreAllRoutes(origin, dest),
+              )
+            : null,
+      ),
+    );
   }
 
   void _clearDestination() {
@@ -402,37 +424,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final dest = state.destination;
     if (origin == null || dest == null) return;
 
-    ref.read(mapInteractionProvider.notifier).setLoading(true);
-    try {
-      final routes = await RoutingService.fetchRoutes(
-        origin: origin,
-        destination: dest,
-        waypoints: state.waypoints,
-      );
-      if (!mounted) return;
-      if (routes.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('경로를 불러오지 못했습니다 — 잠시 후 다시 시도해주세요'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        return;
-      }
-      final notifier = ref.read(mapInteractionProvider.notifier);
-      notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      final scores = await Future.wait(
-        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
-      );
-      notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
-        km: routes[i].distanceKm,
-        mins: routes[i].durationMin,
-        windingScore: scores[i].funScoreV2,
-      )));
-      notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
-    } finally {
-      if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
-    }
+    await _fetchAndStoreAllRoutes(origin, dest);
   }
 
   // ── Toasts / Dialogs ──────────────────────────────────────────────────────

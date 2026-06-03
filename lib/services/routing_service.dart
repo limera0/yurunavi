@@ -1,8 +1,31 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
 import 'dart:developer' as dev;
+import 'dart:io' show SocketException;
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+
+/// Routing error categories surfaced to the UI.
+enum RoutingError {
+  /// Network unreachable, DNS failure, connection refused, or timeout.
+  serverDown,
+  /// Server responded but could not find a valid route for this request.
+  noRoute,
+  /// Server responded with a non-200 HTTP status.
+  serverError,
+}
+
+/// Thrown by [RoutingService.fetchRoutes] on failure (replaces empty-list return).
+class RoutingException implements Exception {
+  final RoutingError type;
+  final String? detail;
+  const RoutingException(this.type, {this.detail});
+
+  @override
+  String toString() =>
+      'RoutingException(${type.name}${detail != null ? ': $detail' : ''})';
+}
 
 /// Valhalla 라우팅 결과 단위.
 class RouteResult {
@@ -22,7 +45,7 @@ class RouteResult {
 ///
 /// 코스 타입별로 Valhalla를 3회 병렬 호출하여 서로 다른 geometry를 유도한다.
 /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
-/// Valhalla 미응답 시 빈 리스트 반환 — 호출자가 처리.
+/// 실패 시 [RoutingException] throw — 호출자가 처리.
 class RoutingService {
   static const _valhallaBase = 'https://valhalla.westinx.com';
 
@@ -41,7 +64,7 @@ class RoutingService {
     _speedNationalKmh,
   ];
 
-  // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────
+  // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
   static const _cacheMaxSize = 20;
   static final Map<String, ({List<RouteResult> routes, DateTime at})> _cache = {};
@@ -59,6 +82,7 @@ class RoutingService {
 
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
+  /// 실패 시 [RoutingException] throw: serverDown(1회 자동 재시도), noRoute, serverError.
   static Future<List<RouteResult>> fetchRoutes({
     required LatLng origin,
     required LatLng destination,
@@ -132,83 +156,121 @@ class RoutingService {
       },
     ];
 
-    try {
-      // 3개 코스 병렬 요청
-      final futures = costingOptions.map(
-        (opts) => http
-            .post(
-              Uri.parse('$_valhallaBase/route'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'locations': locations,
-                'costing': 'motorcycle',
-                'costing_options': {'motorcycle': opts},
-              }),
-            )
-            .timeout(const Duration(seconds: 20)),
-      );
-
-      final responses = await Future.wait(futures);
-
-      final results = <RouteResult>[];
-      for (int i = 0; i < 3; i++) {
-        final resp = responses.elementAt(i);
-        if (resp.statusCode != 200) {
-          dev.log(
-            'Valhalla [${_courseNames[i]}] ${resp.statusCode}: '
-            '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
-            name: 'RoutingService',
-            level: 900,
-          );
-          return const <RouteResult>[];
-        }
-
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final trip = data['trip'] as Map<String, dynamic>?;
-        if (trip == null) return const <RouteResult>[];
-
-        final legs = (trip['legs'] as List?) ?? [];
-        if (legs.isEmpty) return const <RouteResult>[];
-
-        final pts = _extractPoints(legs);
-        if (pts.isEmpty) return const <RouteResult>[];
-
-        final km = legs.fold<double>(
-          0,
-          (sum, leg) =>
-              sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
-        );
-        final realisticMins = (km / _courseSpeeds[i] * 60).round();
-
+    // serverDown은 1회 자동 재시도 (noRoute·serverError는 재시도 없음)
+    RoutingException? lastError;
+    for (int attempt = 0; attempt <= 1; attempt++) {
+      if (attempt > 0) {
         dev.log(
-          'Valhalla [${_courseNames[i]}] ${pts.length}pts '
-          '${km.toStringAsFixed(1)}km '
-          'realisticMin=$realisticMins (${_courseSpeeds[i].toStringAsFixed(0)}km/h)',
+          'RoutingService retry (attempt $attempt)',
           name: 'RoutingService',
         );
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+      try {
+        final result = await _doFetch(locations, costingOptions);
+        // cache store — evict oldest if full
+        if (_cache.length >= _cacheMaxSize) {
+          final oldest = _cache.entries
+              .reduce((a, b) => a.value.at.isBefore(b.value.at) ? a : b);
+          _cache.remove(oldest.key);
+        }
+        _cache[cacheKey] = (routes: result, at: DateTime.now());
+        dev.log(
+          'RoutingService cache STORE (${_cache.length}/$_cacheMaxSize entries)',
+          name: 'RoutingService',
+        );
+        return result;
+      } on RoutingException catch (e) {
+        dev.log(
+          'RoutingService error on attempt $attempt: $e',
+          name: 'RoutingService',
+          level: 900,
+        );
+        lastError = e;
+        if (e.type != RoutingError.serverDown) break;
+      }
+    }
+    throw lastError!;
+  }
 
-        results.add(RouteResult(
-          points: pts,
-          distanceKm: km,
-          durationMin: realisticMins,
-        ));
-      }
-      // cache store — evict oldest if full
-      if (_cache.length >= _cacheMaxSize) {
-        final oldest = _cache.entries
-            .reduce((a, b) => a.value.at.isBefore(b.value.at) ? a : b);
-        _cache.remove(oldest.key);
-      }
-      _cache[cacheKey] = (routes: results, at: DateTime.now());
-      dev.log(
-        'RoutingService cache STORE (${_cache.length}/$_cacheMaxSize entries)',
-        name: 'RoutingService',
-      );
-      return results;
+  /// 3개 코스 병렬 요청 실행. 실패 시 [RoutingException] throw.
+  static Future<List<RouteResult>> _doFetch(
+    List<Map<String, dynamic>> locations,
+    List<Map<String, dynamic>> costingOptions,
+  ) async {
+    final futures = costingOptions.map(
+      (opts) => http
+          .post(
+            Uri.parse('$_valhallaBase/route'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'locations': locations,
+              'costing': 'motorcycle',
+              'costing_options': {'motorcycle': opts},
+            }),
+          )
+          .timeout(const Duration(seconds: 20)),
+    );
+
+    final List<http.Response> responses;
+    try {
+      responses = await Future.wait(futures);
+    } on TimeoutException catch (e) {
+      dev.log('Valhalla timeout: $e', name: 'RoutingService', level: 900);
+      throw const RoutingException(RoutingError.serverDown);
+    } on SocketException catch (e) {
+      dev.log('Valhalla socket error: $e', name: 'RoutingService', level: 900);
+      throw const RoutingException(RoutingError.serverDown);
     } catch (e) {
       dev.log('Valhalla fetchRoutes 실패: $e', name: 'RoutingService', level: 900);
-      return const <RouteResult>[];
+      throw RoutingException(RoutingError.serverDown, detail: e.toString());
     }
+
+    final results = <RouteResult>[];
+    for (int i = 0; i < 3; i++) {
+      final resp = responses[i];
+      if (resp.statusCode != 200) {
+        dev.log(
+          'Valhalla [${_courseNames[i]}] ${resp.statusCode}: '
+          '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
+          name: 'RoutingService',
+          level: 900,
+        );
+        throw RoutingException(RoutingError.serverError,
+            detail: 'HTTP ${resp.statusCode}');
+      }
+
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final trip = data['trip'] as Map<String, dynamic>?;
+      if (trip == null) throw const RoutingException(RoutingError.noRoute);
+
+      final legs = (trip['legs'] as List?) ?? [];
+      if (legs.isEmpty) throw const RoutingException(RoutingError.noRoute);
+
+      final pts = _extractPoints(legs);
+      if (pts.isEmpty) throw const RoutingException(RoutingError.noRoute);
+
+      final km = legs.fold<double>(
+        0,
+        (sum, leg) =>
+            sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
+      );
+      final realisticMins = (km / _courseSpeeds[i] * 60).round();
+
+      dev.log(
+        'Valhalla [${_courseNames[i]}] ${pts.length}pts '
+        '${km.toStringAsFixed(1)}km '
+        'realisticMin=$realisticMins (${_courseSpeeds[i].toStringAsFixed(0)}km/h)',
+        name: 'RoutingService',
+      );
+
+      results.add(RouteResult(
+        points: pts,
+        distanceKm: km,
+        durationMin: realisticMins,
+      ));
+    }
+    return results;
   }
 
   static List<LatLng> _extractPoints(List legs) {
