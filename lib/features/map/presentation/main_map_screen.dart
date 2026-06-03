@@ -21,6 +21,8 @@ import '../../navigation/presentation/nav_screen.dart';
 
 export 'main_map_screen.dart';
 
+enum _TapAction { destination, waypoint }
+
 /// Default *map framing* used before the first GPS fix arrives.
 /// This is the camera centre only — it is NOT treated as the rider's
 /// location: the origin marker, distance badge and tap-to-snap are all
@@ -178,6 +180,28 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final interaction = ref.read(mapInteractionProvider);
     if (interaction.isLoading) return;
 
+    // 경로가 표시 중이면 도착지변경 vs 경유지추가 선택 시트 표시
+    if (_showCourseSheet) {
+      final action = await _showTapActionSheet(tapped);
+      if (!mounted) return;
+      if (action == _TapAction.waypoint) {
+        ref.read(mapInteractionProvider.notifier).addWaypoint(tapped);
+        final dest = ref.read(mapInteractionProvider).destination;
+        if (dest != null) {
+          ref.read(mapInteractionProvider.notifier).setLoading(true);
+          try {
+            await _fetchAndStoreAllRoutes(origin, dest);
+          } finally {
+            if (mounted) {
+              ref.read(mapInteractionProvider.notifier).setLoading(false);
+            }
+          }
+        }
+        return;
+      }
+      if (action != _TapAction.destination) return; // cancelled
+    }
+
     ref.read(mapInteractionProvider.notifier).setLoading(true);
     setState(() {
       _touchPoint = tapped;
@@ -219,6 +243,49 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         ref.read(mapInteractionProvider.notifier).setLoading(false);
       }
     }
+  }
+
+  Future<_TapAction?> _showTapActionSheet(LatLng tapped) {
+    return showModalBottomSheet<_TapAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 4),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined, color: Color(0xFF008080)),
+                title: const Text('도착지 변경'),
+                onTap: () => Navigator.pop(context, _TapAction.destination),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_location_alt_outlined, color: Color(0xFF008080)),
+                title: const Text('경유지 추가'),
+                subtitle: const Text('현재 경로에 경유지를 삽입합니다',
+                    style: TextStyle(fontSize: 12)),
+                onTap: () => Navigator.pop(context, _TapAction.waypoint),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _applyDestination(LatLng dest) {
