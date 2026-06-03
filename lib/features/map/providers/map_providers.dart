@@ -83,7 +83,7 @@ class MapInteractionState {
   final List<LatLng> routePolyline; // 선택된 카드의 경로 좌표
   final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (Valhalla 3회 병렬 페치)
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
-  final List<({double km, int mins})> allRouteMeta; // 각 경로의 거리·시간 메타
+  final List<({double km, int mins, double windingScore})> allRouteMeta; // 각 경로의 거리·시간 메타
 
   const MapInteractionState({
     this.mode = MapInteractionMode.idle,
@@ -109,7 +109,7 @@ class MapInteractionState {
     List<LatLng>? routePolyline,
     List<List<LatLng>>? allRoutes,
     int? selectedRouteIdx,
-    List<({double km, int mins})>? allRouteMeta,
+    List<({double km, int mins, double windingScore})>? allRouteMeta,
     bool clearDestination = false,
     bool clearWaypoints = false,
     bool clearRoute = false,
@@ -175,7 +175,7 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
   void setAllRoutes(List<List<LatLng>> routes) =>
       state = state.copyWith(allRoutes: routes);
 
-  void setAllRouteMeta(List<({double km, int mins})> meta) =>
+  void setAllRouteMeta(List<({double km, int mins, double windingScore})> meta) =>
       state = state.copyWith(allRouteMeta: meta);
 
   void setSelectedRouteIdx(int idx) =>

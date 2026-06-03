@@ -9,10 +9,12 @@ class RouteResult {
   final List<LatLng> points;
   final double distanceKm;
   final int durationMin; // round(distance / realistic_speed_kmh * 60)
+  final double windingScore; // 0~100 from NativeEngine.calcWindingScore
   const RouteResult({
     required this.points,
     required this.distanceKm,
     required this.durationMin,
+    this.windingScore = 0.0,
   });
 }
 

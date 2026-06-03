@@ -14,6 +14,7 @@ import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/map_cache_provider.dart';
+import '../../../services/native_engine.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
 import '../../navigation/presentation/nav_screen.dart';
@@ -276,7 +277,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      notifier.setAllRouteMeta(routes.map((r) => (km: r.distanceKm, mins: r.durationMin)).toList());
+      notifier.setAllRouteMeta(routes.asMap().entries.map((e) {
+        final r = e.value;
+        final pts = r.points.map((p) => GpsPoint(p.latitude, p.longitude)).toList();
+        final ws = NativeEngine.calcWindingScore(pts);
+        return (km: r.distanceKm, mins: r.durationMin, windingScore: ws.score);
+      }).toList());
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
       notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
@@ -346,7 +352,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      notifier.setAllRouteMeta(routes.map((r) => (km: r.distanceKm, mins: r.durationMin)).toList());
+      notifier.setAllRouteMeta(routes.asMap().entries.map((e) {
+        final r = e.value;
+        final pts = r.points.map((p) => GpsPoint(p.latitude, p.longitude)).toList();
+        final ws = NativeEngine.calcWindingScore(pts);
+        return (km: r.distanceKm, mins: r.durationMin, windingScore: ws.score);
+      }).toList());
       notifier.setRoutePolyline(routes[idx.clamp(0, routes.length - 1)].points);
     } finally {
       if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
@@ -1150,7 +1161,7 @@ class _FloatingActionLabel extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CourseSheet extends StatelessWidget {
-  final List<({double km, int mins})> routeMeta;
+  final List<({double km, int mins, double windingScore})> routeMeta;
   final int selectedIdx;
   final ValueChanged<int> onSelect;
   final VoidCallback onStart;
@@ -1222,8 +1233,12 @@ class _CourseSheet extends StatelessWidget {
                 final hasMeta = routeMeta.length > i;
                 final distKm = hasMeta ? routeMeta[i].km : 0.0;
                 final mins = hasMeta ? routeMeta[i].mins : 0;
+                final ws = hasMeta ? routeMeta[i].windingScore : 0.0;
                 final distStr = hasMeta ? '${distKm.toStringAsFixed(0)}km' : '---';
                 final durStr = hasMeta ? _durFromMins(mins) : '---';
+                // best fun score among loaded routes
+                final bestWs = routeMeta.isEmpty ? 0.0
+                    : routeMeta.map((m) => m.windingScore).reduce((a, b) => a > b ? a : b);
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -1234,6 +1249,8 @@ class _CourseSheet extends StatelessWidget {
                       info: r,
                       distStr: distStr,
                       duration: durStr,
+                      windingScore: ws,
+                      isBestFun: hasMeta && ws >= bestWs && ws > 0,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -1267,6 +1284,8 @@ class _RouteCard extends StatelessWidget {
   final _RouteInfo info;
   final String distStr;
   final String duration;
+  final double windingScore;
+  final bool isBestFun;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -1274,6 +1293,8 @@ class _RouteCard extends StatelessWidget {
     required this.info,
     required this.distStr,
     required this.duration,
+    this.windingScore = 0.0,
+    this.isBestFun = false,
     required this.isSelected,
     required this.onTap,
   });
@@ -1332,6 +1353,29 @@ class _RouteCard extends StatelessWidget {
                 fontSize: 10,
               ),
             ),
+            if (windingScore > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isBestFun
+                        ? info.color.withValues(alpha: 0.15)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    isBestFun
+                        ? '★ 재미 ${windingScore.toStringAsFixed(0)}'
+                        : '재미 ${windingScore.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: isBestFun ? FontWeight.w700 : FontWeight.w400,
+                      color: isBestFun ? info.color : AppColors.textHint,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
