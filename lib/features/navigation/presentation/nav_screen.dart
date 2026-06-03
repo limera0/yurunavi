@@ -43,6 +43,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _recenterTimer;
   StreamSubscription<Position>? _locationSub;
 
+  // 속도계 노이즈 제거
+  final _speedBuffer = <double>[];
+  static const _kBufSize = 3; // 이동평균 샘플 수
+  DateTime? _lastSpeedAt; // 적응 갱신 타이밍
+
   // Turn-by-turn demo steps
   final List<_TurnStep> _steps = const [
     _TurnStep(Icons.turn_right_rounded, '17m 후 우회전', '300m'),
@@ -118,20 +123,41 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 5,
+        distanceFilter: 0, // 모든 이벤트 수신; 속도 갱신은 내부에서 적응 조절
       ),
-    ).listen((pos) {
-      final loc = LatLng(pos.latitude, pos.longitude);
-      ref.read(currentLocationProvider.notifier).set(loc);
-      // Raw device speed in m/s → km/h. Defaults to 0 when stationary,
-      // negative, or NaN. No simulator override.
-      final raw = pos.speed;
-      final kmh = (raw.isNaN || raw <= 0) ? 0.0 : raw * 3.6;
-      setState(() {
-        _currentPos = loc;
-        _speedKmh = kmh;
-      });
-      if (!_isManualMode) _recenter(loc);
+    ).listen(_onPosition);
+  }
+
+  void _onPosition(Position pos) {
+    final loc = LatLng(pos.latitude, pos.longitude);
+    ref.read(currentLocationProvider.notifier).set(loc);
+    if (!_isManualMode) _recenter(loc);
+
+    final now = DateTime.now();
+    // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
+    final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
+    final elapsedMs = _lastSpeedAt == null
+        ? intervalMs
+        : now.difference(_lastSpeedAt!).inMilliseconds;
+
+    if (elapsedMs < intervalMs) {
+      setState(() => _currentPos = loc);
+      return;
+    }
+    _lastSpeedAt = now;
+
+    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) → 0 처리
+    final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
+    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0) ? 0.0 : rawKmh;
+
+    // 이동평균으로 튐 완화
+    _speedBuffer.add(clamped);
+    if (_speedBuffer.length > _kBufSize) _speedBuffer.removeAt(0);
+    final avg = _speedBuffer.reduce((a, b) => a + b) / _speedBuffer.length;
+
+    setState(() {
+      _currentPos = loc;
+      _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
     });
   }
 
