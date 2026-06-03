@@ -58,8 +58,10 @@ class RoutingService {
     // 코스별 costing_options — 서로 다른 geometry를 유도
     final costingOptions = <Map<String, dynamic>>[
       // 시골길: 생활도로·비포장 선호, top_speed 제한 → 간선도로 자연 회피
+      // use_ferry:0.0 — 한국 도선/나룻배는 오토바이 탑승 불가 경우 많음
       {
         'use_highways': 0.0,
+        'use_ferry': 0.0,
         'use_living_streets': 1.0,
         'use_tracks': 0.8,
         'top_speed': 40,
@@ -75,6 +77,7 @@ class RoutingService {
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
       {
         'use_highways': 0.0,
+        'use_ferry': 0.0,
         'use_living_streets': 0.5,
         'use_tracks': 0.2,
         'class_factors': {
@@ -88,6 +91,7 @@ class RoutingService {
       // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
       {
         'use_highways': 0.0,
+        'use_ferry': 0.0,
         'use_living_streets': 0.0,
         'use_tracks': 0.0,
         'shortest': true,
