@@ -41,6 +41,22 @@ class RoutingService {
     _speedNationalKmh,
   ];
 
+  // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────
+  static const _cacheTtl = Duration(minutes: 5);
+  static const _cacheMaxSize = 20;
+  static final Map<String, ({List<RouteResult> routes, DateTime at})> _cache = {};
+
+  /// 원점이 크게 이동했거나 강제 새로고침이 필요할 때 캐시를 비운다.
+  static void invalidateCache() => _cache.clear();
+
+  static String _cacheKey(
+      LatLng origin, LatLng destination, List<LatLng> waypoints) {
+    String fmt(LatLng p) =>
+        '${p.latitude.toStringAsFixed(4)},${p.longitude.toStringAsFixed(4)}';
+    final wStr = waypoints.map(fmt).join(';');
+    return '${fmt(origin)}→${fmt(destination)}|$wStr';
+  }
+
   /// 3가지 코스 타입 경로를 반환한다 (idx 0=시골길, 1=지방도로, 2=국도).
   /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
   static Future<List<RouteResult>> fetchRoutes({
@@ -54,6 +70,17 @@ class RoutingService {
         {'lon': w.longitude, 'lat': w.latitude},
       {'lon': destination.longitude, 'lat': destination.latitude},
     ];
+
+    final cacheKey = _cacheKey(origin, destination, waypoints);
+    final cached = _cache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _cacheTtl) {
+      dev.log(
+        'RoutingService cache HIT (${_cache.length} entries)',
+        name: 'RoutingService',
+      );
+      return cached.routes;
+    }
 
     // 코스별 costing_options — 서로 다른 geometry를 유도
     final costingOptions = <Map<String, dynamic>>[
@@ -166,6 +193,17 @@ class RoutingService {
           durationMin: realisticMins,
         ));
       }
+      // cache store — evict oldest if full
+      if (_cache.length >= _cacheMaxSize) {
+        final oldest = _cache.entries
+            .reduce((a, b) => a.value.at.isBefore(b.value.at) ? a : b);
+        _cache.remove(oldest.key);
+      }
+      _cache[cacheKey] = (routes: results, at: DateTime.now());
+      dev.log(
+        'RoutingService cache STORE (${_cache.length}/$_cacheMaxSize entries)',
+        name: 'RoutingService',
+      );
       return results;
     } catch (e) {
       dev.log('Valhalla fetchRoutes 실패: $e', name: 'RoutingService', level: 900);
