@@ -582,8 +582,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final isDay = ref.watch(isDayProvider);
 
     // Theme-adaptive colors for map overlays.
-    final routeColor =
-        riderMode ? RiderModeColors.mapRoute : AppColors.primary;
     final originColor =
         riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin;
     final destColor =
@@ -643,13 +641,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               ),
 
               // ── ZOOM TIER 1 (any zoom): route polylines ─────────────
-              // 비선택 카드 경로: 흐릿하게 (alpha ~0.25)
-              // 선택 카드 경로: 진하게 (alpha ~0.92), 더 굵게
+              // 코스별 고유 색상: 0=시골길(초록), 1=지방도로(보조색), 2=국도(주색)
+              // 비선택: alpha 0.25, 선택: alpha 0.92 + 굵게
               ...() {
-                const fadedColors = [
-                  AppColors.mapCourse,
-                  AppColors.tertiary,
-                  AppColors.primary,
+                const courseColors = [
+                  AppColors.mapCourse, // 시골길 — 초록
+                  AppColors.tertiary,  // 지방도로
+                  AppColors.primary,   // 국도
                 ];
                 final layers = <Widget>[];
                 for (int i = 0; i < allRoutes.length; i++) {
@@ -658,7 +656,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   layers.add(PolylineLayer(polylines: [
                     Polyline(
                       points: allRoutes[i],
-                      color: fadedColors[i.clamp(0, 2)].withValues(alpha: 0.25),
+                      color: courseColors[i.clamp(0, 2)].withValues(alpha: 0.25),
                       strokeWidth: riderMode ? 4.0 : 2.5,
                       strokeCap: StrokeCap.round,
                       strokeJoin: StrokeJoin.round,
@@ -671,7 +669,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 PolylineLayer(polylines: [
                   Polyline(
                     points: routePolyline,
-                    color: routeColor.withValues(alpha: 0.92),
+                    // 선택 경로도 코스 고유 색 사용 (riderMode는 공통 주황)
+                    color: riderMode
+                        ? RiderModeColors.mapRoute.withValues(alpha: 0.92)
+                        : [
+                            AppColors.mapCourse,
+                            AppColors.tertiary,
+                            AppColors.primary,
+                          ][selectedRouteIdx.clamp(0, 2)].withValues(alpha: 0.92),
                     strokeWidth: riderMode
                         ? (_currentZoom >= 13 ? 9.0 : _currentZoom >= 10.5 ? 7.0 : 5.0)
                         : (_currentZoom >= 13 ? 6.0 : _currentZoom >= 10.5 ? 4.0 : 3.0),
