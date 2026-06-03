@@ -625,6 +625,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
           ),
+
+          // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
+          // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
+          if (!isDay)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.35),
+                ),
+              ),
+            ),
         ],
       ),
     );

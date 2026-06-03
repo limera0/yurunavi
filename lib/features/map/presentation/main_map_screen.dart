@@ -534,6 +534,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final selectedRouteIdx = interaction.selectedRouteIdx;
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
+    final isDay = ref.watch(isDayProvider);
 
     // Theme-adaptive colors for map overlays.
     final routeColor =
@@ -864,6 +865,20 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             ),
             ),
           ),
+
+          // ══════════════════════════════════════════════════════
+          // LAYER 8 · 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT)
+          // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
+          // IgnorePointer로 터치 투명하게 처리.
+          // ══════════════════════════════════════════════════════
+          if (!isDay)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.35),
+                ),
+              ),
+            ),
         ],
       ),
     );
