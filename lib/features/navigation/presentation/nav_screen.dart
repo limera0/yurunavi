@@ -500,10 +500,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 좌측 속도계 (ETA 바 위에 위치) ─────────────────────────────────
+          // ── 좌측 속도계 (상단 30% 높이, 네이버지도 배치 참고) ─────────────────
           Positioned(
             left: 12,
-            bottom: 160,
+            top: MediaQuery.of(context).size.height * 0.30,
             child: ScaleTransition(
               scale: _pulseAnim,
               child: _Speedometer(speedKmh: _speedKmh),
