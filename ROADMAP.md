@@ -7,5 +7,5 @@
 - [x] 6. 지도 한 지점 터치 → 출발/도착/경유지 설정 → 코스 재검색 UI
 - [x] 7. validate_rural_route.py를 동탄 외 3개 지역(서울 강남, 대전, 부산)으로 확장해 도심관통 회귀 자동검출
 - [x] 8. 경로 검색 결과 캐싱(같은 출발-도착 재호출 시 Valhalla 부하 감소)
-- [ ] 9. 에러 핸들링: Valhalla/Rust 서버 다운 시 사용자에게 보이는 graceful 메시지 + 재시도
-- [ ] 10. 통합 점검: flutter analyze + 전체 cargo test + validate 스크립트를 한 번에 돌리는 scripts/check_all.sh 작성
+- [x] 9. 에러 핸들링: Valhalla/Rust 서버 다운 시 사용자에게 보이는 graceful 메시지 + 재시도
+- [x] 10. 통합 점검: flutter analyze + 전체 cargo test + validate 스크립트를 한 번에 돌리는 scripts/check_all.sh 작성
