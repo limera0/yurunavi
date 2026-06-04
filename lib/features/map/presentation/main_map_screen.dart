@@ -89,7 +89,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   List<RouteResult> _fetchedRoutes = const [];
   // 선택된 경로의 턴바이턴 maneuvers — NavScreen 으로 전달
   List<ManeuverStep> _selectedManeuvers = const [];
-  double _currentZoom = 11.0;
+  double _currentZoom = 16.0; // z16 고정 초기 줌
 
   // Course sheet
   bool _showCourseSheet = false;
