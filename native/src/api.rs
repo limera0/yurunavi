@@ -283,6 +283,19 @@ pub fn fun_score_v3(route: &[GpsPoint], avg_fc: f64, avg_speed_kmh: f64) -> f64 
     (0.5 * tau_score + 0.3 * fc_score + 0.2 * t_score).clamp(0.0, 100.0)
 }
 
+/// 헤딩 기반 커브 밀도: Valhalla 엣지의 (begin_heading, end_heading) 쌍에서 평균 각도 변화량 계산.
+///
+/// Valhalla /trace_attributes 응답의 edges[].begin_heading / edges[].end_heading 사용.
+/// 반환: 0.0~180.0 (도/엣지 평균). 높을수록 굽은 구간 많음.
+pub fn heading_curvature(edges: &[(f64, f64)]) -> f64 {
+    if edges.is_empty() { return 0.0; }
+    let total: f64 = edges.iter().map(|(begin, end)| {
+        let diff = (end - begin).abs() % 360.0;
+        if diff > 180.0 { 360.0 - diff } else { diff }
+    }).sum();
+    total / edges.len() as f64
+}
+
 /// FC 등급 가중치 v2 (비선형): motorway→0, trunk→30, primary→60, secondary→85, unclassified→100.
 ///
 /// 현재 road_class_score 는 선형(0~100). v2는 상위 도로(고속·간선) 감점을 강화.
@@ -983,6 +996,37 @@ mod tests {
         assert!(rural > national,
             "시골숲길 v4={rural:.1} > 국도 v4={national:.1} 기대");
         assert!(rural > 50.0, "시골숲길 점수가 50점 이상이어야 함, 실제: {rural:.1}");
+    }
+
+    // ── 항목 4: 헤딩 기반 커브 밀도 ─────────────────────────────────────────
+
+    #[test]
+    fn heading_curvature_straight_road_is_zero() {
+        // 직선: 모든 엣지의 방향이 동일 → 변화량 0
+        let edges: Vec<(f64, f64)> = (0..5).map(|_| (90.0, 90.0)).collect();
+        let c = heading_curvature(&edges);
+        assert!(c.abs() < 0.01, "직선 커브 밀도=0 기대, 실제: {c:.2}");
+    }
+
+    #[test]
+    fn heading_curvature_90deg_turns_is_ninety() {
+        // 매 엣지마다 90° 우회전
+        let edges: Vec<(f64, f64)> = vec![(0.0, 90.0), (90.0, 180.0), (180.0, 270.0)];
+        let c = heading_curvature(&edges);
+        assert!((c - 90.0).abs() < 0.01, "90°씩 회전 → 평균=90, 실제: {c:.2}");
+    }
+
+    #[test]
+    fn heading_curvature_wraps_around_360() {
+        // 350° → 10°: 실제 변화량 20° (360° 넘어가는 경우)
+        let edges: Vec<(f64, f64)> = vec![(350.0, 10.0)];
+        let c = heading_curvature(&edges);
+        assert!((c - 20.0).abs() < 0.01, "350°→10° 변화량=20°, 실제: {c:.2}");
+    }
+
+    #[test]
+    fn heading_curvature_empty_returns_zero() {
+        assert!(heading_curvature(&[]).abs() < 0.01, "빈 엣지→0");
     }
 
     // ── 항목 3: 도로 등급 가중치 v2 ─────────────────────────────────────────
