@@ -278,6 +278,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final maxLat = points.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
     final minLng = points.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
     final maxLng = points.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    final bottomPadding = _showCourseSheet ? 360.0 : 80.0;
     _mlCtrl?.animateCamera(
       ml.CameraUpdate.newLatLngBounds(
         ml.LatLngBounds(
@@ -287,7 +288,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         left: 50,
         top: 110,
         right: 80,
-        bottom: 260,
+        bottom: bottomPadding,
       ),
     );
   }
