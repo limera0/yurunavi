@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -15,7 +16,7 @@ import '../../../core/widgets/slider_start_button.dart';
 import '../../../models/poi.dart';
 import '../../../models/saved_place.dart';
 import '../../../services/connectivity_service.dart';
-import '../../../services/map_cache_provider.dart';
+import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
@@ -76,6 +77,11 @@ class MainMapScreen extends ConsumerStatefulWidget {
 class _MainMapScreenState extends ConsumerState<MainMapScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
+  ml.MapLibreMapController? _mlCtrl; // M1~M4 동안 점진 연결
+
+  // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
+  ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
+
   // Nullable until the device returns a real GPS fix — prevents the origin
   // marker / distance badge from rendering at a hardcoded mock location.
   LatLng? _origin;
@@ -96,6 +102,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // Touch overlay
   LatLng? _touchPoint;
+  // ignore: unused_field
   double _touchDistKm = 0;
   bool _waypointAddedAtTouch = false; // 같은 터치 지점에 경유지 추가됐으면 true
 
@@ -600,6 +607,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // ── POI markers ───────────────────────────────────────────────────────────
 
+  // ignore: unused_element
   List<Marker> _buildPoiMarkers(List<Poi> pois) {
     return _clusterPois(pois, _currentZoom).map((cell) {
       final color = Color(cell.representative.type.colorValue);
@@ -619,19 +627,21 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   @override
   Widget build(BuildContext context) {
     final interaction = ref.watch(mapInteractionProvider);
-    final pois = ref.watch(poiListProvider);
+    final pois = ref.watch(poiListProvider); // ignore: unused_local_variable
     final dest = interaction.destination;
-    final waypoint = interaction.waypoint;
-    final routePolyline = interaction.routePolyline;
-    final allRoutes = interaction.allRoutes;
+    final waypoint = interaction.waypoint; // ignore: unused_local_variable
+    final routePolyline = interaction.routePolyline; // ignore: unused_local_variable
+    final allRoutes = interaction.allRoutes; // ignore: unused_local_variable
     final selectedRouteIdx = interaction.selectedRouteIdx;
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
 
-    // Theme-adaptive colors for map overlays.
+    // Theme-adaptive colors for map overlays. (M2~M3에서 마커에 재사용)
+    // ignore: unused_local_variable
     final originColor =
         riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin;
+    // ignore: unused_local_variable
     final destColor =
         riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination;
 
@@ -659,147 +669,31 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       body: Stack(
         children: [
           // ══════════════════════════════════════════════════════
-          // LAYER 1 · OSM Map
+          // LAYER 1 · MapLibre Map (osm_liberty 스타일)
+          // M1: 빈 지도 + 스타일만. 폴리라인·마커는 M2~M3에서 추가.
           // ══════════════════════════════════════════════════════
-          FlutterMap(
-            mapController: _mapCtrl,
-            options: MapOptions(
-              initialCenter: _origin ?? _lastKnown ?? kInitialMapView,
-              initialZoom: _currentZoom,
-              // Disable rotation: lock North-up for motorcycle mount
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onTap: _onMapTap,
-              onMapEvent: (event) {
-                if (event is MapEventMoveEnd) {
-                  setState(() => _currentZoom = _mapCtrl.camera.zoom);
-                }
-              },
+          ml.MapLibreMap(
+            styleString: 'assets/images/osm_liberty_yurunavi.json',
+            initialCameraPosition: ml.CameraPosition(
+              target: _toMl(_origin ?? _lastKnown ?? kInitialMapView),
+              zoom: _currentZoom,
             ),
-            children: [
-              // OSM standard tiles — full road/building/POI detail at all zoom levels.
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.westinx.yurunavi',
-                maxZoom: 19,
-                tileProvider: buildCachedTileProvider(),
-              ),
-
-              // ── ZOOM TIER 1 (any zoom): route polylines ─────────────
-              // 비선택 경로: 회색 0.4 (선택 경로의 고유색과 명확히 구분)
-              // 선택 경로: 코스 고유색 0.92 + 굵게
-              ...() {
-                final layers = <Widget>[];
-                for (int i = 0; i < allRoutes.length; i++) {
-                  if (i == selectedRouteIdx) continue;
-                  if (allRoutes[i].length < 2) continue;
-                  layers.add(PolylineLayer(polylines: [
-                    Polyline(
-                      points: allRoutes[i],
-                      color: Colors.grey.withValues(alpha: 0.4),
-                      strokeWidth: riderMode ? 3.5 : 2.0,
-                      strokeCap: StrokeCap.round,
-                      strokeJoin: StrokeJoin.round,
-                    ),
-                  ]));
-                }
-                return layers;
-              }(),
-              if (routePolyline.length >= 2)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: routePolyline,
-                    // 선택 경로도 코스 고유 색 사용 (riderMode는 공통 주황)
-                    color: riderMode
-                        ? RiderModeColors.mapRoute.withValues(alpha: 0.92)
-                        : [
-                            AppColors.mapCourse,
-                            AppColors.tertiary,
-                            AppColors.primary,
-                          ][selectedRouteIdx.clamp(0, 2)].withValues(alpha: 0.92),
-                    strokeWidth: riderMode
-                        ? (_currentZoom >= 13 ? 9.0 : _currentZoom >= 10.5 ? 7.0 : 5.0)
-                        : (_currentZoom >= 13 ? 6.0 : _currentZoom >= 10.5 ? 4.0 : 3.0),
-                    strokeCap: StrokeCap.round,
-                    strokeJoin: StrokeJoin.round,
-                  ),
-                ]),
-
-              // ── ZOOM TIER 2 (zoom ≥ 10.5): POI clusters ────────────
-              // Hide all POI detail at wide view — only the route matters
-              // at motorway speeds. Clusters appear once the rider slows.
-              if (pois.isNotEmpty && _currentZoom >= 10.5)
-                MarkerLayer(markers: _buildPoiMarkers(pois)),
-
-              // ── ZOOM TIER 3 (zoom ≥ 13): detail overlays ───────────
-              // Tap-radius circle and destination radius only at street
-              // level; at wide zoom they cover too much of the screen.
-              if (_touchPoint != null && _origin != null && _currentZoom >= 13)
-                CircleLayer(circles: [
-                  CircleMarker(
-                    point: _origin!,
-                    radius: _touchDistKm * 1000,
-                    useRadiusInMeter: true,
-                    color:
-                        AppColors.secondary.withValues(alpha: 0.06),
-                    borderColor:
-                        AppColors.secondary.withValues(alpha: 0.35),
-                    borderStrokeWidth: 1.2,
-                  ),
-                ]),
-
-              if (dest != null && _origin != null && _currentZoom >= 9.0)
-                CircleLayer(circles: [
-                  CircleMarker(
-                    point: _origin!,
-                    radius: interaction.distanceKm * 1000,
-                    useRadiusInMeter: true,
-                    color: AppColors.mapOrigin.withValues(alpha: 0.05),
-                    borderColor:
-                        AppColors.mapOrigin.withValues(alpha: 0.25),
-                    borderStrokeWidth: 1.0,
-                  ),
-                ]),
-
-              // Origin + destination + waypoint markers.
-              // Origin dot only renders once a real GPS fix has arrived;
-              // dest/waypoint pins shown at zoom ≥ 10.5 where legible.
-              // Rider mode: markers scale up for glove-friendly visibility.
-              MarkerLayer(markers: [
-                if (_origin != null)
-                  Marker(
-                    point: _origin!,
-                    width: riderMode ? 28 : 22,
-                    height: riderMode ? 28 : 22,
-                    child: _OriginMarker(color: originColor),
-                  ),
-                if (waypoint != null && _currentZoom >= 9.0)
-                  Marker(
-                    point: waypoint,
-                    width: riderMode ? 48 : 36,
-                    height: riderMode ? 48 : 36,
-                    alignment: Alignment.topCenter,
-                    child: Icon(Icons.location_pin,
-                        color: riderMode
-                            ? RiderModeColors.tertiary
-                            : const Color(0xFFFFB300),
-                        size: riderMode ? 48 : 36),
-                  ),
-                if (dest != null && _currentZoom >= 9.0)
-                  Marker(
-                    point: dest,
-                    width: riderMode ? 48 : 36,
-                    height: riderMode ? 48 : 36,
-                    alignment: Alignment.topCenter,
-                    child: Icon(Icons.location_pin,
-                        color: destColor,
-                        size: riderMode ? 48 : 36),
-                  ),
-              ]),
-            ],
+            // 오토바이 거치 — 회전 잠금 (North-up 고정)
+            rotateGesturesEnabled: false,
+            // 기울기도 잠금 (2D 유지)
+            tiltGesturesEnabled: false,
+            compassEnabled: false,
+            onMapCreated: (c) => _mlCtrl = c,
+            onMapClick: (point, latLng) {
+              _onMapTap(
+                const TapPosition(Offset.zero, null),
+                LatLng(latLng.latitude, latLng.longitude),
+              );
+            },
+            onCameraIdle: () {
+              final z = _mlCtrl?.cameraPosition?.zoom;
+              if (z != null) setState(() => _currentZoom = z);
+            },
           ),
 
           // ══════════════════════════════════════════════════════
@@ -1677,8 +1571,10 @@ class _CompChip extends StatelessWidget {
 // Map markers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ignore: unused_element
 class _OriginMarker extends StatelessWidget {
   final Color color;
+  // ignore: unused_element_parameter
   const _OriginMarker({this.color = AppColors.mapOrigin});
 
   @override
