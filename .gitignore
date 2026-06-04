@@ -49,3 +49,8 @@ app.*.map.json
 
 # Flutter generated
 .flutter-plugins
+260604_ZoomLevel_OSM.pptx
+*.pptx
+
+# 자동 생성 l10n (소스는 lib/l10n/*.arb)
+lib/src/l10n/
