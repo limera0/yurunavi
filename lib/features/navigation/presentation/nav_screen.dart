@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' show sin, cos, sqrt, asin;
+
+import 'package:http/http.dart' as http;
 
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -339,7 +342,47 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (dest == null) return;
     if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
       _arrived = true;
-      _showArrivalDialog();
+      _fetchNearbyPois(dest).then((pois) {
+        if (mounted) _showArrivalDialog(pois);
+      });
+    }
+  }
+
+  /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
+  Future<List<({String name, String type})>> _fetchNearbyPois(LatLng dest) async {
+    final query =
+        '[out:json][timeout:5];'
+        '(node["amenity"~"fuel|convenience|restaurant"]'
+        '(around:500,${dest.latitude},${dest.longitude}););'
+        'out 3;';
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('https://overpass-api.de/api/interpreter'),
+            body: query,
+          )
+          .timeout(const Duration(seconds: 5));
+      if (resp.statusCode != 200) return [];
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final elements = (data['elements'] as List?) ?? [];
+      return elements.take(3).map((e) {
+        final tags = (e['tags'] as Map?) ?? {};
+        return (
+          name: (tags['name'] as String?) ?? '근처 장소',
+          type: _poiTypeLabel(tags['amenity'] as String? ?? ''),
+        );
+      }).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static String _poiTypeLabel(String amenity) {
+    switch (amenity) {
+      case 'fuel': return '주유소';
+      case 'convenience': return '편의점';
+      case 'restaurant': return '식당';
+      default: return amenity;
     }
   }
 
@@ -355,7 +398,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 2 * r * asin(sqrt(h));
   }
 
-  void _showArrivalDialog() {
+  void _showArrivalDialog(List<({String name, String type})> pois) {
     if (!mounted) return;
     showDialog<void>(
       context: context,
@@ -367,12 +410,34 @@ class _NavScreenState extends ConsumerState<NavScreen>
           SizedBox(width: 8),
           Text('도착했습니다!'),
         ]),
-        content: const Text('목적지에 도착했습니다.\n내비게이션을 종료합니다.'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('목적지에 도착했습니다.\n내비게이션을 종료합니다.'),
+            if (pois.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('근처 장소',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              ...pois.map((p) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(children: [
+                      const Icon(Icons.place, size: 14, color: Color(0xFF008080)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text('${p.type}: ${p.name}',
+                              style: const TextStyle(fontSize: 12))),
+                    ]),
+                  )),
+            ],
+          ],
+        ),
         actions: [
           ElevatedButton(
             onPressed: () {
-              Navigator.of(ctx).pop(); // 다이얼로그 닫기
-              if (mounted) Navigator.of(context).pop(); // 내비 화면 종료 → 홈
+              Navigator.of(ctx).pop();
+              if (mounted) Navigator.of(context).pop();
             },
             child: const Text('확인'),
           ),
