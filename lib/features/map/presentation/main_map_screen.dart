@@ -687,14 +687,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               ),
 
               // ── ZOOM TIER 1 (any zoom): route polylines ─────────────
-              // 코스별 고유 색상: 0=시골길(초록), 1=지방도로(보조색), 2=국도(주색)
-              // 비선택: alpha 0.25, 선택: alpha 0.92 + 굵게
+              // 비선택 경로: 회색 0.4 (선택 경로의 고유색과 명확히 구분)
+              // 선택 경로: 코스 고유색 0.92 + 굵게
               ...() {
-                const courseColors = [
-                  AppColors.mapCourse, // 시골길 — 초록
-                  AppColors.tertiary,  // 지방도로
-                  AppColors.primary,   // 국도
-                ];
                 final layers = <Widget>[];
                 for (int i = 0; i < allRoutes.length; i++) {
                   if (i == selectedRouteIdx) continue;
@@ -702,8 +697,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   layers.add(PolylineLayer(polylines: [
                     Polyline(
                       points: allRoutes[i],
-                      color: courseColors[i.clamp(0, 2)].withValues(alpha: 0.25),
-                      strokeWidth: riderMode ? 4.0 : 2.5,
+                      color: Colors.grey.withValues(alpha: 0.4),
+                      strokeWidth: riderMode ? 3.5 : 2.0,
                       strokeCap: StrokeCap.round,
                       strokeJoin: StrokeJoin.round,
                     ),
