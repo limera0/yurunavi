@@ -283,6 +283,26 @@ pub fn fun_score_v3(route: &[GpsPoint], avg_fc: f64, avg_speed_kmh: f64) -> f64 
     (0.5 * tau_score + 0.3 * fc_score + 0.2 * t_score).clamp(0.0, 100.0)
 }
 
+/// FC 등급 가중치 v2 (비선형): motorway→0, trunk→30, primary→60, secondary→85, unclassified→100.
+///
+/// 현재 road_class_score 는 선형(0~100). v2는 상위 도로(고속·간선) 감점을 강화.
+/// avg_fc: Valhalla FC 평균 (1.0=FC1 motorway, 5.0=FC5 소로).
+pub fn road_class_score_v2(avg_fc: f64) -> f64 {
+    let fc = avg_fc.clamp(1.0, 5.0);
+    // FC→점수 구간별 선형 보간
+    // FC1→0, FC2→30, FC3→60, FC4→85, FC5→100
+    let score = if fc <= 2.0 {
+        (fc - 1.0) * 30.0
+    } else if fc <= 3.0 {
+        30.0 + (fc - 2.0) * 30.0
+    } else if fc <= 4.0 {
+        60.0 + (fc - 3.0) * 25.0
+    } else {
+        85.0 + (fc - 4.0) * 15.0
+    };
+    score.clamp(0.0, 100.0)
+}
+
 /// 숲 근접도 점수 (0~100).
 /// forest_proximity: 0.0 = 숲 없음, 1.0 = 경로 전체가 숲 속.
 /// OSM landuse=forest / natural=wood 폴리곤으로부터 전처리 필요.
@@ -963,6 +983,32 @@ mod tests {
         assert!(rural > national,
             "시골숲길 v4={rural:.1} > 국도 v4={national:.1} 기대");
         assert!(rural > 50.0, "시골숲길 점수가 50점 이상이어야 함, 실제: {rural:.1}");
+    }
+
+    // ── 항목 3: 도로 등급 가중치 v2 ─────────────────────────────────────────
+
+    #[test]
+    fn road_class_score_v2_fc1_is_zero() {
+        assert!(road_class_score_v2(1.0).abs() < 0.01, "FC1(motorway)→0");
+    }
+
+    #[test]
+    fn road_class_score_v2_fc2_is_thirty() {
+        assert!((road_class_score_v2(2.0) - 30.0).abs() < 0.01, "FC2(trunk)→30");
+    }
+
+    #[test]
+    fn road_class_score_v2_fc5_is_hundred() {
+        assert!((road_class_score_v2(5.0) - 100.0).abs() < 0.01, "FC5(소로)→100");
+    }
+
+    #[test]
+    fn road_class_score_v2_gives_more_credit_to_secondary_roads() {
+        // v2는 지방도(FC4)에 v1보다 높은 점수 부여 → 시골길 선호 강화
+        let fc4_v1 = road_class_score(4.0);     // 선형: 75
+        let fc4_v2 = road_class_score_v2(4.0);  // v2: 85
+        assert!(fc4_v2 > fc4_v1,
+            "FC4(지방도) v2({fc4_v2:.1}) > v1({fc4_v1:.1}): v2가 지방도를 더 선호해야 함");
     }
 
     // ── 항목 2: 고속도로 배제 검증 ──────────────────────────────────────────
