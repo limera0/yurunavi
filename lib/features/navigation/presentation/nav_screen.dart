@@ -58,9 +58,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
 
-  // 음성 안내
+  // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
-  int _lastAnnouncedIdx = -1; // 중복 발화 방지
+  int _lastAnnouncedIdx = -1;      // 중복 발화 방지
+  List<double> _stepEndDistM = []; // 각 step 종점까지의 누적 거리(m)
+  bool _preAnnounced = false;      // 400m 예비 발화 완료 여부
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
@@ -119,10 +121,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _steps = widget.maneuvers.isNotEmpty
         ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
         : const [
-            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', ''),
-            _TurnStep(Icons.straight_rounded,   '직진',         ''),
-            _TurnStep(Icons.flag_rounded,        '목적지 도착',  ''),
+            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
+            _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
+            _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
           ];
+    // 각 step 종점까지의 누적 거리 계산 (GPS 기반 자동 진행용)
+    _computeStepEndDistances();
     if (widget.destination == null) {
       // 목적지 없이 진입하면 즉시 빠져나간다
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -200,7 +204,58 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
 
     _checkArrival(loc);
-    if (!_arrived && _routePoints.length >= 2) _checkOffRoute(loc);
+    if (!_arrived && _routePoints.length >= 2) {
+      _checkOffRoute(loc);
+      _updateStepByDistance(loc);
+    }
+  }
+
+  void _computeStepEndDistances() {
+    _stepEndDistM = [];
+    double cum = 0.0;
+    for (final step in _steps) {
+      cum += step.rawDistKm * 1000.0;
+      _stepEndDistM.add(cum);
+    }
+  }
+
+  /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
+  double _traveledDistM(LatLng pos) {
+    if (_routePoints.length < 2) return 0.0;
+    double minDist = double.maxFinite;
+    int minIdx = 0;
+    for (int i = 0; i < _routePoints.length - 1; i++) {
+      final d = _segmentDistM(pos, _routePoints[i], _routePoints[i + 1]);
+      if (d < minDist) { minDist = d; minIdx = i; }
+    }
+    // 해당 세그먼트까지의 누적 거리
+    double traveled = 0.0;
+    for (int i = 0; i < minIdx; i++) {
+      traveled += _distanceM(_routePoints[i], _routePoints[i + 1]);
+    }
+    return traveled;
+  }
+
+  void _updateStepByDistance(LatLng loc) {
+    if (_stepIdx >= _steps.length - 1) return;
+    if (_stepEndDistM.isEmpty) return;
+    final traveled = _traveledDistM(loc);
+    final stepEnd = _stepIdx < _stepEndDistM.length ? _stepEndDistM[_stepIdx] : 0.0;
+    final remaining = (stepEnd - traveled).clamp(0.0, double.maxFinite);
+
+    // 400m 예비 발화
+    if (remaining < 400 && !_preAnnounced && _stepIdx + 1 < _steps.length) {
+      _preAnnounced = true;
+      final next = _steps[_stepIdx + 1];
+      final distStr = '${remaining.toStringAsFixed(0)}미터 앞';
+      _tts?.speak('$distStr ${next.label}');
+    }
+    // 50m → 자동 진행
+    if (remaining < 50) {
+      _preAnnounced = false;
+      setState(() => _stepIdx++);
+      _announceStep(_stepIdx);
+    }
   }
 
   void _checkOffRoute(LatLng loc) {
@@ -744,13 +799,15 @@ class _TurnStep {
   final IconData icon;
   final String label;
   final String dist;
-  const _TurnStep(this.icon, this.label, this.dist);
+  final double rawDistKm; // GPS 거리 자동 진행용 원시 거리(km)
+  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0]);
 
   factory _TurnStep.fromManeuver(ManeuverStep m) {
     return _TurnStep(
       _iconForType(m.type),
       _labelForType(m.type),
       _formatDist(m.distanceKm),
+      m.distanceKm,
     );
   }
 
