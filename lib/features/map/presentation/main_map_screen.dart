@@ -175,7 +175,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   void _recenterMap() {
     final o = _origin;
     if (o == null) return;
-    _mapCtrl.move(o, _currentZoom.clamp(10.0, 14.0));
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(_toMl(o), _currentZoom.clamp(10.0, 14.0)),
+    );
   }
 
   // ── Haversine ─────────────────────────────────────────────────────────────
