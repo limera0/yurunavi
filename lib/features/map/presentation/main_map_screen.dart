@@ -564,7 +564,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           maneuvers: _selectedManeuvers,
         ),
       ),
-    );
+    ).then((_) {
+      if (mounted) _clearDestination();
+    });
   }
 
   Future<void> _onRouteCardSelect(int idx) async {
