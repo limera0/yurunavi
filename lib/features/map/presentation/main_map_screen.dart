@@ -82,6 +82,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   static const _routeSourceId = 'route-source';
   static const _routeLayerId = 'route-layer';
+  static const _routeBgSourceId = 'route-bg-source';
+  static const _routeBgLayerId = 'route-bg-layer';
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -208,9 +210,39 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               ],
       };
 
+  Map<String, dynamic> _buildBgGeoJson(List<List<LatLng>> routes) => {
+        'type': 'FeatureCollection',
+        'features': routes.isEmpty
+            ? <dynamic>[]
+            : routes
+                .map((pts) => {
+                      'type': 'Feature',
+                      'geometry': {
+                        'type': 'LineString',
+                        'coordinates':
+                            pts.map((p) => [p.longitude, p.latitude]).toList(),
+                      },
+                      'properties': <String, dynamic>{},
+                    })
+                .toList(),
+      };
+
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
+    // bg layer (below selected route)
+    await ctrl.addGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
+    await ctrl.addLineLayer(
+      _routeBgSourceId,
+      _routeBgLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#9E9E9E',
+        lineWidth: 4.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+    );
+    // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
     await ctrl.addLineLayer(
       _routeSourceId,
@@ -226,7 +258,21 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   void _updateRouteLayer(List<LatLng> points) {
     if (!_styleLoaded) return;
+    // selected route
     _mlCtrl?.setGeoJsonSource(_routeSourceId, _buildRouteGeoJson(points));
+    // non-selected routes in grey
+    final state = ref.read(mapInteractionProvider);
+    final allRoutes = state.allRoutes;
+    final selIdx = state.selectedRouteIdx;
+    if (allRoutes.length > 1) {
+      final bgRoutes = [
+        for (int i = 0; i < allRoutes.length; i++)
+          if (i != selIdx) allRoutes[i],
+      ];
+      _mlCtrl?.setGeoJsonSource(_routeBgSourceId, _buildBgGeoJson(bgRoutes));
+    } else {
+      _mlCtrl?.setGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
+    }
     if (points.isEmpty) return;
     final minLat = points.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
     final maxLat = points.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
