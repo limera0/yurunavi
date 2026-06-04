@@ -31,3 +31,10 @@ You MUST follow this atomic iteration loop for every feature or fix. Do not bund
 4. Run code-auditor. If FAIL, fix and re-audit (max 3 loops, then stop & report).
 5. On PASS, commit. Move to next step.
 6. At end, write MORNING_REPORT.md: what was done, what passed, what's blocked, token usage note.
+
+
+---
+
+## CAUTION
+
+1. JDK21 is required on build.
