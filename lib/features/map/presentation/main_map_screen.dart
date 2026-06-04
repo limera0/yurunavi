@@ -227,6 +227,23 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   void _updateRouteLayer(List<LatLng> points) {
     if (!_styleLoaded) return;
     _mlCtrl?.setGeoJsonSource(_routeSourceId, _buildRouteGeoJson(points));
+    if (points.isEmpty) return;
+    final minLat = points.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = points.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLng = points.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLng = points.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: ml.LatLng(minLat, minLng),
+          northeast: ml.LatLng(maxLat, maxLng),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: 260,
+      ),
+    );
   }
 
   // ── Haversine ─────────────────────────────────────────────────────────────
