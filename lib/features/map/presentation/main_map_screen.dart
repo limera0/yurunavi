@@ -216,8 +216,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       _routeSourceId,
       _routeLayerId,
       const ml.LineLayerProperties(
-        lineColor: '#F28C28',
-        lineWidth: 5.0,
+        lineColor: '#1E5AFF',
+        lineWidth: 6.0,
         lineCap: 'round',
         lineJoin: 'round',
       ),
