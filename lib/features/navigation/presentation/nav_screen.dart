@@ -457,7 +457,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final target = _zoomForSpeed(_speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
-    _navZoom += diff.clamp(-0.5, 0.5);
+    _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
     _mapCtrl.move(loc, _navZoom);
   }
 
