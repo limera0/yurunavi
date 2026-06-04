@@ -700,21 +700,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                         ),
                       ],
                     ),
-                    child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text('좋은 장소를 찾고 있어요…',
-                              style: AppTextStyles.bodyMD),
-                        ]),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ),
