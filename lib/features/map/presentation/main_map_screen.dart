@@ -437,52 +437,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     );
   }
 
-  // ── 경로 요약 ──────────────────────────────────────────────────────────────
-
-  void _showRouteSummary() {
-    final state = ref.read(mapInteractionProvider);
-    final idx = state.selectedRouteIdx.clamp(0, state.allRouteMeta.length - 1);
-    if (state.allRouteMeta.isEmpty) return;
-    final meta = state.allRouteMeta[idx];
-    final maneuvers = idx < _fetchedRoutes.length ? _fetchedRoutes[idx].maneuvers : <ManeuverStep>[];
-    const turnTypes = {9, 10, 11, 14, 15, 16};
-    final windingCount = maneuvers.where((m) => turnTypes.contains(m.type)).length;
-    const courseNames = ['시골길', '지방도로', '국도'];
-    final courseName = courseNames[idx.clamp(0, 2)];
-    final h = meta.mins ~/ 60;
-    final m = meta.mins % 60;
-    final timeStr = h > 0 ? '$h시간 $m분' : '$m분';
-
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$courseName 경로 요약',
-                  style: AppTextStyles.headlineMD),
-              const SizedBox(height: 16),
-              _SummaryRow(Icons.straighten_rounded, '총 거리', '${meta.km.toStringAsFixed(1)}km'),
-              _SummaryRow(Icons.schedule_rounded, '예상 시간', timeStr),
-              _SummaryRow(Icons.star_rounded, '재미 점수', '${meta.windingScore.toStringAsFixed(0)}점'),
-              _SummaryRow(Icons.turn_right_rounded, '와인딩 구간', '$windingCount개'),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── 내 장소 (즐겨찾기 + 최근 경로) ─────────────────────────────────────────
 
   void _showPlacesSheet() {
@@ -838,7 +792,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                       onSelect: _onRouteCardSelect,
                       onStart: _startNavigation,
                       onClose: _clearDestination,
-                      onShowSummary: _showRouteSummary,
                     ),
                   ),
               ],
@@ -1253,7 +1206,6 @@ class _CourseSheet extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final VoidCallback onStart;
   final VoidCallback onClose;
-  final VoidCallback? onShowSummary; // 경로 요약 시트 트리거
 
   const _CourseSheet({
     required this.routeMeta,
@@ -1261,7 +1213,6 @@ class _CourseSheet extends StatelessWidget {
     required this.onSelect,
     required this.onStart,
     required this.onClose,
-    this.onShowSummary,
   });
 
   static const _routes = [
@@ -1300,29 +1251,17 @@ class _CourseSheet extends StatelessWidget {
             ),
           ),
 
-          // 닫기 + 요약 버튼 행 (우측)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (onShowSummary != null)
-                TextButton.icon(
-                  onPressed: onShowSummary,
-                  icon: const Icon(Icons.info_outline, size: 15),
-                  label: const Text('요약', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.secondary,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                  ),
-                ),
-              GestureDetector(
-                onTap: onClose,
-                child: const Padding(
-                  padding: EdgeInsets.fromLTRB(0, 0, 14, 0),
-                  child: Icon(Icons.close_rounded,
-                      size: 20, color: AppColors.textHint),
-                ),
+          // 닫기 버튼 행 (우측)
+          Align(
+            alignment: Alignment.centerRight,
+            child: GestureDetector(
+              onTap: onClose,
+              child: const Padding(
+                padding: EdgeInsets.fromLTRB(0, 0, 14, 0),
+                child: Icon(Icons.close_rounded,
+                    size: 20, color: AppColors.textHint),
               ),
-            ],
+            ),
           ),
 
           // 3가지 경로 카드
@@ -1340,10 +1279,6 @@ class _CourseSheet extends StatelessWidget {
                 // best fun score among loaded routes
                 final bestWs = routeMeta.isEmpty ? 0.0
                     : routeMeta.map((m) => m.windingScore).reduce((a, b) => a > b ? a : b);
-                final bestDist = routeMeta.isEmpty ? double.infinity
-                    : routeMeta.map((m) => m.km).reduce((a, b) => a < b ? a : b);
-                final bestTime = routeMeta.isEmpty ? double.infinity
-                    : routeMeta.map((m) => m.mins.toDouble()).reduce((a, b) => a < b ? a : b);
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -1356,8 +1291,6 @@ class _CourseSheet extends StatelessWidget {
                       duration: durStr,
                       windingScore: ws,
                       isBestFun: hasMeta && ws >= bestWs && ws > 0,
-                      isBestDist: hasMeta && distKm <= bestDist && distKm > 0,
-                      isBestTime: hasMeta && mins.toDouble() <= bestTime && mins > 0,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -1393,8 +1326,6 @@ class _RouteCard extends StatelessWidget {
   final String duration;
   final double windingScore;
   final bool isBestFun;
-  final bool isBestDist;
-  final bool isBestTime;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -1404,8 +1335,6 @@ class _RouteCard extends StatelessWidget {
     required this.duration,
     this.windingScore = 0.0,
     this.isBestFun = false,
-    this.isBestDist = false,
-    this.isBestTime = false,
     required this.isSelected,
     required this.onTap,
   });
@@ -1457,22 +1386,6 @@ class _RouteCard extends StatelessWidget {
                 fontSize: 15,
               ),
             ),
-            if (isBestDist || isBestTime)
-              Padding(
-                padding: const EdgeInsets.only(top: 3, bottom: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (isBestDist)
-                      _CompChip(label: '최단', color: info.color),
-                    if (isBestDist && isBestTime)
-                      const SizedBox(width: 3),
-                    if (isBestTime)
-                      _CompChip(label: '최속', color: info.color),
-                  ],
-                ),
-              ),
             Text(
               duration,
               style: AppTextStyles.labelSM.copyWith(
@@ -1510,32 +1423,6 @@ class _RouteCard extends StatelessWidget {
   }
 }
 
-
-class _CompChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  const _CompChip({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Map markers
@@ -1774,29 +1661,3 @@ class _PlacesSheet extends ConsumerWidget {
   }
 }
 
-class _SummaryRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  const _SummaryRow(this.icon, this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Text(label,
-              style: AppTextStyles.bodyMD
-                  .copyWith(color: AppColors.textSecondary)),
-          const Spacer(),
-          Text(value,
-              style: AppTextStyles.titleSM
-                  .copyWith(fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}
