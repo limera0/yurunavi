@@ -81,6 +81,21 @@ class RoutingService {
     _speedNationalKmh,
   ];
 
+  // 시골길 우회 과다 시 완화용 costing (main.rs handle_calc_route 와 동일)
+  static const Map<String, dynamic> _ruralBalancedOpts = {
+    'use_highways': 0.0,
+    'use_ferry': 0.0,
+    'class_factors': {
+      '1': 100.0,
+      '2': 4.0,
+      '3': 1.2,
+      '4': 0.8,
+      '5': 0.5,
+    },
+  };
+
+  static const double _ruralDetourThreshold = 1.3;
+
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
   static const _cacheMaxSize = 20;
@@ -301,6 +316,77 @@ class RoutingService {
         maneuvers: maneuvers,
       ));
     }
+
+    // ── 시골길 1.3배 폴백 (main.rs 와 동작 일치) ──────────────────
+    // 시골(0) 시간이 지방(1) 시간의 1.3배 이상이면 과다 우회로 보고
+    // balanced costing 으로 시골 경로만 재요청해 교체한다.
+    if (results.length == 3) {
+      final ruralMins = results[0].durationMin;
+      final provMins = results[1].durationMin;
+      if (provMins > 0 && ruralMins / provMins >= _ruralDetourThreshold) {
+        dev.log(
+          '시골길 과다우회 감지 (rural=${ruralMins}m / prov=${provMins}m '
+          '= ${(ruralMins / provMins).toStringAsFixed(2)}x ≥ $_ruralDetourThreshold) '
+          '→ balanced 재요청',
+          name: 'RoutingService',
+        );
+        try {
+          final resp = await http
+              .post(
+                Uri.parse('$_valhallaBase/route'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'locations': locations,
+                  'costing': 'motorcycle',
+                  'costing_options': {'motorcycle': _ruralBalancedOpts},
+                }),
+              )
+              .timeout(const Duration(seconds: 20));
+
+          if (resp.statusCode == 200) {
+            final data = jsonDecode(resp.body) as Map<String, dynamic>;
+            final trip = data['trip'] as Map<String, dynamic>?;
+            final legs = (trip?['legs'] as List?) ?? [];
+            final pts = _extractPoints(legs);
+            if (pts.isNotEmpty) {
+              final km = legs.fold<double>(
+                0,
+                (sum, leg) =>
+                    sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
+              );
+              // ETA 는 기존과 동일하게 _courseSpeeds[0] 로 재계산 (회귀 방지 핵심)
+              final realisticMins = (km / _courseSpeeds[0] * 60).round();
+              final maneuvers = <ManeuverStep>[];
+              for (final leg in legs) {
+                for (final m in (leg['maneuvers'] as List? ?? [])) {
+                  maneuvers.add(ManeuverStep(
+                    type: (m['type'] as num?)?.toInt() ?? 0,
+                    instruction: (m['instruction'] as String?) ?? '',
+                    distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
+                  ));
+                }
+              }
+              results[0] = RouteResult(
+                points: pts,
+                distanceKm: km,
+                durationMin: realisticMins,
+                maneuvers: maneuvers,
+              );
+              dev.log(
+                'balanced 교체 완료: ${km.toStringAsFixed(1)}km '
+                '${realisticMins}m',
+                name: 'RoutingService',
+              );
+            }
+          }
+          // balanced 실패 시: 기존 시골 경로 유지 (조용히 폴백, throw 금지)
+        } catch (e) {
+          dev.log('balanced 폴백 실패 → 기존 시골 경로 유지: $e',
+              name: 'RoutingService', level: 900);
+        }
+      }
+    }
+
     return results;
   }
 
