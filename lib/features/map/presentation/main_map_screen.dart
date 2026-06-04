@@ -280,48 +280,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (action != _TapAction.destination) return; // cancelled
     }
 
-    ref.read(mapInteractionProvider.notifier).setLoading(true);
     setState(() {
       _touchPoint = tapped;
       _touchDistKm = _haversineKm(origin, tapped);
       _waypointAddedAtTouch = false; // 새 탭 → 경유지 버튼 다시 표시
     });
-
-    final poiSvc = ref.read(poiServiceProvider);
-    try {
-      final result = await poiSvc.snapDestination(
-        origin: origin,
-        tapped: tapped,
-        radiusKm: 1.0,
-      );
-      ref.read(poiListProvider.notifier).set(result.allPois);
-
-      LatLng dest;
-      if (result.snappedPoi != null) {
-        dest = result.snappedPoi!.location;
-        _showSnapToast(result.snappedPoi!);
-      } else {
-        final expand = await _showNoPoiDialog();
-        if (!mounted) return;
-        if (expand == true) {
-          final r2 = await poiSvc.snapDestination(
-            origin: origin,
-            tapped: tapped,
-            radiusKm: 3.0,
-          );
-          ref.read(poiListProvider.notifier).set(r2.allPois);
-          dest = r2.snappedPoi?.location ?? tapped;
-          if (r2.snappedPoi != null) _showSnapToast(r2.snappedPoi!);
-        } else {
-          dest = tapped;
-        }
-      }
-      _applyDestination(dest);
-    } finally {
-      if (mounted) {
-        ref.read(mapInteractionProvider.notifier).setLoading(false);
-      }
-    }
+    _applyDestination(tapped);
   }
 
   Future<_TapAction?> _showTapActionSheet(LatLng tapped) {
@@ -609,58 +573,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
     await _fetchAndStoreAllRoutes(origin, dest);
   }
-
-  // ── Toasts / Dialogs ──────────────────────────────────────────────────────
-
-  void _showSnapToast(Poi poi) {
-    final msg = poi.type == PoiType.cafe
-        ? '근처 카페로 목적지를 조정했어요'
-        : '근처 편의점으로 목적지를 조정했어요';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          Icon(
-            poi.type == PoiType.cafe ? Icons.local_cafe : Icons.store,
-            color: Colors.white,
-            size: 16,
-          ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(msg, style: AppTextStyles.bodyMD.copyWith(color: Colors.white))),
-        ]),
-        backgroundColor: AppColors.primary,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Future<bool?> _showNoPoiDialog() => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: Row(children: [
-            const Icon(Icons.search_off, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Text('쉴 곳을 못 찾았어요',
-                style: AppTextStyles.headlineMD),
-          ]),
-          content: Text(
-            '목적지 근처에 카페나 편의점이 없어요.\n범위를 넓혀 찾아볼까요?',
-            style: AppTextStyles.bodyMD,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('이대로'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('범위 넓혀 찾기'),
-            ),
-          ],
-        ),
-      );
 
   // ── POI markers ───────────────────────────────────────────────────────────
 
