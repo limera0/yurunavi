@@ -964,4 +964,28 @@ mod tests {
             "시골숲길 v4={rural:.1} > 국도 v4={national:.1} 기대");
         assert!(rural > 50.0, "시골숲길 점수가 50점 이상이어야 함, 실제: {rural:.1}");
     }
+
+    // ── 항목 2: 고속도로 배제 검증 ──────────────────────────────────────────
+
+    #[test]
+    fn motorway_fc1_contributes_zero_to_fun_score() {
+        // FC1(motorway) avg_fc=1.0 → road_class_score=0
+        // 동일 형상에서 고속도로 경로가 시골길보다 현저히 낮아야 함
+        let pts: Vec<GpsPoint> = (0..20)
+            .map(|i| GpsPoint { lat: 37.0, lng: 127.0 + i as f64 * 0.01 })
+            .collect();
+        let motorway_score = fun_score_v2(&pts, 1.0); // FC1 = motorway
+        let rural_score    = fun_score_v2(&pts, 5.0); // FC5 = 소로
+        assert!(motorway_score < rural_score,
+            "고속도로(FC1) 점수({motorway_score:.1}) < 소로(FC5)({rural_score:.1}) 필요");
+        assert!(motorway_score < 30.0,
+            "고속도로 fun_score < 30 필요, 실제: {motorway_score:.1}");
+    }
+
+    #[test]
+    fn motorway_link_near_fc1_scores_low() {
+        // motorway_link는 FC1~FC2 사이 (avg≈1.3)
+        let s = road_class_score(1.3);
+        assert!(s < 10.0, "motorway_link(FC1.3) road_class_score < 10 필요, 실제: {s:.1}");
+    }
 }
