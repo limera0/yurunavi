@@ -1,0 +1,54 @@
+{
+  "@@locale": "ko",
+  "@@last_modified": "2026-06-04",
+  "appTitle": "유루나비",
+  "@appTitle": { "description": "앱 이름" },
+
+  "searchingRoute": "좋은 장소를 찾고 있어요…",
+  "@searchingRoute": { "description": "경로 탐색 중 로딩 메시지" },
+
+  "arrived": "도착했습니다!",
+  "@arrived": { "description": "목적지 도착 다이얼로그 제목" },
+
+  "arrivedMessage": "목적지에 도착했습니다.\n내비게이션을 종료합니다.",
+  "@arrivedMessage": { "description": "목적지 도착 다이얼로그 내용" },
+
+  "confirm": "확인",
+  "@confirm": { "description": "확인 버튼" },
+
+  "noRoute": "이 구간의 경로를 찾을 수 없습니다.",
+  "@noRoute": { "description": "경로 없음 오류 메시지" },
+
+  "serverDown": "라우팅 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  "@serverDown": { "description": "서버 다운 오류 메시지" },
+
+  "retry": "다시 시도",
+  "@retry": { "description": "재시도 버튼" },
+
+  "offline": "오프라인 — 캐시 지도 사용 중",
+  "@offline": { "description": "오프라인 배너 텍스트" },
+
+  "locationPermissionTitle": "위치 권한 필요",
+  "@locationPermissionTitle": { "description": "위치 권한 다이얼로그 제목" },
+
+  "locationPermissionMessage": "유루나비는 현재 위치를 기반으로 경로를 탐색합니다.\n권한 없이도 앱을 사용할 수 있지만 일부 기능이 제한됩니다.",
+  "@locationPermissionMessage": { "description": "위치 권한 다이얼로그 내용" },
+
+  "skip": "건너뛰기",
+  "@skip": { "description": "건너뛰기 버튼" },
+
+  "openSettings": "설정 열기",
+  "@openSettings": { "description": "설정 열기 버튼" },
+
+  "startEngine": "Start your Engine",
+  "@startEngine": { "description": "내비 시작 슬라이더 버튼" },
+
+  "courseCountryside": "시골길로\n느긋하게",
+  "@courseCountryside": { "description": "시골길 경로 카드 레이블" },
+
+  "courseProvincial": "지방도로\n여유롭게",
+  "@courseProvincial": { "description": "지방도로 경로 카드 레이블" },
+
+  "courseNational": "국도로\n빠르게",
+  "@courseNational": { "description": "국도 경로 카드 레이블" }
+}

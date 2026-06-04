@@ -1,0 +1,21 @@
+{
+  "@@locale": "ja",
+  "@@last_modified": "2026-06-04",
+  "appTitle": "ゆるナビ",
+  "searchingRoute": "良いルートを探しています…",
+  "arrived": "到着しました！",
+  "arrivedMessage": "目的地に到着しました。\nナビゲーションを終了します。",
+  "confirm": "確認",
+  "noRoute": "このルートは見つかりませんでした。",
+  "serverDown": "ルーティングサーバーに接続できません。しばらくしてから再試行してください。",
+  "retry": "再試行",
+  "offline": "オフライン — キャッシュマップ使用中",
+  "locationPermissionTitle": "位置情報の許可が必要",
+  "locationPermissionMessage": "ゆるナビは現在地を基にルートを探索します。\n許可なしでも利用できますが、一部機能が制限されます。",
+  "skip": "スキップ",
+  "openSettings": "設定を開く",
+  "startEngine": "Start your Engine",
+  "courseCountryside": "田舎道で\nのんびり",
+  "courseProvincial": "地方道を\nゆったり",
+  "courseNational": "国道で\n速く"
+}
