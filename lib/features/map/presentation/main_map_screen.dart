@@ -780,14 +780,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               child: _RightPanel(
                 showCourseSheet: _showCourseSheet,
                 onRecenter: _recenterMap,
-                onZoomIn: () => _mapCtrl.move(
-                  _mapCtrl.camera.center,
-                  (_mapCtrl.camera.zoom + 1).clamp(1.0, 19.0),
-                ),
-                onZoomOut: () => _mapCtrl.move(
-                  _mapCtrl.camera.center,
-                  (_mapCtrl.camera.zoom - 1).clamp(1.0, 19.0),
-                ),
+                onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
+                onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
               ),
             ),
           ),
