@@ -30,6 +30,7 @@ dependencies:
   connectivity_plus: ^6.1.4
   wakelock_plus: ^1.2.10
   flutter_tts: ^4.2.0
+  maplibre_gl: ^0.26.1
 
 dev_dependencies:
   flutter_test:
