@@ -78,6 +78,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
   ml.MapLibreMapController? _mlCtrl; // M1~M4 동안 점진 연결
+  bool _styleLoaded = false;
+
+  static const _routeSourceId = 'route-source';
+  static const _routeLayerId = 'route-layer';
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -178,6 +182,47 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _mlCtrl?.animateCamera(
       ml.CameraUpdate.newLatLngZoom(_toMl(o), _currentZoom.clamp(10.0, 14.0)),
     );
+  }
+
+  // ── Route polyline (M2) ───────────────────────────────────────────────────
+
+  Map<String, dynamic> _buildRouteGeoJson(List<LatLng> points) => {
+        'type': 'FeatureCollection',
+        'features': points.isEmpty
+            ? <dynamic>[]
+            : [
+                {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'LineString',
+                    // GeoJSON은 [longitude, latitude] 순서
+                    'coordinates':
+                        points.map((p) => [p.longitude, p.latitude]).toList(),
+                  },
+                  'properties': <String, dynamic>{},
+                }
+              ],
+      };
+
+  Future<void> _initRouteLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
+    await ctrl.addLineLayer(
+      _routeSourceId,
+      _routeLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#F28C28',
+        lineWidth: 5.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+    );
+  }
+
+  void _updateRouteLayer(List<LatLng> points) {
+    if (!_styleLoaded) return;
+    _mlCtrl?.setGeoJsonSource(_routeSourceId, _buildRouteGeoJson(points));
   }
 
   // ── Haversine ─────────────────────────────────────────────────────────────
@@ -632,9 +677,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final pois = ref.watch(poiListProvider); // ignore: unused_local_variable
     final dest = interaction.destination;
     final waypoint = interaction.waypoint; // ignore: unused_local_variable
-    final routePolyline = interaction.routePolyline; // ignore: unused_local_variable
     final allRoutes = interaction.allRoutes; // ignore: unused_local_variable
     final selectedRouteIdx = interaction.selectedRouteIdx;
+
+    ref.listen<MapInteractionState>(mapInteractionProvider, (prev, next) {
+      if (prev?.routePolyline != next.routePolyline) {
+        _updateRouteLayer(next.routePolyline);
+      }
+    });
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
@@ -673,6 +723,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           // ══════════════════════════════════════════════════════
           // LAYER 1 · MapLibre Map (osm_liberty 스타일)
           // M1: 빈 지도 + 스타일만. 폴리라인·마커는 M2~M3에서 추가.
+          // M2: 경로 폴리라인 GeoJSON 소스/레이어 추가.
           // ══════════════════════════════════════════════════════
           ml.MapLibreMap(
             styleString: 'assets/images/osm_liberty_yurunavi.json',
@@ -686,6 +737,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             tiltGesturesEnabled: false,
             compassEnabled: false,
             onMapCreated: (c) => _mlCtrl = c,
+            onStyleLoadedCallback: () async {
+              _styleLoaded = true;
+              await _initRouteLayer();
+              // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
+              final poly =
+                  ref.read(mapInteractionProvider).routePolyline;
+              if (poly.isNotEmpty) _updateRouteLayer(poly);
+            },
             onMapClick: (point, latLng) {
               _onMapTap(
                 const TapPosition(Offset.zero, null),
