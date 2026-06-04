@@ -155,7 +155,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (last != null && mounted && _origin == null) {
         final loc = LatLng(last.latitude, last.longitude);
         setState(() => _lastKnown = loc);
-        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+        _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
+        );
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
@@ -171,7 +173,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       setState(() => _origin = loc);
       if (isFirstFix) {
         // Snap the camera to the rider the moment GPS resolves.
-        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+        _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
+        );
       }
     });
   }
@@ -381,10 +385,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           ? origin.longitude
           : dest.longitude,
     );
-    _mapCtrl.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds(sw, ne),
-        padding: const EdgeInsets.fromLTRB(50, 110, 80, 260),
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: _toMl(sw),
+          northeast: _toMl(ne),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: 260,
       ),
     );
 
