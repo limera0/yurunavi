@@ -237,6 +237,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
+    // 경로선을 circle 마커 레이어 아래에 삽입하기 위해 circle layer id 산출
+    final circleLyr = ctrl.circleManager?.layerIds.isNotEmpty == true
+        ? ctrl.circleManager!.layerIds.first
+        : null;
+    debugPrint('[zorder] circleLyr=$circleLyr');
     // bg layer (below selected route)
     await ctrl.addGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
     await ctrl.addLineLayer(
@@ -248,6 +253,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: circleLyr,
     );
     // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
@@ -260,6 +266,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: circleLyr,
     );
   }
 
