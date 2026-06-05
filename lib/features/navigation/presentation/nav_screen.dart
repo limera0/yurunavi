@@ -308,7 +308,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
         destination: dest,
         waypoints: widget.waypoints,
       );
-      if (mounted && routes.isNotEmpty) setState(() => _routePoints = routes[0].points);
+      if (mounted && routes.isNotEmpty) {
+        final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
+        setState(() => _routePoints = routes[selIdx].points);
+      }
     } on RoutingException {
       // 재탐색 실패 — 기존 경로 유지
     } finally {
