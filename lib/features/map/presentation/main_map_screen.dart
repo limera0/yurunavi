@@ -85,6 +85,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _routeBgSourceId = 'route-bg-source';
   static const _routeBgLayerId = 'route-bg-layer';
 
+  ml.Circle? _locMarker;
+  ml.Circle? _destMarker;
+  static const String _kLocColor = '#00C853';
+  static const String _kDestColor = '#E53935';
+
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
 
@@ -160,6 +165,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         _mlCtrl?.animateCamera(
           ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
         );
+        _ensureLocationMarker(); // unawaited — B1
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
@@ -179,6 +185,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
         );
       }
+      _ensureLocationMarker(); // unawaited — B1
     });
   }
 
@@ -254,6 +261,52 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineJoin: 'round',
       ),
     );
+  }
+
+  // ── Marker helpers (B1/B2) ────────────────────────────────────────────────
+
+  Future<void> _ensureLocationMarker() async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final p = _origin ?? _lastKnown;
+    if (p == null) return;
+    final geo = _toMl(p);
+    if (_locMarker == null) {
+      _locMarker = await c.addCircle(ml.CircleOptions(
+        geometry: geo,
+        circleRadius: 8,
+        circleColor: _kLocColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    } else {
+      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
+    }
+  }
+
+  Future<void> _ensureDestMarker(LatLng dest) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final geo = _toMl(dest);
+    if (_destMarker == null) {
+      _destMarker = await c.addCircle(ml.CircleOptions(
+        geometry: geo,
+        circleRadius: 8,
+        circleColor: _kDestColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    } else {
+      await c.updateCircle(_destMarker!, ml.CircleOptions(geometry: geo));
+    }
+  }
+
+  Future<void> _removeDestMarker() async {
+    final c = _mlCtrl;
+    if (c != null && _destMarker != null) {
+      await c.removeCircle(_destMarker!);
+    }
+    _destMarker = null;
   }
 
   void _updateRouteLayer(List<LatLng> points) {
@@ -432,6 +485,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     });
     _sheetCtrl.forward();
 
+    _ensureDestMarker(dest); // unawaited — B2
+
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
   }
@@ -538,6 +593,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     });
     _sheetCtrl.reverse();
     _recenterMap();
+    _removeDestMarker(); // unawaited — B2
   }
 
   void _startNavigation() {
@@ -686,6 +742,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               final poly =
                   ref.read(mapInteractionProvider).routePolyline;
               if (poly.isNotEmpty) _updateRouteLayer(poly);
+              // B1: 현위치 마커 — 경로 레이어 위에 그려지도록 마지막에 추가
+              await _ensureLocationMarker();
             },
             onMapClick: (point, latLng) {
               _onMapTap(
