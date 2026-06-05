@@ -86,9 +86,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _routeBgLayerId = 'route-bg-layer';
 
   ml.Circle? _locMarker;
-  ml.Circle? _destMarker;
+  ml.Symbol? _destMarker;
   static const String _kLocColor = '#00C853';
-  static const String _kDestColor = '#E53935';
+  static const String _kDestIcon = 'marker';
+  static const double _kDestIconSize = 1.6;
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -296,22 +297,21 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     if (c == null || !_styleLoaded) return;
     final geo = _toMl(dest);
     if (_destMarker == null) {
-      _destMarker = await c.addCircle(ml.CircleOptions(
+      _destMarker = await c.addSymbol(ml.SymbolOptions(
         geometry: geo,
-        circleRadius: 8,
-        circleColor: _kDestColor,
-        circleStrokeWidth: 3,
-        circleStrokeColor: '#FFFFFF',
+        iconImage: _kDestIcon,
+        iconSize: _kDestIconSize,
+        iconAnchor: 'bottom',
       ));
     } else {
-      await c.updateCircle(_destMarker!, ml.CircleOptions(geometry: geo));
+      await c.updateSymbol(_destMarker!, ml.SymbolOptions(geometry: geo));
     }
   }
 
   Future<void> _removeDestMarker() async {
     final c = _mlCtrl;
     if (c != null && _destMarker != null) {
-      await c.removeCircle(_destMarker!);
+      await c.removeSymbol(_destMarker!);
     }
     _destMarker = null;
   }
