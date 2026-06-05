@@ -116,7 +116,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   LatLng? _touchPoint;
   // ignore: unused_field
   double _touchDistKm = 0;
-  bool _waypointAddedAtTouch = false; // 같은 터치 지점에 경유지 추가됐으면 true
 
   // Slide-up animation for course sheet
   late final AnimationController _sheetCtrl;
@@ -407,7 +406,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     setState(() {
       _touchPoint = tapped;
       _touchDistKm = _haversineKm(origin, tapped);
-      _waypointAddedAtTouch = false; // 새 탭 → 경유지 버튼 다시 표시
     });
     _applyDestination(tapped);
   }
@@ -873,23 +871,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 같은 지점에 경유지가 이미 추가됐으면 버튼 숨김 (버그 수정)
-                  if (!_waypointAddedAtTouch)
-                  _FloatingActionLabel(
-                    label: '경유지 추가',
-                    color: const Color(0xFFFFB300),
-                    onTap: () {
-                      if (_touchPoint != null) {
-                        ref
-                            .read(mapInteractionProvider.notifier)
-                            .setWaypoint(_touchPoint!);
-                        // _touchPoint 유지 → 목적지 버튼은 계속 표시
-                        setState(() => _waypointAddedAtTouch = true);
-                      }
-                    },
-                  ),
-                  if (!_waypointAddedAtTouch)
-                  const SizedBox(width: 10),
                   _FloatingActionLabel(
                     label: '목적지',
                     color: AppColors.mapDestination,
