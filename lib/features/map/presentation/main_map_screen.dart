@@ -89,7 +89,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   ml.Symbol? _destMarker;
   static const String _kLocColor = '#00C853';
   static const String _kDestIcon = 'pointer_red';
-  static const double _kDestIconSize = 0.5; // 96px PNG 기준, 폰 실측으로 조정
+  static const double _kDestIconSize = 1.5; // 폰 실측: 3x 적용
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
