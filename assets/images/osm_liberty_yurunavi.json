@@ -9,7 +9,7 @@
   "sources": {
     "openmaptiles": {
       "type": "vector",
-      "url": "http://192.168.0.57:8080/data/v3.json"
+      "url": "https://tiles.westinx.com/data/v3.json"
     },
     "natural_earth_shaded_relief": {
       "maxzoom": 6,
@@ -21,7 +21,7 @@
     }
   },
   "sprite": "https://maputnik.github.io/osm-liberty/sprites/osm-liberty",
-  "glyphs": "http://192.168.0.57:8080/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "https://tiles.westinx.com/fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",

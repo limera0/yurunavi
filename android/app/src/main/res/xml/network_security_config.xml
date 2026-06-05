@@ -8,7 +8,4 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">ts.net</domain>
     </domain-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">192.168.0.57</domain>
-    </domain-config>
 </network-security-config>
