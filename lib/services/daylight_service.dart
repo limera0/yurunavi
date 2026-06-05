@@ -7,13 +7,13 @@ import 'package:sunrise_sunset_calc/sunrise_sunset_calc.dart';
 
 /// 낮/밤 사이클 상태 — DaylightBar가 표시에 사용한다.
 class DaylightCycleState {
-  /// true=낮(BMNT~EENT), false=밤(EENT~익일BMNT)
+  /// true=낮(일출~일몰), false=밤(일몰~익일일출)
   final bool isDay;
   /// 현재 구간 내 진행도 0.0~1.0
   final double progress;
-  /// 게이지 상단 시각 (낮=BMNT, 밤=EENT)
+  /// 게이지 상단 시각 (낮=일출, 밤=일몰)
   final DateTime topTime;
-  /// 게이지 하단 시각 (낮=EENT, 밤=익일BMNT)
+  /// 게이지 하단 시각 (낮=일몰, 밤=익일일출)
   final DateTime bottomTime;
 
   const DaylightCycleState({
@@ -24,11 +24,12 @@ class DaylightCycleState {
   });
 }
 
-/// BMNT/EENT 계산 서비스.
+/// 일출/일몰 계산 서비스.
 ///
 /// 우선순위:
-/// 1. api.sunrise-sunset.org 의 nautical_twilight (UTC→KST) — (위치1dp+날짜) 기준 하루 1회 캐시
+/// 1. api.sunrise-sunset.org 의 sunrise/sunset (UTC→KST) — (위치1dp+날짜) 기준 하루 1회 캐시
 /// 2. sunrise_sunset_calc 패키지 로컬 계산 (오프라인 fallback)
+/// 내부 record 필드명은 bmnt/eent를 유지하지만 실제로는 일출/일몰 시각을 담는다.
 class DaylightService {
   // ── API 결과 인메모리 캐시 (앱 생명주기 동안 유지) ───────────────────────────
   static final Map<String, ({DateTime bmnt, DateTime eent})> _apiCache = {};
@@ -38,7 +39,7 @@ class DaylightService {
     return '${lat.toStringAsFixed(1)},${lng.toStringAsFixed(1)},$d';
   }
 
-  /// sunrise-sunset.org API에서 nautical twilight 를 가져온다.
+  /// sunrise-sunset.org API에서 sunrise/sunset 를 가져온다.
   /// 성공 시 캐시 저장 후 반환. 실패 시 null.
   static Future<({DateTime bmnt, DateTime eent})?> fetchRemote(
     double lat,
@@ -61,10 +62,16 @@ class DaylightService {
       if (body['status'] != 'OK') return null;
       final results = body['results'] as Map<String, dynamic>;
 
-      // API 반환 형식: ISO 8601 UTC (e.g. "2024-06-03T20:17:00+00:00")
-      // nautical_twilight_begin = BMNT, nautical_twilight_end = EENT
-      final bmntUtc = DateTime.parse(results['nautical_twilight_begin'] as String);
-      final eentUtc = DateTime.parse(results['nautical_twilight_end'] as String);
+      // API 반환 형식: ISO 8601 UTC (e.g. "2026-06-05T20:10:31+00:00")
+      // sunrise/sunset 키 사용 (0단계 curl로 존재 확인됨)
+      final sRaw = results['sunrise'];
+      final eRaw = results['sunset'];
+      if (sRaw == null || eRaw == null) {
+        debugPrint('[daylight] api missing sunrise/sunset keys, fallback to local');
+        return null;
+      }
+      final bmntUtc = DateTime.parse(sRaw as String);
+      final eentUtc = DateTime.parse(eRaw as String);
 
       // toLocal()로 기기 로컬시각(KST)으로 변환 → epoch 비교 정상화
       final bmnt = bmntUtc.toLocal();
@@ -95,7 +102,6 @@ class DaylightService {
 
   static ({DateTime bmnt, DateTime eent}) _localCalc(
       double lat, double lng, DateTime date) {
-    const civilOffset = Duration(minutes: 30);
     try {
       final utcOffset = date.timeZoneOffset;
       final result = getSunriseSunset(lat, lng, utcOffset, date);
@@ -106,12 +112,10 @@ class DaylightService {
       }
       // 패키지는 UTC-tagged에 LOCAL clock값을 저장(isUtc=true, hour=KST시각).
       // DateTime(...)으로 local-tagged 재포장 → epoch 비교 정상화.
-      final sunriseLocal = DateTime(date.year, date.month, date.day,
+      final bmnt = DateTime(date.year, date.month, date.day,
           sunrise.hour, sunrise.minute, sunrise.second);
-      final sunsetLocal = DateTime(date.year, date.month, date.day,
+      final eent = DateTime(date.year, date.month, date.day,
           sunset.hour, sunset.minute, sunset.second);
-      final bmnt = sunriseLocal.subtract(civilOffset);
-      final eent = sunsetLocal.add(civilOffset);
       debugPrint('[daylight] path=local bmnt=$bmnt eent=$eent isUtc=${bmnt.isUtc}');
       return (bmnt: bmnt, eent: eent);
     } catch (_) {
@@ -120,10 +124,11 @@ class DaylightService {
   }
 
   static ({DateTime bmnt, DateTime eent}) _fallback(DateTime date) {
+    // 일출/일몰 근사 (API·로컬 계산 모두 실패 시만 사용)
     final base = DateTime(date.year, date.month, date.day);
     return (
-      bmnt: base.add(const Duration(hours: 6)),
-      eent: base.add(const Duration(hours: 20)),
+      bmnt: base.add(const Duration(hours: 5, minutes: 30)),
+      eent: base.add(const Duration(hours: 19, minutes: 30)),
     );
   }
 
@@ -137,8 +142,8 @@ class DaylightService {
 
   /// 낮/밤 사이클 상태 계산.
   ///
-  /// 낮 (BMNT~EENT): progress = (now-BMNT)/(EENT-BMNT), topTime=BMNT, bottomTime=EENT
-  /// 밤 (EENT~익일BMNT): progress = (now-EENT)/(nextBMNT-EENT), topTime=EENT, bottomTime=nextBMNT
+  /// 낮 (일출~일몰): progress = (now-일출)/(일몰-일출), topTime=일출, bottomTime=일몰
+  /// 밤 (일몰~익일일출): progress = (now-일몰)/(next일출-일몰), topTime=일몰, bottomTime=next일출
   static DaylightCycleState cycleState({
     required double lat,
     required double lng,
