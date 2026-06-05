@@ -304,6 +304,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         iconImage: _kDestIcon,
         iconSize: _kDestIconSize,
         iconAnchor: 'bottom',
+        zIndex: 10,
       ));
     } else {
       await c.updateSymbol(_destMarker!, ml.SymbolOptions(geometry: geo));
@@ -331,6 +332,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         iconImage: _kWpIcon,
         iconSize: _kWpIconSize,
         iconAnchor: 'bottom',
+        zIndex: 5,
       ));
       _waypointMarkers.add(s);
     }
@@ -777,6 +779,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               await _mlCtrl!.addImage('pointer_red', pinBytes.buffer.asUint8List());
               final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
               await _mlCtrl!.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+              await _mlCtrl!.setSymbolIconAllowOverlap(true);
               // B1: 현위치 마커 — 경로 레이어 위에 그려지도록 마지막에 추가
               await _ensureLocationMarker();
             },
