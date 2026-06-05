@@ -87,9 +87,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   ml.Circle? _locMarker;
   ml.Symbol? _destMarker;
+  List<ml.Symbol> _waypointMarkers = [];
   static const String _kLocColor = '#00C853';
   static const String _kDestIcon = 'pointer_red';
   static const double _kDestIconSize = 1.5; // 폰 실측: 3x 적용
+  static const String _kWpIcon = 'pointer_yellow';
+  static const double _kWpIconSize = 1.5; // 96px PNG, 폰 실측으로 조정
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -313,6 +316,24 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       await c.removeSymbol(_destMarker!);
     }
     _destMarker = null;
+  }
+
+  Future<void> _syncWaypointMarkers(List<LatLng> waypoints) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    for (final s in _waypointMarkers) {
+      await c.removeSymbol(s);
+    }
+    _waypointMarkers = [];
+    for (final wp in waypoints) {
+      final s = await c.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(wp),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+      ));
+      _waypointMarkers.add(s);
+    }
   }
 
   void _updateRouteLayer(List<LatLng> points) {
@@ -599,6 +620,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _sheetCtrl.reverse();
     _recenterMap();
     _removeDestMarker(); // unawaited — B2
+    _syncWaypointMarkers(const []); // unawaited — 경유지 핀 전체 제거
   }
 
   void _startNavigation() {
@@ -687,6 +709,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (prev?.routePolyline != next.routePolyline) {
         _updateRouteLayer(next.routePolyline);
       }
+      if (prev?.waypoints != next.waypoints) {
+        _syncWaypointMarkers(next.waypoints); // unawaited
+      }
     });
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
@@ -747,9 +772,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               final poly =
                   ref.read(mapInteractionProvider).routePolyline;
               if (poly.isNotEmpty) _updateRouteLayer(poly);
-              // B2: 목적지 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
+              // B2: 목적지/경유지 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
               final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
               await _mlCtrl!.addImage('pointer_red', pinBytes.buffer.asUint8List());
+              final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
+              await _mlCtrl!.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
               // B1: 현위치 마커 — 경로 레이어 위에 그려지도록 마지막에 추가
               await _ensureLocationMarker();
             },
