@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:sunrise_sunset_calc/sunrise_sunset_calc.dart';
 
@@ -65,12 +66,13 @@ class DaylightService {
       final bmntUtc = DateTime.parse(results['nautical_twilight_begin'] as String);
       final eentUtc = DateTime.parse(results['nautical_twilight_end'] as String);
 
-      // UTC → KST (+9h): add 9 h; do NOT call toLocal() — bmntUtc is tagged UTC
-      // and toLocal() would apply the device tz offset again (double-convert on KST devices)
-      const kst = Duration(hours: 9);
-      final r = (bmnt: bmntUtc.add(kst), eent: eentUtc.add(kst));
+      // toLocal()로 기기 로컬시각(KST)으로 변환 → epoch 비교 정상화
+      final bmnt = bmntUtc.toLocal();
+      final eent = eentUtc.toLocal();
+      final r = (bmnt: bmnt, eent: eent);
       _apiCache[key] = r;
-      dev.log('DaylightService API fetch OK: BMNT=${r.bmnt}, EENT=${r.eent}',
+      debugPrint('[daylight] path=api bmnt=$bmnt eent=$eent isUtc=${bmnt.isUtc}');
+      dev.log('DaylightService API fetch OK: BMNT=$bmnt, EENT=$eent',
           name: 'DaylightService');
       return r;
     } catch (e) {
@@ -102,10 +104,16 @@ class DaylightService {
       if (!_isFiniteDateTime(sunrise) || !_isFiniteDateTime(sunset)) {
         return _fallback(date);
       }
-      return (
-        bmnt: sunrise.subtract(civilOffset),
-        eent: sunset.add(civilOffset),
-      );
+      // 패키지는 UTC-tagged에 LOCAL clock값을 저장(isUtc=true, hour=KST시각).
+      // DateTime(...)으로 local-tagged 재포장 → epoch 비교 정상화.
+      final sunriseLocal = DateTime(date.year, date.month, date.day,
+          sunrise.hour, sunrise.minute, sunrise.second);
+      final sunsetLocal = DateTime(date.year, date.month, date.day,
+          sunset.hour, sunset.minute, sunset.second);
+      final bmnt = sunriseLocal.subtract(civilOffset);
+      final eent = sunsetLocal.add(civilOffset);
+      debugPrint('[daylight] path=local bmnt=$bmnt eent=$eent isUtc=${bmnt.isUtc}');
+      return (bmnt: bmnt, eent: eent);
     } catch (_) {
       return _fallback(date);
     }
