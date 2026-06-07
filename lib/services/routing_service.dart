@@ -86,11 +86,14 @@ class RoutingService {
     'use_highways': 0.0,
     'use_ferry': 0.0,
     'class_factors': {
-      '1': 100.0,
-      '2': 4.0,
-      '3': 1.2,
-      '4': 0.8,
-      '5': 0.5,
+      '0': 100,   // motorway: 고속도로 회피
+      '1': 100,   // trunk: 자동차전용 회피
+      '2': 3.0,   // primary: 국도 일부 허용 (시골길 6→폴백 3)
+      '3': 1.0,   // secondary: 지방도 중립
+      '4': 0.7,   // tertiary: 시군도 선호
+      '5': 1.0,   // unclassified: 소로 중립
+      '6': 1.2,   // residential: 마을길 약한 회피
+      '7': 2.0,   // service: 농로 회피
     },
   };
 
