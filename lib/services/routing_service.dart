@@ -95,9 +95,11 @@ class RoutingService {
       '6': 1.2,   // residential: 마을길 약한 회피
       '7': 2.0,   // service: 농로 회피
     },
+    'curvature_penalty': 1.2,
+    'long_bridge_factor': 1.5,
   };
 
-  static const double _ruralDetourThreshold = 1.3;
+  static const double _ruralDetourThreshold = 1.5;
 
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
@@ -160,7 +162,11 @@ class RoutingService {
           '5': 0.8,   // unclassified: 소로 선호
           '6': 0.9,   // residential: 마을길 선호
           '7': 1.0,   // service: 농로 기준
-        }
+        },
+        'curvature_penalty': 2.5,
+        'long_bridge_factor': 3.0,
+        'long_tunnel_factor': 3.0,
+        'span_min_length': 500,
       },
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
       {
@@ -178,6 +184,10 @@ class RoutingService {
           '6': 2.0,   // residential: 마을길 회피
           '7': 3.0,   // service: 농로 회피
         },
+        'curvature_penalty': 1.0,
+        'long_bridge_factor': 1.5,
+        'long_tunnel_factor': 1.5,
+        'span_min_length': 500,
       },
       // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
       {
@@ -196,6 +206,9 @@ class RoutingService {
           '6': 5.0,   // residential: 마을길 강한 회피
           '7': 8.0,   // service: 농로 강한 회피
         },
+        'curvature_penalty': 0.0,
+        'long_bridge_factor': 1.0,
+        'long_tunnel_factor': 1.0,
       },
     ];
 
