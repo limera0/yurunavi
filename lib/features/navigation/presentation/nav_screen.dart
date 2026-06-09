@@ -9,8 +9,9 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map/flutter_map.dart'; // 임시 오버레이용 — ②③에서 제거
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -46,7 +47,9 @@ class NavScreen extends ConsumerStatefulWidget {
 
 class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
-  final MapController _mapCtrl = MapController();
+  ml.MapLibreMapController? _mlCtrl;
+  bool _styleLoaded = false;
+  bool _programmaticCamera = false; // onCameraMove에서 수동조작 판별용
   // Nullable until the first real GPS fix arrives — prevents the position
   // marker from rendering at a hardcoded mock location.
   LatLng? _currentPos;
@@ -156,7 +159,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _offRouteDebounce?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
-    _mapCtrl.dispose();
     _tts?.stop();
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
@@ -209,8 +211,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
-    if (pos.heading >= 0 && _speedKmh > 2.0) {
-      _mapCtrl.rotate(-pos.heading); // north-up 기준 counter-clockwise 보정
+    // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
+    if (pos.heading >= 0 && _speedKmh > 2.0 && _styleLoaded) {
+      _programmaticCamera = true;
+      final bf = _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(pos.heading));
+      bf?.then((_) { if (mounted) _programmaticCamera = false; });
     }
 
     _checkArrival(loc);
@@ -508,11 +513,22 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _recenter(LatLng loc) {
+    if (!_styleLoaded) return;
     final target = _zoomForSpeed(_speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    _mapCtrl.move(loc, _navZoom);
+    _programmaticCamera = true;
+    final cf = _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom));
+    cf?.then((_) { if (mounted) _programmaticCamera = false; });
+  }
+
+  ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
+
+  void _onStyleLoaded() {
+    setState(() => _styleLoaded = true);
+    // ② GeoJSON 경로 레이어 초기화는 커밋 ②에서 추가
+    // ③ Circle/Symbol 마커 초기화는 커밋 ③에서 추가
   }
 
   void _onMapGesture() {
@@ -543,87 +559,86 @@ class _NavScreenState extends ConsumerState<NavScreen>
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Stack(
         children: [
-          // ── 지도 ────────────────────────────────────────────────────────────
-          FlutterMap(
-            mapController: _mapCtrl,
-            options: MapOptions(
-              initialCenter: _currentPos ?? _kInitialMapView,
-              initialZoom: 15,
-              // Lock north-up: rotation gestures during pinch-zoom were
-              // disorienting riders on the bar mount.
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapEvent: (event) {
-                if (event is MapEventMoveStart && event.source != MapEventSource.mapController) {
-                  _onMapGesture();
-                }
-              },
+          // ── 지도: MapLibre (커밋 ①) ─────────────────────────────────────────
+          ml.MapLibreMap(
+            styleString: 'assets/images/osm_liberty_yurunavi.json',
+            initialCameraPosition: ml.CameraPosition(
+              target: _toMl(_currentPos ?? _kInitialMapView),
+              zoom: 15,
             ),
-            children: [
-              // OSM standard tiles — readable at all times of day.
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.westinx.yurunavi',
-                maxZoom: 19,
-              ),
-              // 경로 폴리라인 (_routePoints: 재탐색 시 자동 갱신)
-              if (_routePoints.length >= 2)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: _routePoints,
-                    color: const Color(0xFFF28C28).withValues(alpha: 0.9),
-                    strokeWidth: 4.5,
-                    strokeCap: StrokeCap.round,
-                    strokeJoin: StrokeJoin.round,
-                  ),
-                ]),
+            rotateGesturesEnabled: false, // North-up 고정 (바이크 거치)
+            tiltGesturesEnabled: false,   // 2D 유지
+            compassEnabled: false,
+            onMapCreated: (c) => _mlCtrl = c,
+            onStyleLoadedCallback: _onStyleLoaded,
+            onCameraMove: (_) {
+              if (!_programmaticCamera) _onMapGesture();
+            },
+          ),
 
-              MarkerLayer(markers: [
-                // 현위치 — only after a real GPS fix arrives.
-                if (_currentPos != null)
-                  Marker(
-                    point: _currentPos!,
-                    width: 24,
-                    height: 24,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: cs.tertiary,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(color: cs.tertiary.withValues(alpha: 0.5), blurRadius: 12),
-                        ],
+          // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
+          // ② GeoJSON LineLayer로, ③ Circle/Symbol로 교체 후 이 블록 제거
+          IgnorePointer(
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: _currentPos ?? _kInitialMapView,
+                initialZoom: _navZoom,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.none,
+                ),
+              ),
+              children: [
+                if (_routePoints.length >= 2)
+                  PolylineLayer(polylines: [
+                    Polyline(
+                      points: _routePoints,
+                      color: const Color(0xFFF28C28).withValues(alpha: 0.9),
+                      strokeWidth: 4.5,
+                      strokeCap: StrokeCap.round,
+                      strokeJoin: StrokeJoin.round,
+                    ),
+                  ]),
+                MarkerLayer(markers: [
+                  if (_currentPos != null)
+                    Marker(
+                      point: _currentPos!,
+                      width: 24,
+                      height: 24,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: cs.tertiary,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(color: cs.tertiary.withValues(alpha: 0.5), blurRadius: 12),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ...widget.waypoints.map(
+                    (wp) => Marker(
+                      point: wp,
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.topCenter,
+                      child: const Icon(
+                        Icons.location_pin,
+                        color: Color(0xFFFFB300),
+                        size: 34,
                       ),
                     ),
                   ),
-                // 경유지
-                ...widget.waypoints.map(
-                  (wp) => Marker(
-                    point: wp,
-                    width: 34,
-                    height: 34,
-                    alignment: Alignment.topCenter,
-                    child: const Icon(
-                      Icons.location_pin,
-                      color: Color(0xFFFFB300),
-                      size: 34,
+                  if (widget.destination != null)
+                    Marker(
+                      point: widget.destination!,
+                      width: 38,
+                      height: 38,
+                      alignment: Alignment.topCenter,
+                      child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
                     ),
-                  ),
-                ),
-                // 목적지
-                if (widget.destination != null)
-                  Marker(
-                    point: widget.destination!,
-                    width: 38,
-                    height: 38,
-                    alignment: Alignment.topCenter,
-                    child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
-                  ),
-              ]),
-            ],
+                ]),
+              ],
+            ),
           ),
 
           // ── 수동모드 복귀 알림 ──────────────────────────────────────────────
