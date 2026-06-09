@@ -1,0 +1,8 @@
+services:
+  style-ai-proxy:
+    build: .
+    container_name: yurunavi-style-ai
+    ports:
+      - "8014:8014"
+    env_file: .env
+    restart: unless-stopped
