@@ -37,6 +37,8 @@ def _load_style_obj() -> dict:
     # 글립 → 로컬 tileserver
     if "glyphs" in s:
         s["glyphs"] = f"{TILESERVER_BASE}/fonts/{{fontstack}}/{{range}}.pbf"
+    # sprite: HTML에서 window.location.origin 기반으로 동적 주입 (GitHub Pages 의존 제거)
+    s.pop("sprite", None)
     return s
 
 PROFILE_LABELS = {
