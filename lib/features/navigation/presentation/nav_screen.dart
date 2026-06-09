@@ -28,6 +28,8 @@ class NavScreen extends ConsumerStatefulWidget {
   final List<LatLng> waypoints;
   final List<LatLng> routePolyline;
   final List<ManeuverStep> maneuvers;
+  // Valhalla time은 낙관적 추정치 (~57-88 km/h 기준). TODO: 실효속도 보정 적용
+  final int durationMin;
 
   const NavScreen({
     super.key,
@@ -35,6 +37,7 @@ class NavScreen extends ConsumerStatefulWidget {
     this.waypoints = const [],
     this.routePolyline = const [],
     this.maneuvers = const [],
+    this.durationMin = 0,
   });
 
   @override
@@ -56,6 +59,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   final _speedBuffer = <double>[];
   static const _kBufSize = 3; // 이동평균 샘플 수
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
+
+  // ETA — widget.durationMin 초기값, 재탐색 시 갱신
+  int _durationMin = 0;
 
   // 도착 감지
   bool _arrived = false;
@@ -116,6 +122,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _routePoints = List<LatLng>.of(widget.routePolyline);
+    _durationMin = widget.durationMin;
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
     // TTS 초기화 + 첫 안내
@@ -310,7 +317,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       );
       if (mounted && routes.isNotEmpty) {
         final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
-        setState(() => _routePoints = routes[selIdx].points);
+        setState(() {
+          _routePoints = routes[selIdx].points;
+          _durationMin = routes[selIdx].durationMin;
+        });
       }
     } on RoutingException {
       // 재탐색 실패 — 기존 경로 유지
@@ -447,6 +457,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
         ],
       ),
     );
+  }
+
+  static String _etaText(int durationMin) {
+    final eta = DateTime.now().add(Duration(minutes: durationMin));
+    final h = eta.hour.toString().padLeft(2, '0');
+    final m = eta.minute.toString().padLeft(2, '0');
+    return '$h:$m 도착';
+  }
+
+  static String _remainingText(int durationMin) {
+    if (durationMin <= 0) return '--';
+    if (durationMin >= 60) {
+      final h = durationMin ~/ 60;
+      final m = durationMin % 60;
+      return m > 0 ? '$h시간 $m분' : '$h시간';
+    }
+    return '$durationMin분';
   }
 
   void _confirmExit(BuildContext ctx) {
@@ -776,7 +803,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '14:32 도착',
+                              _etaText(_durationMin),
                               style: TextStyle(
                                 color: cs.onSurface,
                                 fontSize: 22,
@@ -785,7 +812,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             ),
                             Row(
                               children: [
-                                Text('38분', style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
+                                Text(_remainingText(_durationMin), style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
                                 const SizedBox(width: 8),
                                 Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
                               ],

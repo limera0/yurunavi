@@ -641,6 +641,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             at: DateTime.now(),
           ));
     }
+    final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx
+        .clamp(0, _fetchedRoutes.length - 1);
+    final durationMin = selIdx < _fetchedRoutes.length
+        ? _fetchedRoutes[selIdx].durationMin
+        : 0;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavScreen(
@@ -648,6 +653,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           waypoints: state.waypoints,
           routePolyline: state.routePolyline,
           maneuvers: _selectedManeuvers,
+          durationMin: durationMin,
         ),
       ),
     ).then((_) {
