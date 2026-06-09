@@ -27,10 +27,13 @@ _STYLE_FILE = Path(os.environ.get("STYLE_FILE_PATH", str(_default_style)))
 def _load_style_obj() -> dict:
     with open(_STYLE_FILE, encoding="utf-8") as f:
         s = json.load(f)
-    # 소스 URL → 로컬 tileserver
+    # TileJSON URL 방식 대신 tiles 배열 직접 인라인 → cross-origin TileJSON fetch 제거
     for src in s.get("sources", {}).values():
-        if "url" in src and "v3" in src["url"]:
-            src["url"] = f"{TILESERVER_BASE}/data/v3.json"
+        if src.get("type") == "vector" and "url" in src and "v3" in src["url"]:
+            src.pop("url", None)
+            src["tiles"] = [f"{TILESERVER_BASE}/data/v3/{{z}}/{{x}}/{{y}}.pbf"]
+            src["minzoom"] = 0
+            src["maxzoom"] = 14
     # 글립 → 로컬 tileserver
     if "glyphs" in s:
         s["glyphs"] = f"{TILESERVER_BASE}/fonts/{{fontstack}}/{{range}}.pbf"
