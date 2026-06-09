@@ -6,4 +6,5 @@ services:
     network_mode: host
     volumes:
       - ./routing_config.yaml:/app/routing_config.yaml
+      - ../../assets:/app/assets:ro
     restart: unless-stopped

@@ -14,10 +14,27 @@ from core.metrics import road_class_distribution
 st.set_page_config(page_title="Yurunavi Tuning Dashboard", layout="wide")
 st.title("Yurunavi 라우팅 파인튜닝 대시보드")
 
-STYLE_URL = os.environ.get(
-    "TILESERVER_STYLE_URL",
-    "https://tiles.westinx.com/styles/osm_liberty_yurunavi/style.json",
-)
+TILESERVER_BASE = os.environ.get("TILESERVER_BASE_URL", "http://192.168.0.57:8080")
+
+# 로컬 스타일 JSON 로드 + 소스/글립 URL을 로컬 타일서버로 패치
+# Docker: 볼륨 마운트 ../../assets → /app/assets
+# Dev:    ../../assets = /data/projects/yurunavi/assets
+_default_style = Path(__file__).parent / "assets" / "images" / "osm_liberty_yurunavi.json"
+if not _default_style.exists():
+    _default_style = Path(__file__).parent.parent.parent / "assets" / "images" / "osm_liberty_yurunavi.json"
+_STYLE_FILE = Path(os.environ.get("STYLE_FILE_PATH", str(_default_style)))
+
+def _load_style_obj() -> dict:
+    with open(_STYLE_FILE, encoding="utf-8") as f:
+        s = json.load(f)
+    # 소스 URL → 로컬 tileserver
+    for src in s.get("sources", {}).values():
+        if "url" in src and "v3" in src["url"]:
+            src["url"] = f"{TILESERVER_BASE}/data/v3.json"
+    # 글립 → 로컬 tileserver
+    if "glyphs" in s:
+        s["glyphs"] = f"{TILESERVER_BASE}/fonts/{{fontstack}}/{{range}}.pbf"
+    return s
 
 PROFILE_LABELS = {
     "rural":      "시골길 우선 (Rural)",
@@ -47,7 +64,8 @@ if "error_msg" not in st.session_state:
 
 def _build_map_html(routes_geojson: dict, loading: bool = False) -> str:
     tpl = (Path(__file__).parent / "components" / "maplibre_map.html").read_text()
-    tpl = tpl.replace("{{STYLE_URL}}", STYLE_URL)
+    style_obj = _load_style_obj()
+    tpl = tpl.replace("{{STYLE_OBJ}}", json.dumps(style_obj))
     tpl = tpl.replace("{{ROUTES_JSON}}", json.dumps(routes_geojson or {"type": "FeatureCollection", "features": []}))
     tpl = tpl.replace("{{SHOW_LOADING}}", "true" if loading else "false")
     return tpl

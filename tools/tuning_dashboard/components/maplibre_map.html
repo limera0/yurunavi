@@ -20,7 +20,7 @@
 <div id="map"></div>
 <div id="loading">경로 계산 중...</div>
 <script>
-const STYLE_URL = "{{STYLE_URL}}";
+const STYLE_OBJ = {{STYLE_OBJ}};
 const ROUTES_JSON = {{ROUTES_JSON}};
 const SHOW_LOADING = {{SHOW_LOADING}};
 
@@ -28,7 +28,7 @@ if (SHOW_LOADING) document.getElementById("loading").style.display = "block";
 
 const map = new maplibregl.Map({
   container: "map",
-  style: STYLE_URL,
+  style: STYLE_OBJ,
   center: [127.05, 37.54],
   zoom: 10,
 });
