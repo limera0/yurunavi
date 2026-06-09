@@ -581,6 +581,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           IgnorePointer(
             child: FlutterMap(
               options: MapOptions(
+                backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
                 initialCenter: _currentPos ?? _kInitialMapView,
                 initialZoom: _navZoom,
                 interactionOptions: const InteractionOptions(
