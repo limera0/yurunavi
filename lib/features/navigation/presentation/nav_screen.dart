@@ -449,6 +449,30 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
+  void _confirmExit(BuildContext ctx) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('내비게이션 종료'),
+        content: const Text('내비게이션을 종료할까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dlgCtx).pop(),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dlgCtx).pop();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('종료'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 속도→줌 선형 보간: 0 km/h→18, 20→16, 60+→14
   double _zoomForSpeed(double kmh) {
     if (kmh <= 20) return 18.0 - (kmh / 20.0) * 2.0;
@@ -483,9 +507,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Stack(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, _) {
+        if (!didPop) _confirmExit(context);
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: Stack(
         children: [
           // ── 지도 ────────────────────────────────────────────────────────────
           FlutterMap(
@@ -801,6 +830,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
         ],
+      ),
       ),
     );
   }
