@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' show sin, cos, sqrt, asin;
+import 'dart:math' show sin, cos, sqrt, asin, max;
 
 import 'package:http/http.dart' as http;
 
@@ -61,13 +61,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _recenterTimer;
   StreamSubscription<Position>? _locationSub;
 
-  // 속도계 노이즈 제거
-  final _speedBuffer = <double>[];
-  static const _kBufSize = 3; // 이동평균 샘플 수
-  // 속도 불확실도 임계 (m/s). 초과 시 노이즈로 판단 → 0 처리.
-  // 0.0 리턴 기기(미지원)는 0.0 > 1.0 = false 라 자연히 통과.
-  // 폰 실측 후 조정: 정지 떨림 → 낮춤(0.7), 저속 죽음 → 높임(1.5).
-  static const _kSpeedAccuracyMaxMs = 1.0;
+  // ZUPT 링버퍼: 최근 4초 GPS fix {lat, lon, t, acc}
+  final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
@@ -203,6 +198,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (!_isManualMode) _recenter(loc);
 
     final now = DateTime.now();
+
+    // ZUPT: 매 fix를 링버퍼에 push (적응 throttle 전)
+    _posBuffer.add((lat: pos.latitude, lon: pos.longitude, t: now, acc: pos.accuracy));
+    _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > 4);
+
     // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
     final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
     final elapsedMs = _lastSpeedAt == null
@@ -215,21 +215,26 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     _lastSpeedAt = now;
 
-    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) 또는 속도 불확실 → 0 처리
+    // ZUPT 정지 판정: 최근 4초 좌표 군집 반경으로 정지 여부 결정
+    final bool isStationary;
+    if (_posBuffer.length < 3) {
+      isStationary = true; // 샘플 부족 → 안전측(0 우선)
+    } else {
+      final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
+      final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
+      final radius = _posBuffer
+          .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
+          .reduce((a, b) => a > b ? a : b);
+      final accs = _posBuffer.map((e) => e.acc).toList()..sort();
+      final medAcc = accs[accs.length ~/ 2];
+      final thresh = max(8.0, 1.5 * medAcc);
+      isStationary = radius <= thresh;
+    }
+
     final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
-    final speedUnreliable = pos.speedAccuracy.isNaN
-        || pos.speedAccuracy > _kSpeedAccuracyMaxMs;
-    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0 || speedUnreliable)
-        ? 0.0 : rawKmh;
-
-    // 이동평균으로 튐 완화
-    _speedBuffer.add(clamped);
-    if (_speedBuffer.length > _kBufSize) _speedBuffer.removeAt(0);
-    final avg = _speedBuffer.reduce((a, b) => a + b) / _speedBuffer.length;
-
     setState(() {
       _currentPos = loc;
-      _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
+      _speedKmh = isStationary ? 0.0 : rawKmh;
     });
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
