@@ -186,9 +186,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     } catch (_) {}
 
     _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
+      locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0, // 모든 이벤트 수신; 속도 갱신은 내부에서 적응 조절
+        intervalDuration: const Duration(milliseconds: 333), // ~3Hz 목표
+        distanceFilter: 0,
       ),
     ).listen(_onPosition);
   }
