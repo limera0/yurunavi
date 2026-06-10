@@ -190,6 +190,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         accuracy: LocationAccuracy.bestForNavigation,
         intervalDuration: const Duration(milliseconds: 333), // ~3Hz 목표
         distanceFilter: 0,
+        forceLocationManager: true, // fused 절전 우회 → 생 GPS 연속 수신
       ),
     ).listen(_onPosition);
   }
