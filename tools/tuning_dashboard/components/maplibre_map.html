@@ -44,12 +44,7 @@ window.onerror = function(msg, src, line) {
   showErr(msg + " (" + src + ":" + line + ")");
 };
 
-// sprite: GitHub Pages 대신 Streamlit static 서빙 경로 사용
-// window.location.origin은 브라우저 기준 host:port를 자동으로 추적
-// iframe 내에서는 parent.location.origin을 사용
-var _origin;
-try { _origin = parent.location.origin; } catch(e) { _origin = window.location.origin; }
-STYLE_OBJ.sprite = _origin + "/app/static/sprites/osm-liberty";
+// sprite is injected by app.py as an absolute STYLE_OBJ.sprite URL.
 
 let map;
 try {

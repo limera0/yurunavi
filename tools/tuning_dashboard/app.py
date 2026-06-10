@@ -1,5 +1,9 @@
+import hashlib
+import http.server
 import json
 import os
+import socketserver
+import threading
 from pathlib import Path
 
 import streamlit as st
@@ -24,6 +28,68 @@ if not _default_style.exists():
     _default_style = Path(__file__).parent.parent.parent / "assets" / "images" / "osm_liberty_yurunavi.json"
 _STYLE_FILE = Path(os.environ.get("STYLE_FILE_PATH", str(_default_style)))
 
+# -- map render sidecar HTTP server --------------------------------------------
+# components.html() injects map HTML as srcdoc; a srcdoc iframe has a "null"
+# (opaque) origin, where MapLibre's vector-tile Web Worker cannot issue network
+# requests, so the map stalls at "초기화 중..." (raster/sprite work since they
+# run on the main thread). Fix: serve the map from a real-origin URL and embed
+# via components.iframe(src=...).
+PUBLIC_HOST = os.environ.get("DASHBOARD_PUBLIC_HOST", "192.168.0.57")
+DASHBOARD_PORT = int(os.environ.get("DASHBOARD_PORT", "8501"))
+MAP_SERVER_PORT = int(os.environ.get("MAP_SERVER_PORT", "8502"))
+SPRITE_BASE = os.environ.get("SPRITE_BASE", f"http://{PUBLIC_HOST}:{DASHBOARD_PORT}")
+MAP_SERVER_BASE = os.environ.get("MAP_SERVER_BASE", f"http://{PUBLIC_HOST}:{MAP_SERVER_PORT}")
+_MAP_RENDERS_MAX = 8
+
+
+@st.cache_resource
+def _map_store() -> dict:
+    return {"renders": {}, "order": []}
+
+
+@st.cache_resource
+def _start_map_server():
+    store = _map_store()
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            token = self.path.lstrip("/").split("?", 1)[0]
+            html = store["renders"].get(token)
+            if html is None:
+                self.send_response(404)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                return
+            body = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = socketserver.ThreadingTCPServer(("0.0.0.0", MAP_SERVER_PORT), _Handler)
+    httpd.daemon_threads = True
+    httpd.allow_reuse_address = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def _publish_map(html: str) -> str:
+    _start_map_server()
+    store = _map_store()
+    token = hashlib.sha1(html.encode("utf-8")).hexdigest()[:16] + ".html"
+    if token not in store["renders"]:
+        store["renders"][token] = html
+        store["order"].append(token)
+        while len(store["order"]) > _MAP_RENDERS_MAX:
+            store["renders"].pop(store["order"].pop(0), None)
+    return f"{MAP_SERVER_BASE}/{token}"
+
 def _load_style_obj() -> dict:
     with open(_STYLE_FILE, encoding="utf-8") as f:
         s = json.load(f)
@@ -37,8 +103,9 @@ def _load_style_obj() -> dict:
     # 글립 → 로컬 tileserver
     if "glyphs" in s:
         s["glyphs"] = f"{TILESERVER_BASE}/fonts/{{fontstack}}/{{range}}.pbf"
-    # sprite: HTML에서 window.location.origin 기반으로 동적 주입 (GitHub Pages 의존 제거)
-    s.pop("sprite", None)
+    # sprite: served from the map sidecar (separate origin) -> use absolute URL.
+    # Streamlit static (8501) sends CORS(*), so cross-origin load works.
+    s["sprite"] = f"{SPRITE_BASE}/app/static/sprites/osm-liberty"
     return s
 
 PROFILE_LABELS = {
@@ -124,7 +191,8 @@ with left:
     if st.session_state.result:
         geojson = _routes_to_geojson(st.session_state.result, st.session_state.cfg)
     map_html = _build_map_html(geojson)
-    st.components.v1.html(map_html, height=780)
+    map_src = _publish_map(map_html)
+    st.components.v1.iframe(map_src, height=780)
 
     # 경로 지표 (결과 있을 때)
     if st.session_state.result:
