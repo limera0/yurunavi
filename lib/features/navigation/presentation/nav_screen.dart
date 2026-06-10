@@ -49,7 +49,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
   ml.MapLibreMapController? _mlCtrl;
   bool _styleLoaded = false;
-  bool _programmaticCamera = false; // onCameraMove에서 수동조작 판별용
   // Nullable until the first real GPS fix arrives — prevents the position
   // marker from rendering at a hardcoded mock location.
   LatLng? _currentPos;
@@ -170,6 +169,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
     if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
 
+    // GPS 콜드스타트 전 캐시된 위치로 즉시 카메라 이동
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && mounted && _currentPos == null) {
+        final loc = LatLng(last.latitude, last.longitude);
+        setState(() => _currentPos = loc);
+        _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom),
+        );
+      }
+    } catch (_) {}
+
     _locationSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.bestForNavigation,
@@ -213,9 +224,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
     // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
     if (pos.heading >= 0 && _speedKmh > 2.0 && _styleLoaded) {
-      _programmaticCamera = true;
-      final bf = _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(pos.heading));
-      bf?.then((_) { if (mounted) _programmaticCamera = false; });
+      _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(pos.heading));
     }
 
     _checkArrival(loc);
@@ -518,9 +527,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    _programmaticCamera = true;
-    final cf = _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom));
-    cf?.then((_) { if (mounted) _programmaticCamera = false; });
+    _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom));
   }
 
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -560,20 +567,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
         body: Stack(
         children: [
           // ── 지도: MapLibre (커밋 ①) ─────────────────────────────────────────
-          ml.MapLibreMap(
-            styleString: 'assets/images/osm_liberty_yurunavi.json',
-            initialCameraPosition: ml.CameraPosition(
-              target: _toMl(_currentPos ?? _kInitialMapView),
-              zoom: 15,
+          // Listener: 사용자 터치 시작 감지 → _onMapGesture (수동모드 진입)
+          // HitTestBehavior.translucent: MapLibre 네이티브 패닝/줌 제스처 보존
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _onMapGesture(),
+            child: ml.MapLibreMap(
+              styleString: 'assets/images/osm_liberty_yurunavi.json',
+              initialCameraPosition: ml.CameraPosition(
+                target: _toMl(_currentPos ?? _kInitialMapView),
+                zoom: 15,
+              ),
+              rotateGesturesEnabled: false, // North-up 고정 (바이크 거치)
+              tiltGesturesEnabled: false,   // 2D 유지
+              compassEnabled: false,
+              onMapCreated: (c) => _mlCtrl = c,
+              onStyleLoadedCallback: _onStyleLoaded,
             ),
-            rotateGesturesEnabled: false, // North-up 고정 (바이크 거치)
-            tiltGesturesEnabled: false,   // 2D 유지
-            compassEnabled: false,
-            onMapCreated: (c) => _mlCtrl = c,
-            onStyleLoadedCallback: _onStyleLoaded,
-            onCameraMove: (_) {
-              if (!_programmaticCamera) _onMapGesture();
-            },
           ),
 
           // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
