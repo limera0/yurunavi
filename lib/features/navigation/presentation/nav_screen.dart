@@ -49,6 +49,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
   ml.MapLibreMapController? _mlCtrl;
   bool _styleLoaded = false;
+
+  static const _navRouteSourceId = 'nav-route-source';
+  static const _navRouteLayerId  = 'nav-route-layer';
+
   // Nullable until the first real GPS fix arrives — prevents the position
   // marker from rendering at a hardcoded mock location.
   LatLng? _currentPos;
@@ -331,10 +335,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
       );
       if (mounted && routes.isNotEmpty) {
         final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
+        final newPoints = routes[selIdx].points;
         setState(() {
-          _routePoints = routes[selIdx].points;
+          _routePoints = newPoints;
           _durationMin = routes[selIdx].durationMin;
         });
+        if (_styleLoaded) {
+          _mlCtrl?.setGeoJsonSource(
+              _navRouteSourceId, _buildRouteGeoJson(newPoints));
+        }
       }
     } on RoutingException {
       // 재탐색 실패 — 기존 경로 유지
@@ -532,9 +541,50 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
 
+  Map<String, dynamic> _buildRouteGeoJson(List<LatLng> points) => {
+        'type': 'FeatureCollection',
+        'features': points.isEmpty
+            ? <dynamic>[]
+            : [
+                {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'LineString',
+                    // GeoJSON은 [longitude, latitude] 순서
+                    'coordinates':
+                        points.map((p) => [p.longitude, p.latitude]).toList(),
+                  },
+                  'properties': <String, dynamic>{},
+                }
+              ],
+      };
+
+  Future<void> _initRouteLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
+    await ctrl.addLineLayer(
+      _navRouteSourceId,
+      _navRouteLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#F28C28', // nav 오렌지색 유지
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      // belowLayerId: ③에서 Circle 레이어 추가 후 z-order 삽입
+    );
+  }
+
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
-    // ② GeoJSON 경로 레이어 초기화는 커밋 ②에서 추가
+    // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
+    _initRouteLayer().whenComplete(() {
+      if (_routePoints.length >= 2 && mounted) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(_routePoints));
+      }
+    });
     // ③ Circle/Symbol 마커 초기화는 커밋 ③에서 추가
   }
 
@@ -599,16 +649,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 ),
               ),
               children: [
-                if (_routePoints.length >= 2)
-                  PolylineLayer(polylines: [
-                    Polyline(
-                      points: _routePoints,
-                      color: const Color(0xFFF28C28).withValues(alpha: 0.9),
-                      strokeWidth: 4.5,
-                      strokeCap: StrokeCap.round,
-                      strokeJoin: StrokeJoin.round,
-                    ),
-                  ]),
+                // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
                 MarkerLayer(markers: [
                   if (_currentPos != null)
                     Marker(
