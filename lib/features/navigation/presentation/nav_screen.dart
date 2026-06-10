@@ -530,13 +530,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
-  void _recenter(LatLng loc) {
+  void _recenter(LatLng loc, {bool animate = false}) {
     if (!_styleLoaded) return;
     final target = _zoomForSpeed(_speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom));
+    final update = ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom);
+    if (animate) {
+      _mlCtrl?.animateCamera(update);
+    } else {
+      _mlCtrl?.moveCamera(update);
+    }
   }
 
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -594,7 +599,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer = Timer(const Duration(seconds: 10), () {
       final pos = _currentPos;
       setState(() => _isManualMode = false);
-      if (pos != null) _recenter(pos);
+      if (pos != null) _recenter(pos, animate: true);
     });
   }
 
@@ -841,7 +846,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(pos);
+                    _recenter(pos, animate: true);
                   },
                 ),
               ],
