@@ -64,6 +64,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // ZUPT 링버퍼: 최근 4초 GPS fix {lat, lon, t, acc}
   final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
+  bool _moving = false; // 도플러+히스테리시스 이동 상태
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -215,27 +216,44 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     _lastSpeedAt = now;
 
-    // ZUPT 정지 판정: 최근 4초 좌표 군집 반경으로 정지 여부 결정
-    final bool isStationary;
+    // 도플러+히스테리시스 속도 게이트 (위치 군집을 ZUPT 앵커로 사용)
+    final double d = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed; // m/s
+
+    double bufRadius = 0.0;
+    double parkThresh = 6.0;
+    final bool parked;
     if (_posBuffer.length < 3) {
-      isStationary = true; // 샘플 부족 → 안전측(0 우선)
+      parked = false; // 샘플 부족 → 도플러에 위임
     } else {
       final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
       final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
-      final radius = _posBuffer
+      bufRadius = _posBuffer
           .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
           .reduce((a, b) => a > b ? a : b);
       final accs = _posBuffer.map((e) => e.acc).toList()..sort();
       final medAcc = accs[accs.length ~/ 2];
-      final thresh = max(8.0, 1.5 * medAcc);
-      isStationary = radius <= thresh;
+      parkThresh = (6.0 > 1.2 * medAcc) ? 6.0 : 1.2 * medAcc;
+      parked = bufRadius < parkThresh;
     }
 
-    final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
+    if (parked) {
+      _moving = false;
+    } else if (d >= 2.0) {
+      _moving = true;
+    } else if (d < 1.5) {
+      _moving = false;
+    }
+    // 1.5 <= d < 2.0 (비주차): _moving 직전상태 유지 = 히스테리시스
+
+    final speedKmh = _moving ? d * 3.6 : 0.0;
     setState(() {
       _currentPos = loc;
-      _speedKmh = isStationary ? 0.0 : rawKmh;
+      _speedKmh = speedKmh;
     });
+
+    debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
+               'thr=${parkThresh.toStringAsFixed(1)} parked=$parked mov=$_moving '
+               '=> ${speedKmh.toStringAsFixed(1)}km/h');
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
     // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
