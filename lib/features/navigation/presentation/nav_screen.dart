@@ -61,13 +61,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _recenterTimer;
   StreamSubscription<Position>? _locationSub;
 
-  // 속도계 — 위치 윈도우 기반 (도플러 폐기)
+  // 속도계 노이즈 제거
   final _speedBuffer = <double>[];
   static const _kBufSize = 3; // 이동평균 샘플 수
-  final _posWindow = <({LatLng p, DateTime t})>[];
-  static const _kWindowSec = 3; // 슬라이딩 윈도우 폭 (초)
-  // 정지 판정: 윈도우 시작→끝 변위 < 임계. 폰 실측 후 조정(↑정지노이즈, ↓걷기죽음).
-  static const _kStationaryM = 2.0;
+  // 속도 불확실도 임계 (m/s). 초과 시 노이즈로 판단 → 0 처리.
+  // 0.0 리턴 기기(미지원)는 0.0 > 1.0 = false 라 자연히 통과.
+  // 폰 실측 후 조정: 정지 떨림 → 낮춤(0.7), 저속 죽음 → 높임(1.5).
+  static const _kSpeedAccuracyMaxMs = 1.0;
+  DateTime? _lastSpeedAt; // 적응 갱신 타이밍
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -189,10 +190,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     } catch (_) {}
 
     _locationSub = Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
+      locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
-        intervalDuration: const Duration(milliseconds: 333), // ~3Hz
+        distanceFilter: 0, // 모든 이벤트 수신; 속도 갱신은 내부에서 적응 조절
       ),
     ).listen(_onPosition);
   }
@@ -202,36 +202,34 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ref.read(currentLocationProvider.notifier).set(loc);
     if (!_isManualMode) _recenter(loc);
 
-    // 위치 윈도우 갱신 (throttle 전, 매 이벤트)
-    final ts = pos.timestamp;
-    _posWindow.add((p: loc, t: ts));
-    final cutoff = ts.subtract(const Duration(seconds: _kWindowSec));
-    _posWindow.removeWhere((e) => e.t.isBefore(cutoff));
+    final now = DateTime.now();
+    // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
+    final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
+    final elapsedMs = _lastSpeedAt == null
+        ? intervalMs
+        : now.difference(_lastSpeedAt!).inMilliseconds;
 
-    // 속도 산출 — 윈도우 시작→끝 직선 변위 기반
-    double newKmh = 0.0;
-    if (_posWindow.length >= 2 && pos.accuracy <= 20.0) {
-      final first = _posWindow.first;
-      final last = _posWindow.last;
-      final dispM = Geolocator.distanceBetween(
-          first.p.latitude, first.p.longitude,
-          last.p.latitude, last.p.longitude);
-      final dtSec = last.t.difference(first.t).inMilliseconds / 1000.0;
-      if (dispM < _kStationaryM) {
-        newKmh = 0.0; // 정지 판정: 변위 < 2m
-      } else if (dtSec > 0) {
-        newKmh = dispM / dtSec * 3.6;
-      }
+    if (elapsedMs < intervalMs) {
+      setState(() => _currentPos = loc);
+      return;
     }
+    _lastSpeedAt = now;
 
-    // 이동평균으로 잔여 튐 완화
-    _speedBuffer.add(newKmh);
+    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) 또는 속도 불확실 → 0 처리
+    final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
+    final speedUnreliable = pos.speedAccuracy.isNaN
+        || pos.speedAccuracy > _kSpeedAccuracyMaxMs;
+    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0 || speedUnreliable)
+        ? 0.0 : rawKmh;
+
+    // 이동평균으로 튐 완화
+    _speedBuffer.add(clamped);
     if (_speedBuffer.length > _kBufSize) _speedBuffer.removeAt(0);
     final avg = _speedBuffer.reduce((a, b) => a + b) / _speedBuffer.length;
 
     setState(() {
       _currentPos = loc;
-      _speedKmh = avg;
+      _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
     });
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
