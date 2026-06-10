@@ -198,6 +198,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _onPosition(Position pos) {
+    debugPrint('[NAVSPD] t=${DateTime.now().millisecondsSinceEpoch} '
+        'speed=${pos.speed.toStringAsFixed(2)} '
+        'speedAcc=${pos.speedAccuracy.toStringAsFixed(2)} '
+        'acc=${pos.accuracy.toStringAsFixed(1)} '
+        'lat=${pos.latitude.toStringAsFixed(5)} lon=${pos.longitude.toStringAsFixed(5)}');
     final loc = LatLng(pos.latitude, pos.longitude);
     ref.read(currentLocationProvider.notifier).set(loc);
     if (!_isManualMode) _recenter(loc);
