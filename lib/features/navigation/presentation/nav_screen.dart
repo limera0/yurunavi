@@ -64,6 +64,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 속도계 노이즈 제거
   final _speedBuffer = <double>[];
   static const _kBufSize = 3; // 이동평균 샘플 수
+  // 속도 불확실도 임계 (m/s). 초과 시 노이즈로 판단 → 0 처리.
+  // 0.0 리턴 기기(미지원)는 0.0 > 1.0 = false 라 자연히 통과.
+  // 폰 실측 후 조정: 정지 떨림 → 낮춤(0.7), 저속 죽음 → 높임(1.5).
+  static const _kSpeedAccuracyMaxMs = 1.0;
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
@@ -211,9 +215,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     _lastSpeedAt = now;
 
-    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) → 0 처리
+    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) 또는 속도 불확실 → 0 처리
     final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
-    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0) ? 0.0 : rawKmh;
+    final speedUnreliable = pos.speedAccuracy.isNaN
+        || pos.speedAccuracy > _kSpeedAccuracyMaxMs;
+    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0 || speedUnreliable)
+        ? 0.0 : rawKmh;
 
     // 이동평균으로 튐 완화
     _speedBuffer.add(clamped);
