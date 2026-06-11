@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../map/presentation/main_map_screen.dart';
+import 'permission_onboarding_screen.dart';
 
 /// YuruNavi Splash Screen
 /// - 로고 fade + scale 애니메이션
@@ -47,83 +46,16 @@ class _SplashScreenState extends State<SplashScreen>
     await _ctrl.forward();
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
-    await _requestPermission();
-    if (!mounted) return;
-    _goToMain();
+    _goToOnboarding();
   }
 
-  Future<void> _requestPermission() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return;
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.whileInUse ||
-        perm == LocationPermission.always) {
-      return; // already granted
-    }
-
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-
-    if (!mounted) return;
-    if (perm == LocationPermission.deniedForever) {
-      await _showSettingsDialog(
-        '위치 권한이 거부됨',
-        '설정에서 위치 권한을 허용해 주세요.\n유루나비의 핵심 기능은 현재 위치에 의존합니다.',
-        actionLabel: '설정 열기',
-        onAction: Geolocator.openAppSettings,
-      );
-    } else if (perm == LocationPermission.denied) {
-      await _showSettingsDialog(
-        '위치 권한 필요',
-        '유루나비는 현재 위치로 경로를 탐색합니다.\n권한 없이도 사용할 수 있지만 일부 기능이 제한됩니다.',
-        actionLabel: '다시 허용',
-        onAction: Geolocator.requestPermission,
-      );
-    }
-  }
-
-  Future<void> _showSettingsDialog(
-    String title,
-    String content, {
-    required String actionLabel,
-    required Future<dynamic> Function() onAction,
-  }) async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(children: [
-          const Icon(Icons.location_on, color: AppColors.primary),
-          const SizedBox(width: 8),
-          Text(title),
-        ]),
-        content: Text(content),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('건너뛰기'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await onAction();
-            },
-            child: Text(actionLabel),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _goToMain() {
+  void _goToOnboarding() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (context, animation, secondaryAnimation) => const MainMapScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+        transitionDuration: const Duration(milliseconds: 400),
+        pageBuilder: (_, _, _) => const PermissionOnboardingScreen(),
+        transitionsBuilder: (_, anim, _, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
           child: child,
         ),
       ),
@@ -141,7 +73,7 @@ class _SplashScreenState extends State<SplashScreen>
     return Scaffold(
       backgroundColor: AppColors.background,
       body: GestureDetector(
-        onTap: _goToMain,
+        onTap: _goToOnboarding,
         child: Center(
           child: FadeTransition(
             opacity: _opacity,
