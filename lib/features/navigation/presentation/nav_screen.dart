@@ -61,7 +61,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _recenterTimer;
   StreamSubscription<Position>? _locationSub;
 
-  // ZUPT 링버퍼: 최근 4초 GPS fix {lat, lon, t, acc}
+  // ZUPT 링버퍼: 최근 12초 GPS fix {lat, lon, t, acc} (1Hz·5초 fix 양쪽 호환)
   final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
   bool _moving = false; // 도플러+히스테리시스 이동 상태
@@ -210,7 +210,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     // ZUPT: 매 fix를 링버퍼에 push (적응 throttle 전)
     _posBuffer.add((lat: pos.latitude, lon: pos.longitude, t: now, acc: pos.accuracy));
-    _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > 4);
+    _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > 12);
 
     // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
     final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
