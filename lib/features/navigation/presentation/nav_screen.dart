@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' show sin, cos, sqrt, asin, max;
+import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:http/http.dart' as http;
 
@@ -364,6 +364,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
       cum += step.rawDistKm * 1000.0;
       _stepEndDistM.add(cum);
     }
+  }
+
+  // ignore: unused_element
+  void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
+    _steps = maneuvers.isNotEmpty
+        ? maneuvers.map(_TurnStep.fromManeuver).toList()
+        : const [
+            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
+            _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
+            _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
+          ];
+    _computeStepEndDistances();
+    _stepIdx = 0;
+    _lastAnnouncedIdx = -1;
+    _preAnnounced = false;
   }
 
   /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
