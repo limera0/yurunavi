@@ -141,16 +141,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     WakelockPlus.enable();
     // TTS 초기화 + 첫 안내
     _initTts();
-    // Valhalla maneuvers → _TurnStep 변환 (없으면 더미 폴백)
-    _steps = widget.maneuvers.isNotEmpty
-        ? widget.maneuvers.map(_TurnStep.fromManeuver).toList()
-        : const [
-            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
-            _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
-            _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
-          ];
-    // 각 step 종점까지의 누적 거리 계산 (GPS 기반 자동 진행용)
-    _computeStepEndDistances();
+    _applyRouteGuidance(widget.maneuvers);
     if (widget.destination == null) {
       // 목적지 없이 진입하면 즉시 빠져나간다
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -366,7 +357,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  // ignore: unused_element
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
     _steps = maneuvers.isNotEmpty
         ? maneuvers.map(_TurnStep.fromManeuver).toList()
