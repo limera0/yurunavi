@@ -192,6 +192,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
         accuracy: LocationAccuracy.bestForNavigation,
         intervalDuration: const Duration(milliseconds: 1000), // 1Hz 현실 목표
         distanceFilter: 0,
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: "유루나비 주행 중",
+          notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
+          enableWakeLock: true,
+        ),
       ),
     ).listen(_onPosition);
   }
