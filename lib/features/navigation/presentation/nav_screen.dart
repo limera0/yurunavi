@@ -65,6 +65,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
   bool _moving = false; // 도플러+히스테리시스 이동 상태
+  bool _firstFixReceived = false; // 콜드스타트: 첫 GPS fix 수신 전 "GPS 검색 중" 표시
 
   // 200ms 속도 외삽 ticker (Organic Maps 패턴): 직전 2개 실측 fix의
   // 도플러 속도(m/s)·수신시각·위치를 보관해 fix 사이를 선형 외삽한다.
@@ -261,6 +262,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _onPosition(Position pos) {
+    if (!_firstFixReceived) setState(() => _firstFixReceived = true);
     final loc = LatLng(pos.latitude, pos.longitude);
     ref.read(currentLocationProvider.notifier).set(loc);
     if (!_isManualMode) _recenter(loc);
@@ -916,7 +918,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             top: MediaQuery.of(context).size.height * 0.30,
             child: ScaleTransition(
               scale: _pulseAnim,
-              child: _Speedometer(speedKmh: _speedKmh),
+              child: _Speedometer(speedKmh: _speedKmh, firstFixReceived: _firstFixReceived),
             ),
           ),
 
@@ -1038,9 +1040,40 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
 // ── Sub-widgets ───────────────────────────────────────────────────────────────
 
-class _Speedometer extends StatelessWidget {
+class _Speedometer extends StatefulWidget {
   final double speedKmh;
-  const _Speedometer({required this.speedKmh});
+  final bool firstFixReceived;
+  const _Speedometer({required this.speedKmh, required this.firstFixReceived});
+
+  @override
+  State<_Speedometer> createState() => _SpeedometerState();
+}
+
+class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderStateMixin {
+  late final AnimationController _blinkCtrl;
+  late final Animation<double> _blinkAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _blinkCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))
+      ..repeat(reverse: true);
+    _blinkAnim = Tween<double>(begin: 0.25, end: 1.0).animate(
+      CurvedAnimation(parent: _blinkCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_Speedometer old) {
+    super.didUpdateWidget(old);
+    if (widget.firstFixReceived && _blinkCtrl.isAnimating) _blinkCtrl.stop();
+  }
+
+  @override
+  void dispose() {
+    _blinkCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1054,16 +1087,27 @@ class _Speedometer extends StatelessWidget {
         border: Border.all(color: cs.tertiary, width: 2.5),
         boxShadow: [BoxShadow(color: cs.tertiary.withValues(alpha: 0.25), blurRadius: 16)],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            speedKmh.toStringAsFixed(0),
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
-          ),
-          Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-        ],
-      ),
+      child: widget.firstFixReceived
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  widget.speedKmh.toStringAsFixed(0),
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
+                ),
+                Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+              ],
+            )
+          : FadeTransition(
+              opacity: _blinkAnim,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('GPS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.1)),
+                  Text('검색 중', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
     );
   }
 }
