@@ -262,7 +262,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _onPosition(Position pos) {
-    if (!_firstFixReceived) setState(() => _firstFixReceived = true);
     final loc = LatLng(pos.latitude, pos.longitude);
     ref.read(currentLocationProvider.notifier).set(loc);
     if (!_isManualMode) _recenter(loc);
@@ -280,7 +279,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
         : now.difference(_lastSpeedAt!).inMilliseconds;
 
     if (elapsedMs < intervalMs) {
-      setState(() => _currentPos = loc);
+      setState(() {
+        _currentPos = loc;
+        if (!_firstFixReceived) _firstFixReceived = true;
+      });
       return;
     }
     _lastSpeedAt = now;
@@ -322,6 +324,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() {
       _currentPos = loc;
       _speedKmh = speedKmh;
+      if (!_firstFixReceived) _firstFixReceived = true;
     });
 
     debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
