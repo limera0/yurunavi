@@ -97,7 +97,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kOffRouteM = 20.0; // 이탈 판정 거리 (미터)
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
-  late final List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
+  late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
 
   late final AnimationController _pulseCtrl;
