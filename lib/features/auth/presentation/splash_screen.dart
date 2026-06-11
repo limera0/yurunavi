@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/theme/app_theme.dart';
-import 'permission_onboarding_screen.dart';
+import '../../map/presentation/main_map_screen.dart';
 
 /// YuruNavi Splash Screen
 /// - 로고 fade + scale 애니메이션
-/// - Firebase Auth 상태 확인 후 라우팅 (현재는 MainMapScreen으로 직행)
+/// - 위치·알림 권한 OS 팝업 1회 요청 (미허용 시 skip, 2회차는 granted라 skip)
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -46,14 +47,28 @@ class _SplashScreenState extends State<SplashScreen>
     await _ctrl.forward();
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
-    _goToOnboarding();
+    await _requestPermissions();
+    if (!mounted) return;
+    _goToMain();
   }
 
-  void _goToOnboarding() {
+  /// 위치·알림 권한을 OS 표준 팝업으로 1회씩 요청한다.
+  /// 이미 granted면 팝업 없이 즉시 통과. 2회차 실행도 granted라 skip.
+  Future<void> _requestPermissions() async {
+    if (!(await Permission.location.status).isGranted) {
+      await Permission.location.request();
+    }
+    if (!mounted) return;
+    if (!(await Permission.notification.status).isGranted) {
+      await Permission.notification.request();
+    }
+  }
+
+  void _goToMain() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 400),
-        pageBuilder: (_, _, _) => const PermissionOnboardingScreen(),
+        pageBuilder: (_, _, _) => const MainMapScreen(),
         transitionsBuilder: (_, anim, _, child) => FadeTransition(
           opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
           child: child,
@@ -73,7 +88,7 @@ class _SplashScreenState extends State<SplashScreen>
     return Scaffold(
       backgroundColor: AppColors.background,
       body: GestureDetector(
-        onTap: _goToOnboarding,
+        onTap: _goToMain,
         child: Center(
           child: FadeTransition(
             opacity: _opacity,
