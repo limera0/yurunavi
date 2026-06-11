@@ -66,6 +66,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
   bool _moving = false; // 도플러+히스테리시스 이동 상태
 
+  // 200ms 속도 외삽 ticker (Organic Maps 패턴): 직전 2개 실측 fix의
+  // 도플러 속도(m/s)·수신시각·위치를 보관해 fix 사이를 선형 외삽한다.
+  Timer? _speedTicker;
+  double? _vPrev, _vCur;        // 직전/최근 fix 도플러 속도 (m/s)
+  DateTime? _vPrevAt, _vCurAt;  // 직전/최근 fix 수신시각 (pos.timestamp 불신 → 수신시각 기반)
+  LatLng? _vPrevPos, _vCurPos;  // 직전/최근 fix 위치 (점프 가드용)
+
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
 
@@ -160,6 +167,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
+    _speedTicker?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _tts?.stop();
@@ -197,6 +205,59 @@ class _NavScreenState extends ConsumerState<NavScreen>
         ),
       ),
     ).listen(_onPosition);
+
+    // 200ms 속도 외삽 ticker 가동 (fix 사이 부드러운 추종 + staleness 흡수)
+    _speedTicker?.cancel();
+    _speedTicker = Timer.periodic(const Duration(milliseconds: 200), (_) => _tickSpeed());
+  }
+
+  /// 직전 2개 실측 fix로부터 현재 속도를 선형 외삽한다 (Organic Maps 패턴).
+  /// fix 사이 200ms 간격으로 속도계를 갱신하고, fix 두절 시 0으로 수렴시킨다.
+  void _tickSpeed() {
+    if (!mounted) return;
+    final curAt = _vCurAt;
+    final vCur = _vCur;
+    if (curAt == null || vCur == null) return;
+
+    final sinceFix = DateTime.now().difference(curAt).inMilliseconds;
+
+    // staleness: 8초간 새 fix 없으면 정차로 간주 → 0 (고착 차단)
+    if (sinceFix > 8000) {
+      if (_speedKmh != 0.0 || _moving) {
+        setState(() { _speedKmh = 0.0; _moving = false; });
+      }
+      return;
+    }
+    // ZUPT 존중: 히스테리시스 정차 판정이면 0 유지
+    if (!_moving) {
+      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
+      return;
+    }
+
+    final measured = (vCur * 3.6).clamp(0.0, 270.0);
+    final vPrev = _vPrev;
+    final prevAt = _vPrevAt;
+    // 직전 fix 부재(첫 fix) → 외삽 불가, 마지막 실측 표시
+    if (vPrev == null || prevAt == null) {
+      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
+      return;
+    }
+
+    final dtFix = curAt.difference(prevAt).inMilliseconds;
+    final jumpM = (_vPrevPos != null && _vCurPos != null)
+        ? _distanceM(_vPrevPos!, _vCurPos!) : 0.0;
+    final avgMs = dtFix > 0 ? jumpM / (dtFix / 1000.0) : double.maxFinite;
+    // 가드: timestamp 역전 / 큰 fix 간격 / GPS 점프 / 비현실 평균속도 → 보간 OFF
+    if (dtFix <= 0 || dtFix > 6500 || jumpM > 150.0 || avgMs > 75.0) {
+      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
+      return;
+    }
+
+    // 선형 외삽: v = v2 + (기울기)*경과시간, 0~75 m/s clamp
+    final slope = (vCur - vPrev) / dtFix; // m/s per ms
+    final v = (vCur + slope * sinceFix).clamp(0.0, 75.0);
+    final kmh = v * 3.6;
+    if ((_speedKmh - kmh).abs() > 0.05) setState(() => _speedKmh = kmh);
   }
 
   void _onPosition(Position pos) {
@@ -250,6 +311,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _moving = false;
     }
     // 1.5 <= d < 2.0 (비주차): _moving 직전상태 유지 = 히스테리시스
+
+    // 외삽 ticker용 실측 fix 보관 (직전→2칸 시프트)
+    _vPrev = _vCur; _vPrevAt = _vCurAt; _vPrevPos = _vCurPos;
+    _vCur = d; _vCurAt = now; _vCurPos = loc;
 
     final speedKmh = _moving ? d * 3.6 : 0.0;
     setState(() {
