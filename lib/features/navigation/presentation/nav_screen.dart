@@ -463,7 +463,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
         setState(() {
           _routePoints = newPoints;
           _durationMin = routes[selIdx].durationMin;
+          _applyRouteGuidance(routes[selIdx].maneuvers);
         });
+        _announceStep(0);
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
