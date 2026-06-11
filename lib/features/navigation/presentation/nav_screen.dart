@@ -86,7 +86,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
   bool _isRerouting = false;
   Timer? _offRouteDebounce;
-  Timer? _staleTimer; // 새 fix 미수신 감시 → 속도 0 강제
   static const _kOffRouteM = 20.0; // 이탈 판정 거리 (미터)
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
@@ -161,7 +160,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
-    _staleTimer?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _tts?.stop();
@@ -274,13 +272,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _checkOffRoute(loc);
       _updateStepByDistance(loc);
     }
-
-    // staleness 워치독: 3초간 새 fix 없으면 정차로 간주해 속도 0 강제
-    // (fused 절전/신호 끊김에 의한 '속도 고착' 원천 차단)
-    _staleTimer?.cancel();
-    _staleTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() { _speedKmh = 0.0; _moving = false; });
-    });
   }
 
   void _computeStepEndDistances() {
