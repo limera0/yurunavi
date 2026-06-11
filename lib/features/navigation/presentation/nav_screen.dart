@@ -182,17 +182,30 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
     if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
 
-    // GPS 콜드스타트 전 캐시된 위치로 즉시 카메라 이동
-    try {
-      final last = await Geolocator.getLastKnownPosition();
-      if (last != null && mounted && _currentPos == null) {
-        final loc = LatLng(last.latitude, last.longitude);
-        setState(() => _currentPos = loc);
-        _mlCtrl?.animateCamera(
-          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom),
-        );
-      }
-    } catch (_) {}
+    // GPS 선점 기동: MainMapScreen 스트림이 이미 fix를 받아뒀으면 즉시 숫자 모드
+    // (하드웨어 GPS는 이미 워밍업됐으므로 NavScreen 스트림도 빠르게 fix를 받는다)
+    final knownLoc = ref.read(currentLocationProvider);
+    if (knownLoc != null && mounted) {
+      setState(() {
+        _currentPos = knownLoc;
+        _firstFixReceived = true;
+      });
+      _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(knownLoc), _navZoom));
+    }
+
+    // GPS 콜드스타트 전 캐시된 위치로 즉시 카메라 이동 (knownLoc 없을 때 폴백)
+    if (knownLoc == null) {
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted && _currentPos == null) {
+          final loc = LatLng(last.latitude, last.longitude);
+          setState(() => _currentPos = loc);
+          _mlCtrl?.animateCamera(
+            ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom),
+          );
+        }
+      } catch (_) {}
+    }
 
     _locationSub = Geolocator.getPositionStream(
       locationSettings: AndroidSettings(
