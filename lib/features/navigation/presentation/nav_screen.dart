@@ -15,10 +15,12 @@ import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
+import '../domain/speed_kalman.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -73,6 +75,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   double? _vPrev, _vCur;        // 직전/최근 fix 도플러 속도 (m/s)
   DateTime? _vPrevAt, _vCurAt;  // 직전/최근 fix 수신시각 (pos.timestamp 불신 → 수신시각 기반)
   LatLng? _vPrevPos, _vCurPos;  // 직전/최근 fix 위치 (점프 가드용)
+
+  // GPS+IMU 1D 칼만 속도융합: IMU 가속도로 predict, GPS 도플러/ZUPT로 update.
+  final SpeedKalman _kf = SpeedKalman();
+  StreamSubscription<UserAccelerometerEvent>? _accelSub;
+  DateTime? _lastAccelAt; // predict dt 산출용 (수신시각 기반, pos.timestamp 불신과 동일 원칙)
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -169,6 +176,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
     _speedTicker?.cancel();
+    _accelSub?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
     _tts?.stop();
@@ -223,6 +231,29 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 200ms 속도 외삽 ticker 가동 (fix 사이 부드러운 추종 + staleness 흡수)
     _speedTicker?.cancel();
     _speedTicker = Timer.periodic(const Duration(milliseconds: 200), (_) => _tickSpeed());
+
+    // IMU 가속도 스트림 → 칼만 predict (~50Hz). setState 없음 — predict만.
+    _accelSub?.cancel();
+    _accelSub = userAccelerometerEventStream(
+      samplingPeriod: SensorInterval.gameInterval,
+    ).listen(_onAccel);
+  }
+
+  /// IMU 가속도 콜백: 진행방향 가속도를 칼만 predict로 적분한다.
+  /// 거치각도 무관·부호만 결정(정확도 무의미 원칙): 직전 GPS 도플러 추세로 +/− 판단.
+  void _onAccel(UserAccelerometerEvent e) {
+    final now = DateTime.now();
+    final last = _lastAccelAt;
+    _lastAccelAt = now;
+    if (last == null) return; // 첫 샘플 → dt 기준 없음
+    final dt = now.difference(last).inMicroseconds / 1e6;
+    if (dt <= 0 || dt > 0.5) return; // 이상 간격(앱 복귀 등) 스킵
+    // userAccel은 중력 제거됨 → 합벡터 크기로 가속 세기 추정
+    final aMag = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
+    // 부호: 직전 GPS 속도추세가 음(감속)이면 −, 아니면 +
+    final trend = (_vCur ?? 0.0) - (_vPrev ?? 0.0);
+    final aSigned = trend < 0 ? -aMag : aMag;
+    _kf.predict(aSigned, dt);
   }
 
   /// 직전 2개 실측 fix로부터 현재 속도를 선형 외삽한다 (Organic Maps 패턴).
