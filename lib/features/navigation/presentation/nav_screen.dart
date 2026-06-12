@@ -79,6 +79,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   DateTime? _lastFixAt;   // 마지막 GPS fix 수신시각 — staleness 워치독 기준
   double? _prevDoppler;   // 직전 GPS 도플러 속도 (predict 부호 판단용)
   double _gpsDelta = 0.0; // 최근 도플러 추세(d−이전d): IMU 가속도 부호 결정
+  double _lastASigned = 0.0; // 최근 predict 가속도(부호 포함) — KFT 진단 로그용
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -251,6 +252,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final aMag = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
     // 부호: 직전 GPS 도플러 추세가 음(감속)이면 −, 아니면 +
     final aSigned = _gpsDelta < 0 ? -aMag : aMag;
+    _lastASigned = aSigned; // KFT 진단 로그용
     _kf.predict(aSigned, dt);
   }
 
@@ -272,6 +274,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
 
     final kmh = _kf.speedKmh;
+    debugPrint('KFT v=${_kf.v.toStringAsFixed(2)} a=${_lastASigned.toStringAsFixed(2)} '
+               '=> ${kmh.toStringAsFixed(1)}km/h');
     if ((_speedKmh - kmh).abs() > 0.05) setState(() => _speedKmh = kmh);
   }
 
@@ -334,6 +338,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // R: speedAccuracy² (신뢰 낮으면 기본 4.0). max로 하한 1.0 보장.
     final sAcc = pos.speedAccuracy;
     final double r = (sAcc.isNaN || sAcc <= 0) ? 4.0 : max(1.0, sAcc * sAcc);
+    final double z = _moving ? d : 0.0; // 칼만에 주입한 측정값 (진단 로그용)
     if (_moving) {
       _kf.updateGps(d, r);
     } else {
@@ -352,9 +357,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (!_firstFixReceived) _firstFixReceived = true;
     });
 
-    debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
-               'thr=${parkThresh.toStringAsFixed(1)} parked=$parked mov=$_moving '
-               '=> ${speedKmh.toStringAsFixed(1)}km/h');
+    debugPrint('KF gps=${d.toStringAsFixed(2)} v=${_kf.v.toStringAsFixed(2)} '
+               'b=${_kf.b.toStringAsFixed(3)} P00=${_kf.p00.toStringAsFixed(3)} '
+               'zupt=${z.toStringAsFixed(1)} parked=$parked mov=$_moving '
+               '=> ${_kf.speedKmh.toStringAsFixed(1)}km/h');
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
     // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
