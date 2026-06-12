@@ -69,17 +69,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _moving = false; // 도플러+히스테리시스 이동 상태
   bool _firstFixReceived = false; // 콜드스타트: 첫 GPS fix 수신 전 "GPS 검색 중" 표시
 
-  // 200ms 속도 외삽 ticker (Organic Maps 패턴): 직전 2개 실측 fix의
-  // 도플러 속도(m/s)·수신시각·위치를 보관해 fix 사이를 선형 외삽한다.
+  // 200ms 표시 ticker: 칼만 추정 속도를 화면에 반영(구 선형 외삽 대체).
   Timer? _speedTicker;
-  double? _vPrev, _vCur;        // 직전/최근 fix 도플러 속도 (m/s)
-  DateTime? _vPrevAt, _vCurAt;  // 직전/최근 fix 수신시각 (pos.timestamp 불신 → 수신시각 기반)
-  LatLng? _vPrevPos, _vCurPos;  // 직전/최근 fix 위치 (점프 가드용)
 
   // GPS+IMU 1D 칼만 속도융합: IMU 가속도로 predict, GPS 도플러/ZUPT로 update.
   final SpeedKalman _kf = SpeedKalman();
   StreamSubscription<UserAccelerometerEvent>? _accelSub;
   DateTime? _lastAccelAt; // predict dt 산출용 (수신시각 기반, pos.timestamp 불신과 동일 원칙)
+  DateTime? _lastFixAt;   // 마지막 GPS fix 수신시각 — staleness 워치독 기준
+  double? _prevDoppler;   // 직전 GPS 도플러 속도 (predict 부호 판단용)
+  double _gpsDelta = 0.0; // 최근 도플러 추세(d−이전d): IMU 가속도 부호 결정
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -250,58 +249,29 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (dt <= 0 || dt > 0.5) return; // 이상 간격(앱 복귀 등) 스킵
     // userAccel은 중력 제거됨 → 합벡터 크기로 가속 세기 추정
     final aMag = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
-    // 부호: 직전 GPS 속도추세가 음(감속)이면 −, 아니면 +
-    final trend = (_vCur ?? 0.0) - (_vPrev ?? 0.0);
-    final aSigned = trend < 0 ? -aMag : aMag;
+    // 부호: 직전 GPS 도플러 추세가 음(감속)이면 −, 아니면 +
+    final aSigned = _gpsDelta < 0 ? -aMag : aMag;
     _kf.predict(aSigned, dt);
   }
 
-  /// 직전 2개 실측 fix로부터 현재 속도를 선형 외삽한다 (Organic Maps 패턴).
-  /// fix 사이 200ms 간격으로 속도계를 갱신하고, fix 두절 시 0으로 수렴시킨다.
+  /// 200ms 표시 ticker: 칼만 추정 속도를 화면에 반영한다.
+  /// IMU predict가 fix 사이를 메우므로 외삽식 불필요. staleness 안전폴백 유지:
+  /// 8초간 새 GPS fix 없으면 정차로 간주해 0으로 끌어내린다(IMU 표류 차단).
   void _tickSpeed() {
     if (!mounted) return;
-    final curAt = _vCurAt;
-    final vCur = _vCur;
-    if (curAt == null || vCur == null) return;
+    final fixAt = _lastFixAt;
+    if (fixAt == null) return; // 첫 GPS fix 전
 
-    final sinceFix = DateTime.now().difference(curAt).inMilliseconds;
-
-    // staleness: 8초간 새 fix 없으면 정차로 간주 → 0 (고착 차단)
+    final sinceFix = DateTime.now().difference(fixAt).inMilliseconds;
     if (sinceFix > 8000) {
+      _kf.updateZupt(); // 표류 방지: 칼만 속도를 0으로 수렴
       if (_speedKmh != 0.0 || _moving) {
         setState(() { _speedKmh = 0.0; _moving = false; });
       }
       return;
     }
-    // ZUPT 존중: 히스테리시스 정차 판정이면 0 유지
-    if (!_moving) {
-      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
-      return;
-    }
 
-    final measured = (vCur * 3.6).clamp(0.0, 270.0);
-    final vPrev = _vPrev;
-    final prevAt = _vPrevAt;
-    // 직전 fix 부재(첫 fix) → 외삽 불가, 마지막 실측 표시
-    if (vPrev == null || prevAt == null) {
-      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
-      return;
-    }
-
-    final dtFix = curAt.difference(prevAt).inMilliseconds;
-    final jumpM = (_vPrevPos != null && _vCurPos != null)
-        ? _distanceM(_vPrevPos!, _vCurPos!) : 0.0;
-    final avgMs = dtFix > 0 ? jumpM / (dtFix / 1000.0) : double.maxFinite;
-    // 가드: timestamp 역전 / 큰 fix 간격 / GPS 점프 / 비현실 평균속도 → 보간 OFF
-    if (dtFix <= 0 || dtFix > 6500 || jumpM > 150.0 || avgMs > 75.0) {
-      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
-      return;
-    }
-
-    // 선형 외삽: v = v2 + (기울기)*경과시간, 0~75 m/s clamp
-    final slope = (vCur - vPrev) / dtFix; // m/s per ms
-    final v = (vCur + slope * sinceFix).clamp(0.0, 75.0);
-    final kmh = v * 3.6;
+    final kmh = _kf.speedKmh;
     if ((_speedKmh - kmh).abs() > 0.05) setState(() => _speedKmh = kmh);
   }
 
@@ -360,11 +330,22 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     // 1.5 <= d < 2.0 (비주차): _moving 직전상태 유지 = 히스테리시스
 
-    // 외삽 ticker용 실측 fix 보관 (직전→2칸 시프트)
-    _vPrev = _vCur; _vPrevAt = _vCurAt; _vPrevPos = _vCurPos;
-    _vCur = d; _vCurAt = now; _vCurPos = loc;
+    // 칼만 보정: 이동 중이면 GPS 도플러로 update, 정차면 ZUPT(z=0)로 강제.
+    // R: speedAccuracy² (신뢰 낮으면 기본 4.0). max로 하한 1.0 보장.
+    final sAcc = pos.speedAccuracy;
+    final double r = (sAcc.isNaN || sAcc <= 0) ? 4.0 : max(1.0, sAcc * sAcc);
+    if (_moving) {
+      _kf.updateGps(d, r);
+    } else {
+      _kf.updateZupt();
+    }
+    _lastFixAt = now; // staleness 워치독 기준 (구 _vCurAt 대체)
 
-    final speedKmh = _moving ? d * 3.6 : 0.0;
+    // IMU predict 부호용 도플러 추세 (구 _vCur−_vPrev 대체)
+    _gpsDelta = d - (_prevDoppler ?? d);
+    _prevDoppler = d;
+
+    final speedKmh = _kf.speedKmh;
     setState(() {
       _currentPos = loc;
       _speedKmh = speedKmh;
