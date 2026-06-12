@@ -50,6 +50,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   ml.MapLibreMapController? _mlCtrl;
   bool _styleLoaded = false;
 
+  ml.Circle? _locMarker;
+  static const String _kLocColor = '#00C853';
+
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
 
@@ -302,6 +305,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _currentPos = loc;
         if (!_firstFixReceived) _firstFixReceived = true;
       });
+      _ensureLocationMarker(); // unawaited — ③
       return;
     }
     _lastSpeedAt = now;
@@ -330,6 +334,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _speedKmh = speedKmh;
       if (!_firstFixReceived) _firstFixReceived = true;
     });
+    _ensureLocationMarker(); // unawaited — ③
 
     debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
                'thr=${parkThresh.toStringAsFixed(1)} parked=$parked mov=$_moving '
@@ -708,6 +713,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
+  Future<void> _ensureLocationMarker() async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final p = _currentPos;
+    if (p == null) return;
+    final geo = _toMl(p);
+    if (_locMarker == null) {
+      _locMarker = await c.addCircle(ml.CircleOptions(
+        geometry: geo,
+        circleRadius: 8,
+        circleColor: _kLocColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    } else {
+      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
+    }
+  }
+
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
@@ -716,8 +740,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
+      _ensureLocationMarker(); // unawaited — ③
     });
-    // ③ Circle/Symbol 마커 초기화는 커밋 ③에서 추가
   }
 
   void _onMapGesture() {
@@ -783,22 +807,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
               children: [
                 // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
                 MarkerLayer(markers: [
-                  if (_currentPos != null)
-                    Marker(
-                      point: _currentPos!,
-                      width: 24,
-                      height: 24,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: cs.tertiary,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(color: cs.tertiary.withValues(alpha: 0.5), blurRadius: 12),
-                          ],
-                        ),
-                      ),
-                    ),
                   ...widget.waypoints.map(
                     (wp) => Marker(
                       point: wp,
