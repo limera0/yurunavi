@@ -242,6 +242,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       }
       return;
     }
+    // 빠른 정차: fix가 1500ms 이상 오지 않고 posBuffer가 정지 기준이면 표시만 0
+    // (_moving은 건드리지 않음 — 히스테리시스는 _onPosition 책임)
+    if (sinceFix > 1500 && _calcParkState().parked) {
+      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
+      return;
+    }
     // ZUPT 존중: 히스테리시스 정차 판정이면 0 유지
     if (!_moving) {
       if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
@@ -303,22 +309,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 도플러+히스테리시스 속도 게이트 (위치 군집을 ZUPT 앵커로 사용)
     final double d = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed; // m/s
 
-    double bufRadius = 0.0;
-    double parkThresh = 6.0;
-    final bool parked;
-    if (_posBuffer.length < 3) {
-      parked = false; // 샘플 부족 → 도플러에 위임
-    } else {
-      final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
-      final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
-      bufRadius = _posBuffer
-          .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
-          .reduce((a, b) => a > b ? a : b);
-      final accs = _posBuffer.map((e) => e.acc).toList()..sort();
-      final medAcc = accs[accs.length ~/ 2];
-      parkThresh = (6.0 > 1.2 * medAcc) ? 6.0 : 1.2 * medAcc;
-      parked = bufRadius < parkThresh;
-    }
+    final (:parked, :bufRadius, :parkThresh) = _calcParkState();
 
     if (parked) {
       _moving = false;
@@ -551,6 +542,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final h = sin(dLat / 2) * sin(dLat / 2) +
         cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2);
     return 2 * r * asin(sqrt(h));
+  }
+
+  /// posBuffer 군집 반경으로 정차 여부를 판정한다.
+  /// 샘플 부족(< 3)이면 parked=false 반환.
+  ({bool parked, double bufRadius, double parkThresh}) _calcParkState() {
+    if (_posBuffer.length < 3) {
+      return (parked: false, bufRadius: 0.0, parkThresh: 6.0);
+    }
+    final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
+    final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
+    final bufRadius = _posBuffer
+        .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
+        .reduce((a, b) => a > b ? a : b);
+    final accs = _posBuffer.map((e) => e.acc).toList()..sort();
+    final medAcc = accs[accs.length ~/ 2];
+    final parkThresh = (6.0 > 1.2 * medAcc) ? 6.0 : 1.2 * medAcc;
+    return (parked: bufRadius < parkThresh, bufRadius: bufRadius, parkThresh: parkThresh);
   }
 
   void _showArrivalDialog(List<({String name, String type})> pois) {
