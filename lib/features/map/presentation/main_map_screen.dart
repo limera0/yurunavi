@@ -21,6 +21,7 @@ import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
+import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
 
 export 'main_map_screen.dart';
@@ -118,6 +119,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // TODO REMOVE: spike-only debug language toggle
   MapLanguage _debugLang = MapLanguage.korean;
+  String? _rawStyle;   // 원본 JSON 1회 로드
+  String? _styleJson;  // 언어 적용 후 주입 문자열
 
   // Touch overlay
   LatLng? _touchPoint;
@@ -140,6 +143,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _sheetCtrl, curve: Curves.easeOutCubic));
     _startLocationTracking();
+    _loadRawStyle();
+  }
+
+  Future<void> _loadRawStyle() async {
+    final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
+    if (!mounted) return;
+    setState(() {
+      _rawStyle = raw;
+      _styleJson = applyMapLanguageToStyle(raw, _debugLang);
+    });
   }
 
   @override
@@ -242,32 +255,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       };
 
   // ── TODO REMOVE: spike-only language toggle ────────────────────────────────
-  static const _languageLayerIds = <String>[
-    'waterway-name', 'water-name-lakeline', 'water-name-other',
-    'poi-level-3', 'poi-level-2', 'poi-level-1', 'poi-railway',
-    'highway-name-path', 'highway-name-minor', 'highway-name-major',
-    'airport-label-major', 'place-other', 'place-village', 'place-town',
-    'place-city', 'place-city-capital',
-    'water-name-ocean', 'place-state', 'place-country-other',
-    'place-country-3', 'place-country-2', 'place-country-1', 'place-continent',
-  ];
-
-  String _languageTextField(MapLanguage l) => switch (l) {
-    MapLanguage.korean  => '{name:nonlatin}',
-    MapLanguage.english => '{name:latin}',
-  };
-
-  Future<void> _applyMapLanguage(MapLanguage l) async {
-    final c = _mlCtrl;
-    if (c == null) return;
-    final expr = _languageTextField(l);
-    for (final id in _languageLayerIds) {
-      try {
-        await c.setLayerProperties(id, ml.SymbolLayerProperties(textField: expr));
-      } catch (e) {
-        debugPrint('lang apply fail [$id]: $e');
-      }
-    }
+  void _applyMapLanguage(MapLanguage l) {
+    final raw = _rawStyle;
+    if (raw == null) return;
+    setState(() {
+      _debugLang = l;
+      _styleJson = applyMapLanguageToStyle(raw, l);
+    });
   }
   // ── END TODO REMOVE ────────────────────────────────────────────────────────
 
@@ -795,8 +789,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           // M1: 빈 지도 + 스타일만. 폴리라인·마커는 M2~M3에서 추가.
           // M2: 경로 폴리라인 GeoJSON 소스/레이어 추가.
           // ══════════════════════════════════════════════════════
+          if (_styleJson == null)
+            const Center(child: CircularProgressIndicator()),
+          if (_styleJson != null)
           ml.MapLibreMap(
-            styleString: 'assets/images/osm_liberty_yurunavi.json',
+            styleString: _styleJson!,
             initialCameraPosition: ml.CameraPosition(
               target: _toMl(_origin ?? _lastKnown ?? kInitialMapView),
               zoom: _currentZoom,
@@ -990,12 +987,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             bottom: 120,
             left: 16,
             child: GestureDetector(
-              onTap: () async {
-                final next = _debugLang == MapLanguage.korean
-                    ? MapLanguage.english
-                    : MapLanguage.korean;
-                await _applyMapLanguage(next);
-                setState(() => _debugLang = next);
+              onTap: () {
+                _applyMapLanguage(
+                  _debugLang == MapLanguage.korean
+                      ? MapLanguage.english
+                      : MapLanguage.korean,
+                );
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
