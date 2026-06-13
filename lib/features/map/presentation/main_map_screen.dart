@@ -13,6 +13,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../core/widgets/slider_start_button.dart';
+import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
 import '../../../models/saved_place.dart';
 import '../../../services/connectivity_service.dart';
@@ -114,6 +115,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // Course sheet
   bool _showCourseSheet = false;
+
+  // TODO REMOVE: spike-only debug language toggle
+  MapLanguage _debugLang = MapLanguage.korean;
 
   // Touch overlay
   LatLng? _touchPoint;
@@ -236,6 +240,36 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     })
                 .toList(),
       };
+
+  // ── TODO REMOVE: spike-only language toggle ────────────────────────────────
+  static const _languageLayerIds = <String>[
+    'waterway-name', 'water-name-lakeline', 'water-name-other',
+    'poi-level-3', 'poi-level-2', 'poi-level-1', 'poi-railway',
+    'highway-name-path', 'highway-name-minor', 'highway-name-major',
+    'airport-label-major', 'place-other', 'place-village', 'place-town',
+    'place-city', 'place-city-capital',
+    'water-name-ocean', 'place-state', 'place-country-other',
+    'place-country-3', 'place-country-2', 'place-country-1', 'place-continent',
+  ];
+
+  String _languageTextField(MapLanguage l) => switch (l) {
+    MapLanguage.korean  => '{name:nonlatin}',
+    MapLanguage.english => '{name:latin}',
+  };
+
+  Future<void> _applyMapLanguage(MapLanguage l) async {
+    final c = _mlCtrl;
+    if (c == null) return;
+    final expr = _languageTextField(l);
+    for (final id in _languageLayerIds) {
+      try {
+        await c.setLayerProperties(id, ml.SymbolLayerProperties(textField: expr));
+      } catch (e) {
+        debugPrint('lang apply fail [$id]: $e');
+      }
+    }
+  }
+  // ── END TODO REMOVE ────────────────────────────────────────────────────────
 
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
@@ -951,6 +985,32 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           ),
 
           // ══════════════════════════════════════════════════════
+          // TODO REMOVE: spike-only language debug button
+          Positioned(
+            bottom: 120,
+            left: 16,
+            child: GestureDetector(
+              onTap: () async {
+                final next = _debugLang == MapLanguage.korean
+                    ? MapLanguage.english
+                    : MapLanguage.korean;
+                await _applyMapLanguage(next);
+                setState(() => _debugLang = next);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '라벨: ${_debugLang == MapLanguage.korean ? '한국어' : 'English'}',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+
           // LAYER 8 · 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT)
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
           // IgnorePointer로 터치 투명하게 처리.
