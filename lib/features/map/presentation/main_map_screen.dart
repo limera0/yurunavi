@@ -23,6 +23,7 @@ import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
 import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
+import '../../../screens/settings_screen.dart';
 
 export 'main_map_screen.dart';
 
@@ -893,7 +894,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 onCourseRegister: () {},
                 onTourSummary: () {},
                 onSavedCourses: _showPlacesSheet,
-                onSettings: () {},
+                onSettings: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                ),
               ),
             ),
           ),
