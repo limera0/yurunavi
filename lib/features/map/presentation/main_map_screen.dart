@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:math' show cos, sqrt, asin;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,14 +13,18 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../core/widgets/slider_start_button.dart';
+import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
 import '../../../models/saved_place.dart';
 import '../../../services/connectivity_service.dart';
-import '../../../services/map_cache_provider.dart';
+import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
+import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
+import '../../settings/providers/settings_providers.dart';
+import '../../../screens/settings_screen.dart';
 
 export 'main_map_screen.dart';
 
@@ -76,6 +81,26 @@ class MainMapScreen extends ConsumerStatefulWidget {
 class _MainMapScreenState extends ConsumerState<MainMapScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
+  ml.MapLibreMapController? _mlCtrl; // M1~M4 동안 점진 연결
+  bool _styleLoaded = false;
+
+  static const _routeSourceId = 'route-source';
+  static const _routeLayerId = 'route-layer';
+  static const _routeBgSourceId = 'route-bg-source';
+  static const _routeBgLayerId = 'route-bg-layer';
+
+  ml.Circle? _locMarker;
+  ml.Symbol? _destMarker;
+  List<ml.Symbol> _waypointMarkers = [];
+  static const String _kLocColor = '#00C853';
+  static const String _kDestIcon = 'pointer_red';
+  static const double _kDestIconSize = 1.5; // 폰 실측: 3x 적용
+  static const String _kWpIcon = 'pointer_yellow';
+  static const double _kWpIconSize = 1.5; // 96px PNG, 폰 실측으로 조정
+
+  // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
+  ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
+
   // Nullable until the device returns a real GPS fix — prevents the origin
   // marker / distance badge from rendering at a hardcoded mock location.
   LatLng? _origin;
@@ -94,10 +119,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // Course sheet
   bool _showCourseSheet = false;
 
+  String? _rawStyle;   // 원본 JSON 1회 로드
+  String? _styleJson;  // 언어 적용 후 주입 문자열
+
   // Touch overlay
   LatLng? _touchPoint;
+  // ignore: unused_field
   double _touchDistKm = 0;
-  bool _waypointAddedAtTouch = false; // 같은 터치 지점에 경유지 추가됐으면 true
 
   // Slide-up animation for course sheet
   late final AnimationController _sheetCtrl;
@@ -115,6 +143,17 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _sheetCtrl, curve: Curves.easeOutCubic));
     _startLocationTracking();
+    _loadRawStyle();
+  }
+
+  Future<void> _loadRawStyle() async {
+    final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
+    if (!mounted) return;
+    final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
+    setState(() {
+      _rawStyle = raw;
+      _styleJson = applyMapLanguageToStyle(raw, lang);
+    });
   }
 
   @override
@@ -144,7 +183,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (last != null && mounted && _origin == null) {
         final loc = LatLng(last.latitude, last.longitude);
         setState(() => _lastKnown = loc);
-        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+        _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
+        );
+        _ensureLocationMarker(); // unawaited — B1
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
@@ -160,15 +202,195 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       setState(() => _origin = loc);
       if (isFirstFix) {
         // Snap the camera to the rider the moment GPS resolves.
-        _mapCtrl.move(loc, _currentZoom.clamp(10.0, 14.0));
+        _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
+        );
       }
+      _ensureLocationMarker(); // unawaited — B1
     });
   }
 
   void _recenterMap() {
     final o = _origin;
     if (o == null) return;
-    _mapCtrl.move(o, _currentZoom.clamp(10.0, 14.0));
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(_toMl(o), _currentZoom.clamp(10.0, 14.0)),
+    );
+  }
+
+  // ── Route polyline (M2) ───────────────────────────────────────────────────
+
+  Map<String, dynamic> _buildRouteGeoJson(List<LatLng> points) => {
+        'type': 'FeatureCollection',
+        'features': points.isEmpty
+            ? <dynamic>[]
+            : [
+                {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'LineString',
+                    // GeoJSON은 [longitude, latitude] 순서
+                    'coordinates':
+                        points.map((p) => [p.longitude, p.latitude]).toList(),
+                  },
+                  'properties': <String, dynamic>{},
+                }
+              ],
+      };
+
+  Map<String, dynamic> _buildBgGeoJson(List<List<LatLng>> routes) => {
+        'type': 'FeatureCollection',
+        'features': routes.isEmpty
+            ? <dynamic>[]
+            : routes
+                .map((pts) => {
+                      'type': 'Feature',
+                      'geometry': {
+                        'type': 'LineString',
+                        'coordinates':
+                            pts.map((p) => [p.longitude, p.latitude]).toList(),
+                      },
+                      'properties': <String, dynamic>{},
+                    })
+                .toList(),
+      };
+
+  Future<void> _initRouteLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    // 경로선을 circle 마커 레이어 아래에 삽입하기 위해 circle layer id 산출
+    final circleLyr = ctrl.circleManager?.layerIds.isNotEmpty == true
+        ? ctrl.circleManager!.layerIds.first
+        : null;
+    debugPrint('[zorder] circleLyr=$circleLyr');
+    // bg layer (below selected route)
+    await ctrl.addGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
+    await ctrl.addLineLayer(
+      _routeBgSourceId,
+      _routeBgLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#9E9E9E',
+        lineWidth: 4.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      belowLayerId: circleLyr,
+    );
+    // selected route layer (above bg)
+    await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
+    await ctrl.addLineLayer(
+      _routeSourceId,
+      _routeLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#1E5AFF',
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      belowLayerId: circleLyr,
+    );
+  }
+
+  // ── Marker helpers (B1/B2) ────────────────────────────────────────────────
+
+  Future<void> _ensureLocationMarker() async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final p = _origin ?? _lastKnown;
+    if (p == null) return;
+    final geo = _toMl(p);
+    if (_locMarker == null) {
+      _locMarker = await c.addCircle(ml.CircleOptions(
+        geometry: geo,
+        circleRadius: 8,
+        circleColor: _kLocColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    } else {
+      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
+    }
+  }
+
+  Future<void> _ensureDestMarker(LatLng dest) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final geo = _toMl(dest);
+    if (_destMarker == null) {
+      _destMarker = await c.addSymbol(ml.SymbolOptions(
+        geometry: geo,
+        iconImage: _kDestIcon,
+        iconSize: _kDestIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 10,
+      ));
+    } else {
+      await c.updateSymbol(_destMarker!, ml.SymbolOptions(geometry: geo));
+    }
+  }
+
+  Future<void> _removeDestMarker() async {
+    final c = _mlCtrl;
+    if (c != null && _destMarker != null) {
+      await c.removeSymbol(_destMarker!);
+    }
+    _destMarker = null;
+  }
+
+  Future<void> _syncWaypointMarkers(List<LatLng> waypoints) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    for (final s in _waypointMarkers) {
+      await c.removeSymbol(s);
+    }
+    _waypointMarkers = [];
+    for (final wp in waypoints) {
+      final s = await c.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(wp),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 5,
+      ));
+      _waypointMarkers.add(s);
+    }
+  }
+
+  void _updateRouteLayer(List<LatLng> points) {
+    if (!_styleLoaded) return;
+    // selected route
+    _mlCtrl?.setGeoJsonSource(_routeSourceId, _buildRouteGeoJson(points));
+    // non-selected routes in grey
+    final state = ref.read(mapInteractionProvider);
+    final allRoutes = state.allRoutes;
+    final selIdx = state.selectedRouteIdx;
+    if (allRoutes.length > 1) {
+      final bgRoutes = [
+        for (int i = 0; i < allRoutes.length; i++)
+          if (i != selIdx) allRoutes[i],
+      ];
+      _mlCtrl?.setGeoJsonSource(_routeBgSourceId, _buildBgGeoJson(bgRoutes));
+    } else {
+      _mlCtrl?.setGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
+    }
+    if (points.isEmpty) return;
+    final minLat = points.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = points.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLng = points.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLng = points.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    final bottomPadding = _showCourseSheet ? 360.0 : 80.0;
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: ml.LatLng(minLat, minLng),
+          northeast: ml.LatLng(maxLat, maxLng),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: bottomPadding,
+      ),
+    );
   }
 
   // ── Haversine ─────────────────────────────────────────────────────────────
@@ -222,48 +444,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (action != _TapAction.destination) return; // cancelled
     }
 
-    ref.read(mapInteractionProvider.notifier).setLoading(true);
     setState(() {
       _touchPoint = tapped;
       _touchDistKm = _haversineKm(origin, tapped);
-      _waypointAddedAtTouch = false; // 새 탭 → 경유지 버튼 다시 표시
     });
-
-    final poiSvc = ref.read(poiServiceProvider);
-    try {
-      final result = await poiSvc.snapDestination(
-        origin: origin,
-        tapped: tapped,
-        radiusKm: 1.0,
-      );
-      ref.read(poiListProvider.notifier).set(result.allPois);
-
-      LatLng dest;
-      if (result.snappedPoi != null) {
-        dest = result.snappedPoi!.location;
-        _showSnapToast(result.snappedPoi!);
-      } else {
-        final expand = await _showNoPoiDialog();
-        if (!mounted) return;
-        if (expand == true) {
-          final r2 = await poiSvc.snapDestination(
-            origin: origin,
-            tapped: tapped,
-            radiusKm: 3.0,
-          );
-          ref.read(poiListProvider.notifier).set(r2.allPois);
-          dest = r2.snappedPoi?.location ?? tapped;
-          if (r2.snappedPoi != null) _showSnapToast(r2.snappedPoi!);
-        } else {
-          dest = tapped;
-        }
-      }
-      _applyDestination(dest);
-    } finally {
-      if (mounted) {
-        ref.read(mapInteractionProvider.notifier).setLoading(false);
-      }
-    }
+    _applyDestination(tapped);
   }
 
   Future<_TapAction?> _showTapActionSheet(LatLng tapped) {
@@ -327,10 +512,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           ? origin.longitude
           : dest.longitude,
     );
-    _mapCtrl.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds(sw, ne),
-        padding: const EdgeInsets.fromLTRB(50, 110, 80, 260),
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: _toMl(sw),
+          northeast: _toMl(ne),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: 260,
       ),
     );
 
@@ -339,6 +530,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       _touchPoint = null;
     });
     _sheetCtrl.forward();
+
+    _ensureDestMarker(dest); // unawaited — B2
 
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
@@ -409,52 +602,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     );
   }
 
-  // ── 경로 요약 ──────────────────────────────────────────────────────────────
-
-  void _showRouteSummary() {
-    final state = ref.read(mapInteractionProvider);
-    final idx = state.selectedRouteIdx.clamp(0, state.allRouteMeta.length - 1);
-    if (state.allRouteMeta.isEmpty) return;
-    final meta = state.allRouteMeta[idx];
-    final maneuvers = idx < _fetchedRoutes.length ? _fetchedRoutes[idx].maneuvers : <ManeuverStep>[];
-    const turnTypes = {9, 10, 11, 14, 15, 16};
-    final windingCount = maneuvers.where((m) => turnTypes.contains(m.type)).length;
-    const courseNames = ['시골길', '지방도로', '국도'];
-    final courseName = courseNames[idx.clamp(0, 2)];
-    final h = meta.mins ~/ 60;
-    final m = meta.mins % 60;
-    final timeStr = h > 0 ? '$h시간 $m분' : '$m분';
-
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$courseName 경로 요약',
-                  style: AppTextStyles.headlineMD),
-              const SizedBox(height: 16),
-              _SummaryRow(Icons.straighten_rounded, '총 거리', '${meta.km.toStringAsFixed(1)}km'),
-              _SummaryRow(Icons.schedule_rounded, '예상 시간', timeStr),
-              _SummaryRow(Icons.star_rounded, '재미 점수', '${meta.windingScore.toStringAsFixed(0)}점'),
-              _SummaryRow(Icons.turn_right_rounded, '와인딩 구간', '$windingCount개'),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── 내 장소 (즐겨찾기 + 최근 경로) ─────────────────────────────────────────
 
   void _showPlacesSheet() {
@@ -492,6 +639,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     });
     _sheetCtrl.reverse();
     _recenterMap();
+    _removeDestMarker(); // unawaited — B2
+    _syncWaypointMarkers(const []); // unawaited — 경유지 핀 전체 제거
   }
 
   void _startNavigation() {
@@ -510,6 +659,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             at: DateTime.now(),
           ));
     }
+    final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx
+        .clamp(0, _fetchedRoutes.length - 1);
+    final durationMin = selIdx < _fetchedRoutes.length
+        ? _fetchedRoutes[selIdx].durationMin
+        : 0;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavScreen(
@@ -517,9 +671,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           waypoints: state.waypoints,
           routePolyline: state.routePolyline,
           maneuvers: _selectedManeuvers,
+          durationMin: durationMin,
         ),
       ),
-    );
+    ).then((_) {
+      if (mounted) _clearDestination();
+    });
   }
 
   Future<void> _onRouteCardSelect(int idx) async {
@@ -546,60 +703,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     await _fetchAndStoreAllRoutes(origin, dest);
   }
 
-  // ── Toasts / Dialogs ──────────────────────────────────────────────────────
-
-  void _showSnapToast(Poi poi) {
-    final msg = poi.type == PoiType.cafe
-        ? '근처 카페로 목적지를 조정했어요'
-        : '근처 편의점으로 목적지를 조정했어요';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          Icon(
-            poi.type == PoiType.cafe ? Icons.local_cafe : Icons.store,
-            color: Colors.white,
-            size: 16,
-          ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(msg, style: AppTextStyles.bodyMD.copyWith(color: Colors.white))),
-        ]),
-        backgroundColor: AppColors.primary,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Future<bool?> _showNoPoiDialog() => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20)),
-          title: Row(children: [
-            const Icon(Icons.search_off, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Text('쉴 곳을 못 찾았어요',
-                style: AppTextStyles.headlineMD),
-          ]),
-          content: Text(
-            '목적지 근처에 카페나 편의점이 없어요.\n범위를 넓혀 찾아볼까요?',
-            style: AppTextStyles.bodyMD,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('이대로'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('범위 넓혀 찾기'),
-            ),
-          ],
-        ),
-      );
-
   // ── POI markers ───────────────────────────────────────────────────────────
 
+  // ignore: unused_element
   List<Marker> _buildPoiMarkers(List<Poi> pois) {
     return _clusterPois(pois, _currentZoom).map((cell) {
       final color = Color(cell.representative.type.colorValue);
@@ -619,19 +725,36 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   @override
   Widget build(BuildContext context) {
     final interaction = ref.watch(mapInteractionProvider);
-    final pois = ref.watch(poiListProvider);
+    final pois = ref.watch(poiListProvider); // ignore: unused_local_variable
     final dest = interaction.destination;
-    final waypoint = interaction.waypoint;
-    final routePolyline = interaction.routePolyline;
-    final allRoutes = interaction.allRoutes;
+    final waypoint = interaction.waypoint; // ignore: unused_local_variable
+    final allRoutes = interaction.allRoutes; // ignore: unused_local_variable
     final selectedRouteIdx = interaction.selectedRouteIdx;
+
+    ref.listen<MapInteractionState>(mapInteractionProvider, (prev, next) {
+      if (prev?.routePolyline != next.routePolyline) {
+        _updateRouteLayer(next.routePolyline);
+      }
+      if (prev?.waypoints != next.waypoints) {
+        _syncWaypointMarkers(next.waypoints); // unawaited
+      }
+    });
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
 
-    // Theme-adaptive colors for map overlays.
+    ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
+      final raw = _rawStyle;
+      if (raw == null) return;
+      final lang = next.value ?? MapLanguage.korean;
+      if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
+    });
+
+    // Theme-adaptive colors for map overlays. (M2~M3에서 마커에 재사용)
+    // ignore: unused_local_variable
     final originColor =
         riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin;
+    // ignore: unused_local_variable
     final destColor =
         riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination;
 
@@ -659,147 +782,56 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       body: Stack(
         children: [
           // ══════════════════════════════════════════════════════
-          // LAYER 1 · OSM Map
+          // LAYER 1 · MapLibre Map (osm_liberty 스타일)
+          // M1: 빈 지도 + 스타일만. 폴리라인·마커는 M2~M3에서 추가.
+          // M2: 경로 폴리라인 GeoJSON 소스/레이어 추가.
           // ══════════════════════════════════════════════════════
-          FlutterMap(
-            mapController: _mapCtrl,
-            options: MapOptions(
-              initialCenter: _origin ?? _lastKnown ?? kInitialMapView,
-              initialZoom: _currentZoom,
-              // Disable rotation: lock North-up for motorcycle mount
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onTap: _onMapTap,
-              onMapEvent: (event) {
-                if (event is MapEventMoveEnd) {
-                  setState(() => _currentZoom = _mapCtrl.camera.zoom);
-                }
-              },
+          if (_styleJson == null)
+            const Center(child: CircularProgressIndicator()),
+          if (_styleJson != null)
+          ml.MapLibreMap(
+            styleString: _styleJson!,
+            initialCameraPosition: ml.CameraPosition(
+              target: _toMl(_origin ?? _lastKnown ?? kInitialMapView),
+              zoom: _currentZoom,
             ),
-            children: [
-              // OSM standard tiles — full road/building/POI detail at all zoom levels.
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.westinx.yurunavi',
-                maxZoom: 19,
-                tileProvider: buildCachedTileProvider(),
-              ),
-
-              // ── ZOOM TIER 1 (any zoom): route polylines ─────────────
-              // 비선택 경로: 회색 0.4 (선택 경로의 고유색과 명확히 구분)
-              // 선택 경로: 코스 고유색 0.92 + 굵게
-              ...() {
-                final layers = <Widget>[];
-                for (int i = 0; i < allRoutes.length; i++) {
-                  if (i == selectedRouteIdx) continue;
-                  if (allRoutes[i].length < 2) continue;
-                  layers.add(PolylineLayer(polylines: [
-                    Polyline(
-                      points: allRoutes[i],
-                      color: Colors.grey.withValues(alpha: 0.4),
-                      strokeWidth: riderMode ? 3.5 : 2.0,
-                      strokeCap: StrokeCap.round,
-                      strokeJoin: StrokeJoin.round,
-                    ),
-                  ]));
-                }
-                return layers;
-              }(),
-              if (routePolyline.length >= 2)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: routePolyline,
-                    // 선택 경로도 코스 고유 색 사용 (riderMode는 공통 주황)
-                    color: riderMode
-                        ? RiderModeColors.mapRoute.withValues(alpha: 0.92)
-                        : [
-                            AppColors.mapCourse,
-                            AppColors.tertiary,
-                            AppColors.primary,
-                          ][selectedRouteIdx.clamp(0, 2)].withValues(alpha: 0.92),
-                    strokeWidth: riderMode
-                        ? (_currentZoom >= 13 ? 9.0 : _currentZoom >= 10.5 ? 7.0 : 5.0)
-                        : (_currentZoom >= 13 ? 6.0 : _currentZoom >= 10.5 ? 4.0 : 3.0),
-                    strokeCap: StrokeCap.round,
-                    strokeJoin: StrokeJoin.round,
-                  ),
-                ]),
-
-              // ── ZOOM TIER 2 (zoom ≥ 10.5): POI clusters ────────────
-              // Hide all POI detail at wide view — only the route matters
-              // at motorway speeds. Clusters appear once the rider slows.
-              if (pois.isNotEmpty && _currentZoom >= 10.5)
-                MarkerLayer(markers: _buildPoiMarkers(pois)),
-
-              // ── ZOOM TIER 3 (zoom ≥ 13): detail overlays ───────────
-              // Tap-radius circle and destination radius only at street
-              // level; at wide zoom they cover too much of the screen.
-              if (_touchPoint != null && _origin != null && _currentZoom >= 13)
-                CircleLayer(circles: [
-                  CircleMarker(
-                    point: _origin!,
-                    radius: _touchDistKm * 1000,
-                    useRadiusInMeter: true,
-                    color:
-                        AppColors.secondary.withValues(alpha: 0.06),
-                    borderColor:
-                        AppColors.secondary.withValues(alpha: 0.35),
-                    borderStrokeWidth: 1.2,
-                  ),
-                ]),
-
-              if (dest != null && _origin != null && _currentZoom >= 9.0)
-                CircleLayer(circles: [
-                  CircleMarker(
-                    point: _origin!,
-                    radius: interaction.distanceKm * 1000,
-                    useRadiusInMeter: true,
-                    color: AppColors.mapOrigin.withValues(alpha: 0.05),
-                    borderColor:
-                        AppColors.mapOrigin.withValues(alpha: 0.25),
-                    borderStrokeWidth: 1.0,
-                  ),
-                ]),
-
-              // Origin + destination + waypoint markers.
-              // Origin dot only renders once a real GPS fix has arrived;
-              // dest/waypoint pins shown at zoom ≥ 10.5 where legible.
-              // Rider mode: markers scale up for glove-friendly visibility.
-              MarkerLayer(markers: [
-                if (_origin != null)
-                  Marker(
-                    point: _origin!,
-                    width: riderMode ? 28 : 22,
-                    height: riderMode ? 28 : 22,
-                    child: _OriginMarker(color: originColor),
-                  ),
-                if (waypoint != null && _currentZoom >= 9.0)
-                  Marker(
-                    point: waypoint,
-                    width: riderMode ? 48 : 36,
-                    height: riderMode ? 48 : 36,
-                    alignment: Alignment.topCenter,
-                    child: Icon(Icons.location_pin,
-                        color: riderMode
-                            ? RiderModeColors.tertiary
-                            : const Color(0xFFFFB300),
-                        size: riderMode ? 48 : 36),
-                  ),
-                if (dest != null && _currentZoom >= 9.0)
-                  Marker(
-                    point: dest,
-                    width: riderMode ? 48 : 36,
-                    height: riderMode ? 48 : 36,
-                    alignment: Alignment.topCenter,
-                    child: Icon(Icons.location_pin,
-                        color: destColor,
-                        size: riderMode ? 48 : 36),
-                  ),
-              ]),
-            ],
+            // 오토바이 거치 — 회전 잠금 (North-up 고정)
+            rotateGesturesEnabled: false,
+            // 기울기도 잠금 (2D 유지)
+            tiltGesturesEnabled: false,
+            compassEnabled: false,
+            onMapCreated: (c) => _mlCtrl = c,
+            onStyleLoadedCallback: () async {
+              _styleLoaded = true;
+              // 스타일 재주입 시 네이티브 어노테이션 매니저가 파괴·재생성되므로
+              // Dart 레퍼런스를 초기화해 재생성 경로를 타도록 한다.
+              _locMarker = null;
+              _destMarker = null;
+              _waypointMarkers = <ml.Symbol>[];
+              await _initRouteLayer();
+              // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
+              final poly =
+                  ref.read(mapInteractionProvider).routePolyline;
+              if (poly.isNotEmpty) _updateRouteLayer(poly);
+              // B2: 목적지/경유지 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
+              final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
+              await _mlCtrl!.addImage('pointer_red', pinBytes.buffer.asUint8List());
+              final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
+              await _mlCtrl!.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+              await _mlCtrl!.setSymbolIconAllowOverlap(true);
+              // B1: 현위치 마커 — 경로 레이어 위에 그려지도록 마지막에 추가
+              await _ensureLocationMarker();
+            },
+            onMapClick: (point, latLng) {
+              _onMapTap(
+                const TapPosition(Offset.zero, null),
+                LatLng(latLng.latitude, latLng.longitude),
+              );
+            },
+            onCameraIdle: () {
+              final z = _mlCtrl?.cameraPosition?.zoom;
+              if (z != null) setState(() => _currentZoom = z);
+            },
           ),
 
           // ══════════════════════════════════════════════════════
@@ -823,21 +855,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                         ),
                       ],
                     ),
-                    child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text('좋은 장소를 찾고 있어요…',
-                              style: AppTextStyles.bodyMD),
-                        ]),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -870,7 +895,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                 onCourseRegister: () {},
                 onTourSummary: () {},
                 onSavedCourses: _showPlacesSheet,
-                onSettings: () {},
+                onSettings: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                ),
               ),
             ),
           ),
@@ -886,14 +913,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               child: _RightPanel(
                 showCourseSheet: _showCourseSheet,
                 onRecenter: _recenterMap,
-                onZoomIn: () => _mapCtrl.move(
-                  _mapCtrl.camera.center,
-                  (_mapCtrl.camera.zoom + 1).clamp(1.0, 19.0),
-                ),
-                onZoomOut: () => _mapCtrl.move(
-                  _mapCtrl.camera.center,
-                  (_mapCtrl.camera.zoom - 1).clamp(1.0, 19.0),
-                ),
+                onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
+                onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
               ),
             ),
           ),
@@ -921,23 +942,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 같은 지점에 경유지가 이미 추가됐으면 버튼 숨김 (버그 수정)
-                  if (!_waypointAddedAtTouch)
-                  _FloatingActionLabel(
-                    label: '경유지 추가',
-                    color: const Color(0xFFFFB300),
-                    onTap: () {
-                      if (_touchPoint != null) {
-                        ref
-                            .read(mapInteractionProvider.notifier)
-                            .setWaypoint(_touchPoint!);
-                        // _touchPoint 유지 → 목적지 버튼은 계속 표시
-                        setState(() => _waypointAddedAtTouch = true);
-                      }
-                    },
-                  ),
-                  if (!_waypointAddedAtTouch)
-                  const SizedBox(width: 10),
                   _FloatingActionLabel(
                     label: '목적지',
                     color: AppColors.mapDestination,
@@ -974,7 +978,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                       onSelect: _onRouteCardSelect,
                       onStart: _startNavigation,
                       onClose: _clearDestination,
-                      onShowSummary: _showRouteSummary,
                     ),
                   ),
               ],
@@ -982,7 +985,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             ),
           ),
 
-          // ══════════════════════════════════════════════════════
           // LAYER 8 · 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT)
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
           // IgnorePointer로 터치 투명하게 처리.
@@ -1389,7 +1391,6 @@ class _CourseSheet extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final VoidCallback onStart;
   final VoidCallback onClose;
-  final VoidCallback? onShowSummary; // 경로 요약 시트 트리거
 
   const _CourseSheet({
     required this.routeMeta,
@@ -1397,7 +1398,6 @@ class _CourseSheet extends StatelessWidget {
     required this.onSelect,
     required this.onStart,
     required this.onClose,
-    this.onShowSummary,
   });
 
   static const _routes = [
@@ -1436,29 +1436,17 @@ class _CourseSheet extends StatelessWidget {
             ),
           ),
 
-          // 닫기 + 요약 버튼 행 (우측)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (onShowSummary != null)
-                TextButton.icon(
-                  onPressed: onShowSummary,
-                  icon: const Icon(Icons.info_outline, size: 15),
-                  label: const Text('요약', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.secondary,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                  ),
-                ),
-              GestureDetector(
-                onTap: onClose,
-                child: const Padding(
-                  padding: EdgeInsets.fromLTRB(0, 0, 14, 0),
-                  child: Icon(Icons.close_rounded,
-                      size: 20, color: AppColors.textHint),
-                ),
+          // 닫기 버튼 행 (우측)
+          Align(
+            alignment: Alignment.centerRight,
+            child: GestureDetector(
+              onTap: onClose,
+              child: const Padding(
+                padding: EdgeInsets.fromLTRB(0, 0, 14, 0),
+                child: Icon(Icons.close_rounded,
+                    size: 20, color: AppColors.textHint),
               ),
-            ],
+            ),
           ),
 
           // 3가지 경로 카드
@@ -1476,10 +1464,6 @@ class _CourseSheet extends StatelessWidget {
                 // best fun score among loaded routes
                 final bestWs = routeMeta.isEmpty ? 0.0
                     : routeMeta.map((m) => m.windingScore).reduce((a, b) => a > b ? a : b);
-                final bestDist = routeMeta.isEmpty ? double.infinity
-                    : routeMeta.map((m) => m.km).reduce((a, b) => a < b ? a : b);
-                final bestTime = routeMeta.isEmpty ? double.infinity
-                    : routeMeta.map((m) => m.mins.toDouble()).reduce((a, b) => a < b ? a : b);
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -1492,8 +1476,6 @@ class _CourseSheet extends StatelessWidget {
                       duration: durStr,
                       windingScore: ws,
                       isBestFun: hasMeta && ws >= bestWs && ws > 0,
-                      isBestDist: hasMeta && distKm <= bestDist && distKm > 0,
-                      isBestTime: hasMeta && mins.toDouble() <= bestTime && mins > 0,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -1529,8 +1511,6 @@ class _RouteCard extends StatelessWidget {
   final String duration;
   final double windingScore;
   final bool isBestFun;
-  final bool isBestDist;
-  final bool isBestTime;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -1540,8 +1520,6 @@ class _RouteCard extends StatelessWidget {
     required this.duration,
     this.windingScore = 0.0,
     this.isBestFun = false,
-    this.isBestDist = false,
-    this.isBestTime = false,
     required this.isSelected,
     required this.onTap,
   });
@@ -1593,22 +1571,6 @@ class _RouteCard extends StatelessWidget {
                 fontSize: 15,
               ),
             ),
-            if (isBestDist || isBestTime)
-              Padding(
-                padding: const EdgeInsets.only(top: 3, bottom: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (isBestDist)
-                      _CompChip(label: '최단', color: info.color),
-                    if (isBestDist && isBestTime)
-                      const SizedBox(width: 3),
-                    if (isBestTime)
-                      _CompChip(label: '최속', color: info.color),
-                  ],
-                ),
-              ),
             Text(
               duration,
               style: AppTextStyles.labelSM.copyWith(
@@ -1647,38 +1609,14 @@ class _RouteCard extends StatelessWidget {
 }
 
 
-class _CompChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  const _CompChip({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.4), width: 0.8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Map markers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ignore: unused_element
 class _OriginMarker extends StatelessWidget {
   final Color color;
+  // ignore: unused_element_parameter
   const _OriginMarker({this.color = AppColors.mapOrigin});
 
   @override
@@ -1908,29 +1846,3 @@ class _PlacesSheet extends ConsumerWidget {
   }
 }
 
-class _SummaryRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  const _SummaryRow(this.icon, this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Text(label,
-              style: AppTextStyles.bodyMD
-                  .copyWith(color: AppColors.textSecondary)),
-          const Spacer(),
-          Text(value,
-              style: AppTextStyles.titleSM
-                  .copyWith(fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}

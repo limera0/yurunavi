@@ -9,15 +9,19 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map/flutter_map.dart'; // 임시 오버레이용 — ②③에서 제거
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
+import '../../map/style_language_transform.dart';
+import '../../settings/providers/settings_providers.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -28,6 +32,8 @@ class NavScreen extends ConsumerStatefulWidget {
   final List<LatLng> waypoints;
   final List<LatLng> routePolyline;
   final List<ManeuverStep> maneuvers;
+  // Valhalla time은 낙관적 추정치 (~57-88 km/h 기준). TODO: 실효속도 보정 적용
+  final int durationMin;
 
   const NavScreen({
     super.key,
@@ -35,6 +41,7 @@ class NavScreen extends ConsumerStatefulWidget {
     this.waypoints = const [],
     this.routePolyline = const [],
     this.maneuvers = const [],
+    this.durationMin = 0,
   });
 
   @override
@@ -43,7 +50,18 @@ class NavScreen extends ConsumerStatefulWidget {
 
 class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
-  final MapController _mapCtrl = MapController();
+  ml.MapLibreMapController? _mlCtrl;
+  bool _styleLoaded = false;
+
+  String? _rawStyle;
+  String? _styleJson;
+
+  ml.Circle? _locMarker;
+  static const String _kLocColor = '#00C853';
+
+  static const _navRouteSourceId = 'nav-route-source';
+  static const _navRouteLayerId  = 'nav-route-layer';
+
   // Nullable until the first real GPS fix arrives — prevents the position
   // marker from rendering at a hardcoded mock location.
   LatLng? _currentPos;
@@ -52,10 +70,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _recenterTimer;
   StreamSubscription<Position>? _locationSub;
 
-  // 속도계 노이즈 제거
-  final _speedBuffer = <double>[];
-  static const _kBufSize = 3; // 이동평균 샘플 수
+  // ZUPT 링버퍼: 최근 12초 GPS fix {lat, lon, t, acc} (1Hz·5초 fix 양쪽 호환)
+  final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt; // 적응 갱신 타이밍
+  bool _moving = false; // 도플러+히스테리시스 이동 상태
+  bool _firstFixReceived = false; // 콜드스타트: 첫 GPS fix 수신 전 "GPS 검색 중" 표시
+
+  // 200ms 속도 외삽 ticker (Organic Maps 패턴): 직전 2개 실측 fix의
+  // 도플러 속도(m/s)·수신시각·위치를 보관해 fix 사이를 선형 외삽한다.
+  Timer? _speedTicker;
+  double? _vPrev, _vCur;        // 직전/최근 fix 도플러 속도 (m/s)
+  DateTime? _vPrevAt, _vCurAt;  // 직전/최근 fix 수신시각 (pos.timestamp 불신 → 수신시각 기반)
+  LatLng? _vPrevPos, _vCurPos;  // 직전/최근 fix 위치 (점프 가드용)
+
+  // ETA — widget.durationMin 초기값, 재탐색 시 갱신
+  int _durationMin = 0;
 
   // 도착 감지
   bool _arrived = false;
@@ -116,6 +145,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _routePoints = List<LatLng>.of(widget.routePolyline);
+    _durationMin = widget.durationMin;
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
     // TTS 초기화 + 첫 안내
@@ -138,6 +168,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
       return;
     }
     _startLocation();
+    _loadRawStyle();
+  }
+
+  Future<void> _loadRawStyle() async {
+    final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
+    if (!mounted) return;
+    final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
+    setState(() {
+      _rawStyle = raw;
+      _styleJson = applyMapLanguageToStyle(raw, lang);
+    });
   }
 
   @override
@@ -147,9 +188,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
+    _speedTicker?.cancel();
     _locationSub?.cancel();
     _pulseCtrl.dispose();
-    _mapCtrl.dispose();
     _tts?.stop();
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
@@ -161,12 +202,102 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
     if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
 
+    // GPS 선점 기동: MainMapScreen 스트림이 이미 fix를 받아뒀으면 즉시 숫자 모드
+    // (하드웨어 GPS는 이미 워밍업됐으므로 NavScreen 스트림도 빠르게 fix를 받는다)
+    final knownLoc = ref.read(currentLocationProvider);
+    if (knownLoc != null && mounted) {
+      setState(() {
+        _currentPos = knownLoc;
+        _firstFixReceived = true;
+      });
+      _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(knownLoc), _navZoom));
+    }
+
+    // GPS 콜드스타트 전 캐시된 위치로 즉시 카메라 이동 (knownLoc 없을 때 폴백)
+    if (knownLoc == null) {
+      try {
+        final last = await Geolocator.getLastKnownPosition();
+        if (last != null && mounted && _currentPos == null) {
+          final loc = LatLng(last.latitude, last.longitude);
+          setState(() => _currentPos = loc);
+          _mlCtrl?.animateCamera(
+            ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom),
+          );
+        }
+      } catch (_) {}
+    }
+
     _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
+      locationSettings: AndroidSettings(
         accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0, // 모든 이벤트 수신; 속도 갱신은 내부에서 적응 조절
+        intervalDuration: const Duration(milliseconds: 1000), // 1Hz 현실 목표
+        distanceFilter: 0,
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: "유루나비 주행 중",
+          notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
+          enableWakeLock: true,
+        ),
       ),
     ).listen(_onPosition);
+
+    // 200ms 속도 외삽 ticker 가동 (fix 사이 부드러운 추종 + staleness 흡수)
+    _speedTicker?.cancel();
+    _speedTicker = Timer.periodic(const Duration(milliseconds: 200), (_) => _tickSpeed());
+  }
+
+  /// 직전 2개 실측 fix로부터 현재 속도를 선형 외삽한다 (Organic Maps 패턴).
+  /// fix 사이 200ms 간격으로 속도계를 갱신하고, fix 두절 시 0으로 수렴시킨다.
+  void _tickSpeed() {
+    if (!mounted) return;
+    final curAt = _vCurAt;
+    final vCur = _vCur;
+    if (curAt == null || vCur == null) return;
+
+    final sinceFix = DateTime.now().difference(curAt).inMilliseconds;
+
+    // staleness: 8초간 새 fix 없으면 정차로 간주 → 0 (고착 차단)
+    if (sinceFix > 8000) {
+      if (_speedKmh != 0.0 || _moving) {
+        setState(() { _speedKmh = 0.0; _moving = false; });
+      }
+      return;
+    }
+    // 빠른 정차: fix가 1500ms 이상 오지 않고 posBuffer가 정지 기준이면 표시만 0
+    // (_moving은 건드리지 않음 — 히스테리시스는 _onPosition 책임)
+    if (sinceFix > 1500 && _calcParkState().parked) {
+      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
+      return;
+    }
+    // ZUPT 존중: 히스테리시스 정차 판정이면 0 유지
+    if (!_moving) {
+      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
+      return;
+    }
+
+    final measured = (vCur * 3.6).clamp(0.0, 270.0);
+    final vPrev = _vPrev;
+    final prevAt = _vPrevAt;
+    // 직전 fix 부재(첫 fix) → 외삽 불가, 마지막 실측 표시
+    if (vPrev == null || prevAt == null) {
+      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
+      return;
+    }
+
+    final dtFix = curAt.difference(prevAt).inMilliseconds;
+    final jumpM = (_vPrevPos != null && _vCurPos != null)
+        ? _distanceM(_vPrevPos!, _vCurPos!) : 0.0;
+    final avgMs = dtFix > 0 ? jumpM / (dtFix / 1000.0) : double.maxFinite;
+    // 가드: timestamp 역전 / 큰 fix 간격 / GPS 점프 / 비현실 평균속도 → 보간 OFF
+    if (dtFix <= 0 || dtFix > 6500 || jumpM > 150.0 || avgMs > 75.0) {
+      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
+      return;
+    }
+
+    // 선형 외삽: v = v2 + (기울기)*경과시간, 0~75 m/s clamp
+    final slope = (vCur - vPrev) / dtFix; // m/s per ms
+    final v = (vCur + slope * sinceFix).clamp(0.0, 75.0);
+    final kmh = v * 3.6;
+    if ((_speedKmh - kmh).abs() > 0.05) setState(() => _speedKmh = kmh);
   }
 
   void _onPosition(Position pos) {
@@ -175,6 +306,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (!_isManualMode) _recenter(loc);
 
     final now = DateTime.now();
+
+    // ZUPT: 매 fix를 링버퍼에 push (적응 throttle 전)
+    _posBuffer.add((lat: pos.latitude, lon: pos.longitude, t: now, acc: pos.accuracy));
+    _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > 12);
+
     // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
     final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
     final elapsedMs = _lastSpeedAt == null
@@ -182,28 +318,49 @@ class _NavScreenState extends ConsumerState<NavScreen>
         : now.difference(_lastSpeedAt!).inMilliseconds;
 
     if (elapsedMs < intervalMs) {
-      setState(() => _currentPos = loc);
+      setState(() {
+        _currentPos = loc;
+        if (!_firstFixReceived) _firstFixReceived = true;
+      });
+      _ensureLocationMarker(); // unawaited — ③
       return;
     }
     _lastSpeedAt = now;
 
-    // 데드존: GPS 노이즈 < 2.5 km/h 또는 정확도 불량(>20m) → 0 처리
-    final rawKmh = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed * 3.6;
-    final clamped = (rawKmh < 2.5 || pos.accuracy > 20.0) ? 0.0 : rawKmh;
+    // 도플러+히스테리시스 속도 게이트 (위치 군집을 ZUPT 앵커로 사용)
+    final double d = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed; // m/s
 
-    // 이동평균으로 튐 완화
-    _speedBuffer.add(clamped);
-    if (_speedBuffer.length > _kBufSize) _speedBuffer.removeAt(0);
-    final avg = _speedBuffer.reduce((a, b) => a + b) / _speedBuffer.length;
+    final (:parked, :bufRadius, :parkThresh) = _calcParkState();
 
+    if (parked) {
+      _moving = false;
+    } else if (d >= 2.0) {
+      _moving = true;
+    } else if (d < 1.5) {
+      _moving = false;
+    }
+    // 1.5 <= d < 2.0 (비주차): _moving 직전상태 유지 = 히스테리시스
+
+    // 외삽 ticker용 실측 fix 보관 (직전→2칸 시프트)
+    _vPrev = _vCur; _vPrevAt = _vCurAt; _vPrevPos = _vCurPos;
+    _vCur = d; _vCurAt = now; _vCurPos = loc;
+
+    final speedKmh = _moving ? d * 3.6 : 0.0;
     setState(() {
       _currentPos = loc;
-      _speedKmh = avg < 2.0 ? 0.0 : avg; // 평균에도 최종 데드존 적용
+      _speedKmh = speedKmh;
+      if (!_firstFixReceived) _firstFixReceived = true;
     });
+    _ensureLocationMarker(); // unawaited — ③
+
+    debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
+               'thr=${parkThresh.toStringAsFixed(1)} parked=$parked mov=$_moving '
+               '=> ${speedKmh.toStringAsFixed(1)}km/h');
 
     // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
-    if (pos.heading >= 0 && _speedKmh > 2.0) {
-      _mapCtrl.rotate(-pos.heading); // north-up 기준 counter-clockwise 보정
+    // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
+    if (pos.heading >= 0 && _speedKmh > 2.0 && _styleLoaded) {
+      _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(pos.heading));
     }
 
     _checkArrival(loc);
@@ -308,7 +465,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
         destination: dest,
         waypoints: widget.waypoints,
       );
-      if (mounted && routes.isNotEmpty) setState(() => _routePoints = routes[0].points);
+      if (mounted && routes.isNotEmpty) {
+        final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
+        final newPoints = routes[selIdx].points;
+        setState(() {
+          _routePoints = newPoints;
+          _durationMin = routes[selIdx].durationMin;
+        });
+        if (_styleLoaded) {
+          _mlCtrl?.setGeoJsonSource(
+              _navRouteSourceId, _buildRouteGeoJson(newPoints));
+        }
+      }
     } on RoutingException {
       // 재탐색 실패 — 기존 경로 유지
     } finally {
@@ -398,6 +566,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 2 * r * asin(sqrt(h));
   }
 
+  /// posBuffer 군집 반경으로 정차 여부를 판정한다.
+  /// 샘플 부족(< 3)이면 parked=false 반환.
+  ({bool parked, double bufRadius, double parkThresh}) _calcParkState() {
+    if (_posBuffer.length < 3) {
+      return (parked: false, bufRadius: 0.0, parkThresh: 6.0);
+    }
+    final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
+    final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
+    final bufRadius = _posBuffer
+        .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
+        .reduce((a, b) => a > b ? a : b);
+    final accs = _posBuffer.map((e) => e.acc).toList()..sort();
+    final medAcc = accs[accs.length ~/ 2];
+    final parkThresh = (6.0 > 1.2 * medAcc) ? 6.0 : 1.2 * medAcc;
+    return (parked: bufRadius < parkThresh, bufRadius: bufRadius, parkThresh: parkThresh);
+  }
+
   void _showArrivalDialog(List<({String name, String type})> pois) {
     if (!mounted) return;
     showDialog<void>(
@@ -446,6 +631,47 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
+  static String _etaText(int durationMin) {
+    final eta = DateTime.now().add(Duration(minutes: durationMin));
+    final h = eta.hour.toString().padLeft(2, '0');
+    final m = eta.minute.toString().padLeft(2, '0');
+    return '$h:$m 도착';
+  }
+
+  static String _remainingText(int durationMin) {
+    if (durationMin <= 0) return '--';
+    if (durationMin >= 60) {
+      final h = durationMin ~/ 60;
+      final m = durationMin % 60;
+      return m > 0 ? '$h시간 $m분' : '$h시간';
+    }
+    return '$durationMin분';
+  }
+
+  void _confirmExit(BuildContext ctx) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('내비게이션 종료'),
+        content: const Text('내비게이션을 종료할까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dlgCtx).pop(),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dlgCtx).pop();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('종료'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 속도→줌 선형 보간: 0 km/h→18, 20→16, 60+→14
   double _zoomForSpeed(double kmh) {
     if (kmh <= 20) return 18.0 - (kmh / 20.0) * 2.0;
@@ -453,12 +679,86 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
-  void _recenter(LatLng loc) {
+  void _recenter(LatLng loc, {bool animate = false}) {
+    if (!_styleLoaded) return;
     final target = _zoomForSpeed(_speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    _mapCtrl.move(loc, _navZoom);
+    final update = ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom);
+    if (animate) {
+      _mlCtrl?.animateCamera(update);
+    } else {
+      _mlCtrl?.moveCamera(update);
+    }
+  }
+
+  ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
+
+  Map<String, dynamic> _buildRouteGeoJson(List<LatLng> points) => {
+        'type': 'FeatureCollection',
+        'features': points.isEmpty
+            ? <dynamic>[]
+            : [
+                {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'LineString',
+                    // GeoJSON은 [longitude, latitude] 순서
+                    'coordinates':
+                        points.map((p) => [p.longitude, p.latitude]).toList(),
+                  },
+                  'properties': <String, dynamic>{},
+                }
+              ],
+      };
+
+  Future<void> _initRouteLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
+    await ctrl.addLineLayer(
+      _navRouteSourceId,
+      _navRouteLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#F28C28', // nav 오렌지색 유지
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      // belowLayerId: ③에서 Circle 레이어 추가 후 z-order 삽입
+    );
+  }
+
+  Future<void> _ensureLocationMarker() async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final p = _currentPos;
+    if (p == null) return;
+    final geo = _toMl(p);
+    if (_locMarker == null) {
+      _locMarker = await c.addCircle(ml.CircleOptions(
+        geometry: geo,
+        circleRadius: 8,
+        circleColor: _kLocColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ));
+    } else {
+      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
+    }
+  }
+
+  void _onStyleLoaded() {
+    setState(() => _styleLoaded = true);
+    // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
+    _initRouteLayer().whenComplete(() {
+      if (_routePoints.length >= 2 && mounted) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(_routePoints));
+      }
+      _ensureLocationMarker(); // unawaited — ③
+    });
   }
 
   void _onMapGesture() {
@@ -467,7 +767,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer = Timer(const Duration(seconds: 10), () {
       final pos = _currentPos;
       setState(() => _isManualMode = false);
-      if (pos != null) _recenter(pos);
+      if (pos != null) _recenter(pos, animate: true);
     });
   }
 
@@ -480,91 +780,84 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Stack(
-        children: [
-          // ── 지도 ────────────────────────────────────────────────────────────
-          FlutterMap(
-            mapController: _mapCtrl,
-            options: MapOptions(
-              initialCenter: _currentPos ?? _kInitialMapView,
-              initialZoom: 15,
-              // Lock north-up: rotation gestures during pinch-zoom were
-              // disorienting riders on the bar mount.
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapEvent: (event) {
-                if (event is MapEventMoveStart && event.source != MapEventSource.mapController) {
-                  _onMapGesture();
-                }
-              },
-            ),
-            children: [
-              // OSM standard tiles — readable at all times of day.
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.westinx.yurunavi',
-                maxZoom: 19,
-              ),
-              // 경로 폴리라인 (_routePoints: 재탐색 시 자동 갱신)
-              if (_routePoints.length >= 2)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: _routePoints,
-                    color: const Color(0xFFF28C28).withValues(alpha: 0.9),
-                    strokeWidth: 4.5,
-                    strokeCap: StrokeCap.round,
-                    strokeJoin: StrokeJoin.round,
-                  ),
-                ]),
+    ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
+      final raw = _rawStyle;
+      if (raw == null) return;
+      final lang = next.value ?? MapLanguage.korean;
+      if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
+    });
 
-              MarkerLayer(markers: [
-                // 현위치 — only after a real GPS fix arrives.
-                if (_currentPos != null)
-                  Marker(
-                    point: _currentPos!,
-                    width: 24,
-                    height: 24,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: cs.tertiary,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(color: cs.tertiary.withValues(alpha: 0.5), blurRadius: 12),
-                        ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, _) {
+        if (!didPop) _confirmExit(context);
+      },
+      child: Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: Stack(
+        children: [
+          // ── 지도: MapLibre (커밋 ①) ─────────────────────────────────────────
+          // Listener: 사용자 터치 시작 감지 → _onMapGesture (수동모드 진입)
+          // HitTestBehavior.translucent: MapLibre 네이티브 패닝/줌 제스처 보존
+          if (_styleJson == null)
+            const Center(child: CircularProgressIndicator()),
+          if (_styleJson != null)
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _onMapGesture(),
+            child: ml.MapLibreMap(
+              styleString: _styleJson!,
+              initialCameraPosition: ml.CameraPosition(
+                target: _toMl(_currentPos ?? _kInitialMapView),
+                zoom: 15,
+              ),
+              rotateGesturesEnabled: false, // North-up 고정 (바이크 거치)
+              tiltGesturesEnabled: false,   // 2D 유지
+              compassEnabled: false,
+              onMapCreated: (c) => _mlCtrl = c,
+              onStyleLoadedCallback: _onStyleLoaded,
+            ),
+          ),
+
+          // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
+          // ② GeoJSON LineLayer로, ③ Circle/Symbol로 교체 후 이 블록 제거
+          IgnorePointer(
+            child: FlutterMap(
+              options: MapOptions(
+                backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
+                initialCenter: _currentPos ?? _kInitialMapView,
+                initialZoom: _navZoom,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.none,
+                ),
+              ),
+              children: [
+                // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
+                MarkerLayer(markers: [
+                  ...widget.waypoints.map(
+                    (wp) => Marker(
+                      point: wp,
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.topCenter,
+                      child: const Icon(
+                        Icons.location_pin,
+                        color: Color(0xFFFFB300),
+                        size: 34,
                       ),
                     ),
                   ),
-                // 경유지
-                ...widget.waypoints.map(
-                  (wp) => Marker(
-                    point: wp,
-                    width: 34,
-                    height: 34,
-                    alignment: Alignment.topCenter,
-                    child: const Icon(
-                      Icons.location_pin,
-                      color: Color(0xFFFFB300),
-                      size: 34,
+                  if (widget.destination != null)
+                    Marker(
+                      point: widget.destination!,
+                      width: 38,
+                      height: 38,
+                      alignment: Alignment.topCenter,
+                      child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
                     ),
-                  ),
-                ),
-                // 목적지
-                if (widget.destination != null)
-                  Marker(
-                    point: widget.destination!,
-                    width: 38,
-                    height: 38,
-                    alignment: Alignment.topCenter,
-                    child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
-                  ),
-              ]),
-            ],
+                ]),
+              ],
+            ),
           ),
 
           // ── 수동모드 복귀 알림 ──────────────────────────────────────────────
@@ -684,7 +977,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             top: MediaQuery.of(context).size.height * 0.30,
             child: ScaleTransition(
               scale: _pulseAnim,
-              child: _Speedometer(speedKmh: _speedKmh),
+              child: _Speedometer(speedKmh: _speedKmh, firstFixReceived: _firstFixReceived),
             ),
           ),
 
@@ -715,7 +1008,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(pos);
+                    _recenter(pos, animate: true);
                   },
                 ),
               ],
@@ -744,7 +1037,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '14:32 도착',
+                              _etaText(_durationMin),
                               style: TextStyle(
                                 color: cs.onSurface,
                                 fontSize: 22,
@@ -753,7 +1046,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             ),
                             Row(
                               children: [
-                                Text('38분', style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
+                                Text(_remainingText(_durationMin), style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
                                 const SizedBox(width: 8),
                                 Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
                               ],
@@ -799,15 +1092,47 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
         ],
       ),
+      ),
     );
   }
 }
 
 // ── Sub-widgets ───────────────────────────────────────────────────────────────
 
-class _Speedometer extends StatelessWidget {
+class _Speedometer extends StatefulWidget {
   final double speedKmh;
-  const _Speedometer({required this.speedKmh});
+  final bool firstFixReceived;
+  const _Speedometer({required this.speedKmh, required this.firstFixReceived});
+
+  @override
+  State<_Speedometer> createState() => _SpeedometerState();
+}
+
+class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderStateMixin {
+  late final AnimationController _blinkCtrl;
+  late final Animation<double> _blinkAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _blinkCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))
+      ..repeat(reverse: true);
+    _blinkAnim = Tween<double>(begin: 0.25, end: 1.0).animate(
+      CurvedAnimation(parent: _blinkCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_Speedometer old) {
+    super.didUpdateWidget(old);
+    if (widget.firstFixReceived && _blinkCtrl.isAnimating) _blinkCtrl.stop();
+  }
+
+  @override
+  void dispose() {
+    _blinkCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -821,16 +1146,27 @@ class _Speedometer extends StatelessWidget {
         border: Border.all(color: cs.tertiary, width: 2.5),
         boxShadow: [BoxShadow(color: cs.tertiary.withValues(alpha: 0.25), blurRadius: 16)],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            speedKmh.toStringAsFixed(0),
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
-          ),
-          Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
-        ],
-      ),
+      child: widget.firstFixReceived
+          ? Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  widget.speedKmh.toStringAsFixed(0),
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
+                ),
+                Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
+              ],
+            )
+          : FadeTransition(
+              opacity: _blinkAnim,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('GPS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.1)),
+                  Text('검색 중', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
     );
   }
 }

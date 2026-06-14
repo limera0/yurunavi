@@ -86,15 +86,20 @@ class RoutingService {
     'use_highways': 0.0,
     'use_ferry': 0.0,
     'class_factors': {
-      '1': 100.0,
-      '2': 4.0,
-      '3': 1.2,
-      '4': 0.8,
-      '5': 0.5,
+      '0': 100,   // motorway: 고속도로 회피
+      '1': 100,   // trunk: 자동차전용 회피
+      '2': 3.0,   // primary: 국도 일부 허용 (시골길 6→폴백 3)
+      '3': 1.0,   // secondary: 지방도 중립
+      '4': 0.7,   // tertiary: 시군도 선호
+      '5': 1.0,   // unclassified: 소로 중립
+      '6': 1.2,   // residential: 마을길 약한 회피
+      '7': 2.0,   // service: 농로 회피
     },
+    'curvature_penalty': 1.2,
+    'long_bridge_factor': 1.5,
   };
 
-  static const double _ruralDetourThreshold = 1.3;
+  static const double _ruralDetourThreshold = 1.5;
 
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
@@ -149,13 +154,19 @@ class RoutingService {
         'use_tracks': 0.8,
         'top_speed': 40,
         'class_factors': {
-          '1': 100.0, // FC1: 고속국도 강한 회피
-          '2': 5.0,   // FC2: 일반국도 회피
-          '3': 2.5,   // FC3: 지방도 중간
-          '4': 1.0,   // FC4: 군도 기준
-          '5': 0.2,   // FC5: 생활도로 강한 선호
+          '0': 100,   // motorway: 고속도로 회피
+          '1': 100,   // trunk: 자동차전용 회피
+          '2': 6,     // primary: 일반국도 회피
+          '3': 2,     // secondary: 지방도 중간
+          '4': 0.6,   // tertiary: 시군도 선호
+          '5': 0.8,   // unclassified: 소로 선호
+          '6': 0.9,   // residential: 마을길 선호
+          '7': 1.0,   // service: 농로 기준
         },
-        'urban_penalty': 50.0, // 도심 관통 방지
+        'curvature_penalty': 2.5,
+        'long_bridge_factor': 3.0,
+        'long_tunnel_factor': 3.0,
+        'span_min_length': 500,
       },
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
       {
@@ -164,12 +175,19 @@ class RoutingService {
         'use_living_streets': 0.5,
         'use_tracks': 0.2,
         'class_factors': {
-          '1': 100.0, // FC1: 고속국도 강한 회피
-          '2': 2.0,   // FC2: 일반국도 약한 회피
-          '3': 0.5,   // FC3: 지방도 선호
-          '4': 0.7,   // FC4: 군도 약한 선호
-          '5': 1.5,   // FC5: 생활도로 약한 회피
+          '0': 100,   // motorway: 고속도로 회피
+          '1': 100,   // trunk: 자동차전용 회피
+          '2': 2.0,   // primary: 일반국도 약한 회피
+          '3': 0.5,   // secondary: 지방도 선호
+          '4': 0.9,   // tertiary: 시군도 약한 선호
+          '5': 1.5,   // unclassified: 소로 약한 회피
+          '6': 2.0,   // residential: 마을길 회피
+          '7': 3.0,   // service: 농로 회피
         },
+        'curvature_penalty': 1.0,
+        'long_bridge_factor': 1.5,
+        'long_tunnel_factor': 1.5,
+        'span_min_length': 500,
       },
       // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
       {
@@ -179,12 +197,18 @@ class RoutingService {
         'use_tracks': 0.0,
         'shortest': true,
         'class_factors': {
-          '1': 100.0, // FC1: 고속국도 강한 회피
-          '2': 0.4,   // FC2: 일반국도 강한 선호
-          '3': 1.0,   // FC3: 지방도 기준
-          '4': 2.0,   // FC4: 군도 회피
-          '5': 10.0,  // FC5: 생활도로 강한 회피
+          '0': 100,   // motorway: 고속도로 회피
+          '1': 100,   // trunk: 자동차전용 회피
+          '2': 0.5,   // primary: 일반국도 강한 선호
+          '3': 1.2,   // secondary: 지방도 기준
+          '4': 2.0,   // tertiary: 시군도 회피
+          '5': 4.0,   // unclassified: 소로 강한 회피
+          '6': 5.0,   // residential: 마을길 강한 회피
+          '7': 8.0,   // service: 농로 강한 회피
         },
+        'curvature_penalty': 0.0,
+        'long_bridge_factor': 1.0,
+        'long_tunnel_factor': 1.0,
       },
     ];
 

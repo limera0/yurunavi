@@ -1,0 +1,12 @@
+services:
+  tuning-dashboard:
+    build: .
+    container_name: yurunavi-tuning-dashboard
+    env_file: .env
+    network_mode: host
+    volumes:
+      - ./routing_config.yaml:/app/routing_config.yaml
+      - ../../assets:/app/assets:ro
+      - ./static:/app/static:ro
+      - ./.streamlit:/app/.streamlit:ro
+    restart: unless-stopped

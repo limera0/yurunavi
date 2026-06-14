@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../map/presentation/main_map_screen.dart';
 
 /// YuruNavi Splash Screen
 /// - 로고 fade + scale 애니메이션
-/// - Firebase Auth 상태 확인 후 라우팅 (현재는 MainMapScreen으로 직행)
+/// - 위치·알림 권한 OS 팝업 1회 요청 (미허용 시 skip, 2회차는 granted라 skip)
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -47,83 +47,30 @@ class _SplashScreenState extends State<SplashScreen>
     await _ctrl.forward();
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
-    await _requestPermission();
+    await _requestPermissions();
     if (!mounted) return;
     _goToMain();
   }
 
-  Future<void> _requestPermission() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return;
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.whileInUse ||
-        perm == LocationPermission.always) {
-      return; // already granted
+  /// 위치·알림 권한을 OS 표준 팝업으로 1회씩 요청한다.
+  /// 이미 granted면 팝업 없이 즉시 통과. 2회차 실행도 granted라 skip.
+  Future<void> _requestPermissions() async {
+    if (!(await Permission.location.status).isGranted) {
+      await Permission.location.request();
     }
-
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-
     if (!mounted) return;
-    if (perm == LocationPermission.deniedForever) {
-      await _showSettingsDialog(
-        '위치 권한이 거부됨',
-        '설정에서 위치 권한을 허용해 주세요.\n유루나비의 핵심 기능은 현재 위치에 의존합니다.',
-        actionLabel: '설정 열기',
-        onAction: Geolocator.openAppSettings,
-      );
-    } else if (perm == LocationPermission.denied) {
-      await _showSettingsDialog(
-        '위치 권한 필요',
-        '유루나비는 현재 위치로 경로를 탐색합니다.\n권한 없이도 사용할 수 있지만 일부 기능이 제한됩니다.',
-        actionLabel: '다시 허용',
-        onAction: Geolocator.requestPermission,
-      );
+    if (!(await Permission.notification.status).isGranted) {
+      await Permission.notification.request();
     }
-  }
-
-  Future<void> _showSettingsDialog(
-    String title,
-    String content, {
-    required String actionLabel,
-    required Future<dynamic> Function() onAction,
-  }) async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(children: [
-          const Icon(Icons.location_on, color: AppColors.primary),
-          const SizedBox(width: 8),
-          Text(title),
-        ]),
-        content: Text(content),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('건너뛰기'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await onAction();
-            },
-            child: Text(actionLabel),
-          ),
-        ],
-      ),
-    );
   }
 
   void _goToMain() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (context, animation, secondaryAnimation) => const MainMapScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+        transitionDuration: const Duration(milliseconds: 400),
+        pageBuilder: (_, _, _) => const MainMapScreen(),
+        transitionsBuilder: (_, anim, _, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOut),
           child: child,
         ),
       ),

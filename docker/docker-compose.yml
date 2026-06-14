@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   valhalla:
-    image: ghcr.io/valhalla/valhalla:latest
+    image: valhalla-fork:patch2-signals
     container_name: yurunavi-valhalla
     restart: unless-stopped
     ports:
