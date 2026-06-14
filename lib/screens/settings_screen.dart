@@ -60,26 +60,23 @@ class _LanguageSelector extends ConsumerWidget {
         padding: EdgeInsets.symmetric(vertical: 8),
         child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
       ),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (err, _) => const SizedBox.shrink(),
       data: (lang) => Column(
-        children: [
-          RadioListTile<MapLanguage>(
-            title: const Text('한국어'),
-            value: MapLanguage.korean,
-            groupValue: lang,
-            activeColor: const Color(0xFF008080),
-            onChanged: (v) =>
-                ref.read(mapLanguageProvider.notifier).setLanguage(v!),
-          ),
-          RadioListTile<MapLanguage>(
-            title: const Text('English'),
-            value: MapLanguage.english,
-            groupValue: lang,
-            activeColor: const Color(0xFF008080),
-            onChanged: (v) =>
-                ref.read(mapLanguageProvider.notifier).setLanguage(v!),
-          ),
-        ],
+        children: MapLanguage.values.map((option) {
+          final label = option == MapLanguage.korean ? '한국어' : 'English';
+          return ListTile(
+            title: Text(label),
+            leading: Radio<MapLanguage>(
+              value: option,
+              groupValue: lang,
+              activeColor: const Color(0xFF008080),
+              onChanged: (v) =>
+                  ref.read(mapLanguageProvider.notifier).setLanguage(v!),
+            ),
+            onTap: () =>
+                ref.read(mapLanguageProvider.notifier).setLanguage(option),
+          );
+        }).toList(),
       ),
     );
   }

@@ -23,6 +23,7 @@ import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
 import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
+import '../../settings/providers/settings_providers.dart';
 import '../../../screens/settings_screen.dart';
 
 export 'main_map_screen.dart';
@@ -118,8 +119,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // Course sheet
   bool _showCourseSheet = false;
 
-  // TODO REMOVE: spike-only debug language toggle
-  MapLanguage _debugLang = MapLanguage.korean;
   String? _rawStyle;   // 원본 JSON 1회 로드
   String? _styleJson;  // 언어 적용 후 주입 문자열
 
@@ -150,9 +149,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   Future<void> _loadRawStyle() async {
     final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
     if (!mounted) return;
+    final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
     setState(() {
       _rawStyle = raw;
-      _styleJson = applyMapLanguageToStyle(raw, _debugLang);
+      _styleJson = applyMapLanguageToStyle(raw, lang);
     });
   }
 
@@ -254,17 +254,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                     })
                 .toList(),
       };
-
-  // ── TODO REMOVE: spike-only language toggle ────────────────────────────────
-  void _applyMapLanguage(MapLanguage l) {
-    final raw = _rawStyle;
-    if (raw == null) return;
-    setState(() {
-      _debugLang = l;
-      _styleJson = applyMapLanguageToStyle(raw, l);
-    });
-  }
-  // ── END TODO REMOVE ────────────────────────────────────────────────────────
 
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
@@ -754,6 +743,13 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
 
+    ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
+      final raw = _rawStyle;
+      if (raw == null) return;
+      final lang = next.value ?? MapLanguage.korean;
+      if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
+    });
+
     // Theme-adaptive colors for map overlays. (M2~M3에서 마커에 재사용)
     // ignore: unused_local_variable
     final originColor =
@@ -981,33 +977,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   ),
               ],
             ),
-            ),
-          ),
-
-          // ══════════════════════════════════════════════════════
-          // TODO REMOVE: spike-only language debug button
-          Positioned(
-            bottom: 120,
-            left: 16,
-            child: GestureDetector(
-              onTap: () {
-                _applyMapLanguage(
-                  _debugLang == MapLanguage.korean
-                      ? MapLanguage.english
-                      : MapLanguage.korean,
-                );
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '라벨: ${_debugLang == MapLanguage.korean ? '한국어' : 'English'}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ),
             ),
           ),
 
