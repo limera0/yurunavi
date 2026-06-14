@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' show sin, cos, sqrt, asin, max;
+import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:http/http.dart' as http;
 
@@ -17,8 +17,11 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
+import '../../map/style_language_transform.dart';
+import '../../settings/providers/settings_providers.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -49,6 +52,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin {
   ml.MapLibreMapController? _mlCtrl;
   bool _styleLoaded = false;
+
+  String? _rawStyle;
+  String? _styleJson;
 
   ml.Circle? _locMarker;
   static const String _kLocColor = '#00C853';
@@ -162,6 +168,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
       return;
     }
     _startLocation();
+    _loadRawStyle();
+  }
+
+  Future<void> _loadRawStyle() async {
+    final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
+    if (!mounted) return;
+    final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
+    setState(() {
+      _rawStyle = raw;
+      _styleJson = applyMapLanguageToStyle(raw, lang);
+    });
   }
 
   @override
@@ -763,6 +780,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
 
+    ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
+      final raw = _rawStyle;
+      if (raw == null) return;
+      final lang = next.value ?? MapLanguage.korean;
+      if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
+    });
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, _) {
@@ -775,11 +799,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
           // ── 지도: MapLibre (커밋 ①) ─────────────────────────────────────────
           // Listener: 사용자 터치 시작 감지 → _onMapGesture (수동모드 진입)
           // HitTestBehavior.translucent: MapLibre 네이티브 패닝/줌 제스처 보존
+          if (_styleJson == null)
+            const Center(child: CircularProgressIndicator()),
+          if (_styleJson != null)
           Listener(
             behavior: HitTestBehavior.translucent,
             onPointerDown: (_) => _onMapGesture(),
             child: ml.MapLibreMap(
-              styleString: 'assets/images/osm_liberty_yurunavi.json',
+              styleString: _styleJson!,
               initialCameraPosition: ml.CameraPosition(
                 target: _toMl(_currentPos ?? _kInitialMapView),
                 zoom: 15,
