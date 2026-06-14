@@ -803,6 +803,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             onMapCreated: (c) => _mlCtrl = c,
             onStyleLoadedCallback: () async {
               _styleLoaded = true;
+              // 스타일 재주입 시 네이티브 어노테이션 매니저가 파괴·재생성되므로
+              // Dart 레퍼런스를 초기화해 재생성 경로를 타도록 한다.
+              _locMarker = null;
+              _destMarker = null;
+              _waypointMarkers = <ml.Symbol>[];
               await _initRouteLayer();
               // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
               final poly =
