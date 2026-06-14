@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/settings/providers/settings_providers.dart';
+import '../models/map_language.dart';
 import 'profile_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -29,7 +31,7 @@ class SettingsScreen extends ConsumerWidget {
 
           // ── 지도 표기 언어 ────────────────────────────────────────
           const _SectionHeader(title: '지도 표기 언어'),
-          // TODO: language selector — added in next commit
+          _LanguageSelector(),
 
           // ── Phase 2 이후 항목 (미구현) ────────────────────────────
           const _SectionHeader(title: '주행 설정'),
@@ -43,6 +45,40 @@ class SettingsScreen extends ConsumerWidget {
 
           const _SectionHeader(title: '기타'),
           // TODO Phase 2: 약관 / 오픈소스 라이선스
+        ],
+      ),
+    );
+  }
+}
+
+class _LanguageSelector extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final langAsync = ref.watch(mapLanguageProvider);
+    return langAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (lang) => Column(
+        children: [
+          RadioListTile<MapLanguage>(
+            title: const Text('한국어'),
+            value: MapLanguage.korean,
+            groupValue: lang,
+            activeColor: const Color(0xFF008080),
+            onChanged: (v) =>
+                ref.read(mapLanguageProvider.notifier).setLanguage(v!),
+          ),
+          RadioListTile<MapLanguage>(
+            title: const Text('English'),
+            value: MapLanguage.english,
+            groupValue: lang,
+            activeColor: const Color(0xFF008080),
+            onChanged: (v) =>
+                ref.read(mapLanguageProvider.notifier).setLanguage(v!),
+          ),
         ],
       ),
     );
