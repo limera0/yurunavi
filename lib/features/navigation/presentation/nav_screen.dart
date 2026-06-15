@@ -413,6 +413,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 카드 잔여 거리 실시간 갱신
     setState(() => _cardRemainingM = remaining);
 
+    debugPrint('YNAV_GUIDE tick stepIdx=$_stepIdx total=${_steps.length} '
+        'remaining=${remaining.toStringAsFixed(0)} '
+        'cur=${_steps[_stepIdx].label} '
+        'upcoming=${_stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1].label : "DEST"}');
+
     // 400m 예비 발화
     if (remaining < 400 && !_preAnnounced && _stepIdx + 1 < _steps.length) {
       _preAnnounced = true;
@@ -424,6 +429,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (remaining < 50) {
       _preAnnounced = false;
       setState(() => _stepIdx++);
+      debugPrint('YNAV_GUIDE advance → stepIdx=$_stepIdx label=${_steps[_stepIdx].label}');
       _announceStep(_stepIdx);
     }
   }
@@ -483,6 +489,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _durationMin = routes[selIdx].durationMin;
           _applyRouteGuidance(routes[selIdx].maneuvers);
         });
+        debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
         _announceStep(0);
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
@@ -513,6 +520,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final text = step.dist.isNotEmpty
         ? '${step.dist} 앞 ${step.label}'
         : step.label;
+    debugPrint('YNAV_GUIDE tts idx=$idx text="$text"');
     _tts?.speak(text);
   }
 
