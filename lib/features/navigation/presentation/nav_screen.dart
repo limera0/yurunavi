@@ -108,6 +108,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
+  double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
 
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
@@ -380,6 +381,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           ];
     _computeStepEndDistances();
     _stepIdx = 0;
+    _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
     _preAnnounced = false;
   }
@@ -407,6 +409,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final traveled = _traveledDistM(loc);
     final stepEnd = _stepIdx < _stepEndDistM.length ? _stepEndDistM[_stepIdx] : 0.0;
     final remaining = (stepEnd - traveled).clamp(0.0, double.maxFinite);
+
+    // 카드 잔여 거리 실시간 갱신
+    setState(() => _cardRemainingM = remaining);
 
     // 400m 예비 발화
     if (remaining < 400 && !_preAnnounced && _stepIdx + 1 < _steps.length) {
@@ -947,9 +952,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (step.dist.isNotEmpty)
+                                    if (_cardRemainingM > 0 || step.dist.isNotEmpty)
                                       Text(
-                                        step.dist,
+                                        _cardRemainingM > 0
+                                            ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                                            : step.dist,
                                         style: TextStyle(
                                           color: cs.tertiary,
                                           fontSize: 13,
