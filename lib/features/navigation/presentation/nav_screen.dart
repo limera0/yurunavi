@@ -786,6 +786,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   @override
   Widget build(BuildContext context) {
     final step = _steps[_stepIdx];
+    // 카드에 표시할 "다가오는 회전" — 마지막 step이면 step 자신(목적지)으로 폴백
+    final upcoming = _stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1] : step;
     final daylightCycle = ref.watch(daylightCycleProvider);
     final daylightProgress = daylightCycle?.progress ?? 0.5;
     final isDay = daylightCycle?.isDay ?? true;
@@ -945,7 +947,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                   color: cs.tertiary,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: Icon(step.icon, color: Colors.white, size: 30),
+                                child: Icon(upcoming.icon, color: Colors.white, size: 30),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -964,7 +966,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                         ),
                                       ),
                                     Text(
-                                      step.label,
+                                      upcoming.label,
                                       style: TextStyle(
                                         color: cs.onSurface,
                                         fontSize: 20,
