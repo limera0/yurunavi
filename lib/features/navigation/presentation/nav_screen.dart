@@ -1223,14 +1223,15 @@ class _TurnStep {
     switch (type) {
       case 1: case 2: case 3: return Icons.play_arrow_rounded;
       case 4: case 5: case 6: return Icons.flag_rounded;
-      case 8: return Icons.straight_rounded;
-      case 9: case 17: return Icons.turn_slight_right;
-      case 10: case 25: return Icons.turn_right_rounded;
-      case 11: return Icons.turn_right_rounded; // sharp right
+      case 8: case 17: case 22: return Icons.straight_rounded;
+      case 9: case 18: case 23: return Icons.turn_slight_right;
+      case 10: case 20: case 26: case 27: return Icons.turn_right_rounded;
+      case 11: return Icons.turn_right_rounded;
       case 12: case 13: return Icons.u_turn_right_rounded;
-      case 14: return Icons.turn_left_rounded;  // sharp left
-      case 15: case 26: return Icons.turn_left_rounded;
-      case 16: case 18: return Icons.turn_slight_left;
+      case 14: return Icons.turn_left_rounded;
+      case 15: case 21: return Icons.turn_left_rounded;
+      case 16: case 19: case 24: return Icons.turn_slight_left;
+      case 25: return Icons.straight_rounded;
       default: return Icons.straight_rounded;
     }
   }
@@ -1240,7 +1241,7 @@ class _TurnStep {
       case 1: case 2: case 3: return '출발';
       case 4: case 5: case 6: return '목적지 도착';
       case 7: return '도로명 변경';
-      case 8: return '직진';
+      case 8: case 22: return '직진';
       case 9: return '약간 우회전';
       case 10: return '우회전';
       case 11: return '급우회전';
@@ -1248,11 +1249,18 @@ class _TurnStep {
       case 14: return '급좌회전';
       case 15: return '좌회전';
       case 16: return '약간 좌회전';
-      case 17: return '진출로 직진';
-      case 25: return '진출로 우측';
-      case 26: return '진출로 좌측';
-      case 27: return '우측 출구';
-      case 28: return '좌측 출구';
+      case 17: return '램프 직진';
+      case 18: return '램프 우측';
+      case 19: return '램프 좌측';
+      case 20: return '우측 출구';
+      case 21: return '좌측 출구';
+      case 23: return '우측 유지';
+      case 24: return '좌측 유지';
+      case 25: return '합류';
+      case 26: return '회전교차로 진입';
+      case 27: return '회전교차로 진출';
+      case 28: return '도선 탑승';
+      case 29: return '도선 하차';
       default: return '직진';
     }
   }
