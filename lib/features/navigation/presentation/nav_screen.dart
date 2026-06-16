@@ -17,6 +17,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
@@ -92,9 +93,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
+  VoicePackService? _vps;
   int _lastAnnouncedIdx = -1;      // 중복 발화 방지
   List<double> _stepEndDistM = []; // 각 step 종점까지의 누적 거리(m)
-  bool _preAnnounced = false;      // 400m 예비 발화 완료 여부
+  bool _pre500 = false;
+  bool _pre300 = false;
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
@@ -389,7 +392,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _stepIdx = 0;
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
-    _preAnnounced = false;
+    _pre500 = false;
+    _pre300 = false;
   }
 
   /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
@@ -424,19 +428,26 @@ class _NavScreenState extends ConsumerState<NavScreen>
         'cur=${_steps[_stepIdx].label} '
         'upcoming=${_stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1].label : "DEST"}');
 
-    // 400m 예비 발화
-    if (remaining < 400 && !_preAnnounced && _stepIdx + 1 < _steps.length) {
-      _preAnnounced = true;
-      final next = _steps[_stepIdx + 1];
-      final distStr = '${remaining.toStringAsFixed(0)}미터 앞';
-      _tts?.speak('$distStr ${next.label}');
+    // 500m 예비 발화
+    if (remaining < 500 && !_pre500 && _stepIdx + 1 < _steps.length) {
+      _pre500 = true;
+      final direction = _steps[_stepIdx + 1].label;
+      _vps?.speak('approach_500', vars: {'direction': direction});
+    }
+    // 300m 예비 발화
+    if (remaining < 300 && !_pre300 && _stepIdx + 1 < _steps.length) {
+      _pre300 = true;
+      final direction = _steps[_stepIdx + 1].label;
+      _vps?.speak('approach_300', vars: {'direction': direction});
     }
     // 50m → 자동 진행
     if (remaining < 50) {
-      _preAnnounced = false;
+      final direction = (_stepIdx + 1 < _steps.length) ? _steps[_stepIdx + 1].label : '';
+      _vps?.speak('approach_50', vars: {'direction': direction});
+      _pre500 = false;
+      _pre300 = false;
       setState(() => _stepIdx++);
       debugPrint('YNAV_GUIDE advance → stepIdx=$_stepIdx label=${_steps[_stepIdx].label}');
-      _announceStep(_stepIdx);
     }
   }
 
@@ -497,7 +508,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         });
         debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
         // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
-        _tts?.speak('경로를 재탐색했습니다');
+        _vps?.speak('reroute');
         _lastAnnouncedIdx = 0; // 출발 step 중복 방지
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
@@ -516,7 +527,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setLanguage('ko-KR');
     await _tts!.setSpeechRate(0.5);
     await _tts!.setVolume(1.0);
-    // 첫 번째 안내 발화
+    _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _announceStep(0);
   }
 
@@ -525,16 +536,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (idx == _lastAnnouncedIdx) return; // 중복 방지
     _lastAnnouncedIdx = idx;
     final step = _steps[idx];
-    // 출발 maneuver(type 1~3): 거리 없이 출발 안내
     if (step.label == '출발') {
-      _tts?.speak('안내를 시작합니다');
+      _vps?.speak('departure');
       return;
     }
-    final text = step.dist.isNotEmpty
-        ? '${step.dist} 앞 ${step.label}'
-        : step.label;
-    debugPrint('YNAV_GUIDE tts idx=$idx text="$text"');
-    _tts?.speak(text);
+    debugPrint('YNAV_GUIDE tts idx=$idx direction="${step.label}"');
+    _vps?.speak('approach_300', vars: {'direction': step.label});
   }
 
   void _checkArrival(LatLng loc) {
@@ -543,6 +550,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (dest == null) return;
     if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
       _arrived = true;
+      _vps?.speak('arrival');
       _fetchNearbyPois(dest).then((pois) {
         if (mounted) _showArrivalDialog(pois);
       });
