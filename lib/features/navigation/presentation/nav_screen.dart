@@ -98,6 +98,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<double> _stepEndDistM = []; // 각 step 종점까지의 누적 거리(m)
   bool _pre500 = false;
   bool _pre300 = false;
+  bool _pre50 = false;
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
@@ -394,6 +395,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _lastAnnouncedIdx = -1;
     _pre500 = false;
     _pre300 = false;
+    _pre50 = false;
   }
 
   /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
@@ -441,7 +443,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _vps?.speak('approach_300', vars: {'direction': direction});
     }
     // 50m → 자동 진행
-    if (remaining < 50) {
+    if (remaining < 50 && !_pre50) {
+      _pre50 = true;
       final direction = (_stepIdx + 1 < _steps.length) ? _steps[_stepIdx + 1].label : '';
       _vps?.speak('approach_50', vars: {'direction': direction});
       _pre500 = false;
