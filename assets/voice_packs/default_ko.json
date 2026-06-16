@@ -1,0 +1,15 @@
+{
+  "id": "default_ko",
+  "name": "기본 (한국어)",
+  "lang": "ko",
+  "version": 1,
+  "source": "tts",
+  "templates": {
+    "departure":    "출발합니다",
+    "approach_500": "500m 앞 {direction}",
+    "approach_300": "300m 앞 {direction}",
+    "approach_50":  "곧 {direction}",
+    "reroute":      "경로를 재탐색했습니다",
+    "arrival":      "목적지에 도착했습니다"
+  }
+}
