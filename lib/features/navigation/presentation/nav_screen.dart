@@ -159,6 +159,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       });
       return;
     }
+    // Seoul flicker 방지: GPS fix가 이미 있으면 initState에서 즉시 _currentPos 초기화
+    final initLoc = ref.read(currentLocationProvider);
+    if (initLoc != null) {
+      _currentPos = initLoc;
+      _firstFixReceived = true;
+    }
     _startLocation();
     _loadRawStyle();
   }
@@ -517,6 +523,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (idx == _lastAnnouncedIdx) return; // 중복 방지
     _lastAnnouncedIdx = idx;
     final step = _steps[idx];
+    // 출발 maneuver(type 1~3): 거리 없이 출발 안내
+    if (step.label == '출발') {
+      _tts?.speak('안내를 시작합니다');
+      return;
+    }
     final text = step.dist.isNotEmpty
         ? '${step.dist} 앞 ${step.label}'
         : step.label;
