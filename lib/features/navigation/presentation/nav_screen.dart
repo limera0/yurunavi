@@ -496,7 +496,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _applyRouteGuidance(routes[selIdx].maneuvers);
         });
         debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
-        _announceStep(0);
+        // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
+        _tts?.speak('경로를 재탐색했습니다');
+        _lastAnnouncedIdx = 0; // 출발 step 중복 방지
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
