@@ -1,4 +1,60 @@
-# MORNING_REPORT — Valhalla Base URL 진단 (2026-06-02)
+# MORNING_REPORT — 2026-06-16 T1/T2 TTS 수정
+
+브랜치: fix/tts-departure (T1), fix/tts-reroute (T2)
+실행 내용: RECON_startup_accuracy + N4 기반 TTS 버그 2건 수정.
+
+## T1 — 출발 발화 개선 [PASS]
+- 브랜치: `fix/tts-departure` (cc55f8e)
+- 수정: `_announceStep` 에 `step.label == '출발'` 분기 추가 → '안내를 시작합니다' 발화 (거리 없음)
+- `flutter analyze`: No issues ✅
+
+## T2 — 재탐색 TTS 맥락 구분 [PASS]
+- 브랜치: `fix/tts-reroute` (903715f)
+- 수정: `_reroute(:493)` 에서 `_announceStep(0)` → `_tts?.speak('경로를 재탐색했습니다')` 교체 + `_lastAnnouncedIdx=0` 수동 설정
+- `flutter analyze`: No issues ✅
+
+## T3 — RIDING_QUEUE 이관
+- RIDING_QUEUE.md 생성 (T3: 2단 안내 카드 재설계, L 규모, 실기기 검증 필요)
+
+## 사용자 확인 사항
+- 목적지 설정 후 내비 진입 시: "안내를 시작합니다" 들리는지 (이전: "X분XX초 앞 출발")
+- 경로 이탈 후 재탐색 완료 시: "경로를 재탐색했습니다" 들리는지 (이전: "안내를 시작합니다")
+
+## 머지 방법 (사람이 할 것)
+```bash
+# T1
+git checkout phase1/startup-accuracy
+git merge fix/tts-departure
+
+# T2
+git merge fix/tts-reroute
+```
+
+---
+
+# MORNING_REPORT — 2026-06-16 NIGHT_QUEUE N1~N4 RECON
+
+브랜치: feat/guidance-fix (HEAD: 8c61bf2 guidance-debug)
+실행 내용: NIGHT_QUEUE N1~N4 RECON-ONLY. 코드 변경 0건. 커밋 0건.
+
+## N1 costing/motorway
+OUT: RECON_costing_state.md ✅ — 전 코스 공통 class_factors '0':100(motorway)+'1':100(trunk)+use_highways:0.0 확인. motorway_link 전용 키 없음(Valhalla 내부 위임).
+
+## N2 경로 색상
+OUT: RECON_route_color_state.md ✅ — 선택=#1E5AFF/미선택=#9E9E9E 2단계 고정. 코스별 폴리라인 색 분기 없음.
+
+## N3 초기 줌
+OUT: RECON_zoom_state.md ✅ — main_map:z16.0(폴백=한국중심36.5,127.5) / nav:z15 하드코딩(폴백=광화문). 주행 중 속도→줌 0→z18/20→z16/60+→z14.
+
+## N4 guidance 현 구조
+OUT: RECON_guidance_redesign.md ✅ — 카드=단일Row(1단). TTS 3지점: 400m 예비(:421)/50m자동진행(:430)/_announceStep(:508). 카드거리=live/TTS거리=정적 불일치 확인.
+
+## 코드 변경
+0건. git status: 미추적 RECON/REPORT .md 파일만.
+
+---
+
+# (이전) MORNING_REPORT — Valhalla Base URL 진단 (2026-06-02)
 
 오케스트레이터: Claude Sonnet 4.6
 

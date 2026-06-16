@@ -17,6 +17,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
@@ -92,9 +93,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
+  VoicePackService? _vps;
   int _lastAnnouncedIdx = -1;      // 중복 발화 방지
   List<double> _stepEndDistM = []; // 각 step 종점까지의 누적 거리(m)
-  bool _preAnnounced = false;      // 400m 예비 발화 완료 여부
+  bool _pre500 = false;
+  bool _pre300 = false;
+  bool _pre50 = false;
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
@@ -108,6 +112,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   int _stepIdx = 0;
+  double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
 
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
@@ -157,6 +162,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (mounted) Navigator.of(context).pop();
       });
       return;
+    }
+    // Seoul flicker 방지: GPS fix가 이미 있으면 initState에서 즉시 _currentPos 초기화
+    final initLoc = ref.read(currentLocationProvider);
+    if (initLoc != null) {
+      _currentPos = initLoc;
+      _firstFixReceived = true;
     }
     _startLocation();
     _loadRawStyle();
@@ -380,8 +391,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
           ];
     _computeStepEndDistances();
     _stepIdx = 0;
+    _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
-    _preAnnounced = false;
+    _pre500 = false;
+    _pre300 = false;
+    _pre50 = false;
   }
 
   /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
@@ -408,18 +422,35 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final stepEnd = _stepIdx < _stepEndDistM.length ? _stepEndDistM[_stepIdx] : 0.0;
     final remaining = (stepEnd - traveled).clamp(0.0, double.maxFinite);
 
-    // 400m 예비 발화
-    if (remaining < 400 && !_preAnnounced && _stepIdx + 1 < _steps.length) {
-      _preAnnounced = true;
-      final next = _steps[_stepIdx + 1];
-      final distStr = '${remaining.toStringAsFixed(0)}미터 앞';
-      _tts?.speak('$distStr ${next.label}');
+    // 카드 잔여 거리 실시간 갱신
+    setState(() => _cardRemainingM = remaining);
+
+    debugPrint('YNAV_GUIDE tick stepIdx=$_stepIdx total=${_steps.length} '
+        'remaining=${remaining.toStringAsFixed(0)} '
+        'cur=${_steps[_stepIdx].label} '
+        'upcoming=${_stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1].label : "DEST"}');
+
+    // 500m 예비 발화
+    if (remaining < 500 && !_pre500 && _stepIdx + 1 < _steps.length) {
+      _pre500 = true;
+      final direction = _steps[_stepIdx + 1].label;
+      _vps?.speak('approach_500', vars: {'direction': direction});
+    }
+    // 300m 예비 발화
+    if (remaining < 300 && !_pre300 && _stepIdx + 1 < _steps.length) {
+      _pre300 = true;
+      final direction = _steps[_stepIdx + 1].label;
+      _vps?.speak('approach_300', vars: {'direction': direction});
     }
     // 50m → 자동 진행
-    if (remaining < 50) {
-      _preAnnounced = false;
+    if (remaining < 50 && !_pre50) {
+      _pre50 = true;
+      final direction = (_stepIdx + 1 < _steps.length) ? _steps[_stepIdx + 1].label : '';
+      _vps?.speak('approach_50', vars: {'direction': direction});
+      _pre500 = false;
+      _pre300 = false;
       setState(() => _stepIdx++);
-      _announceStep(_stepIdx);
+      debugPrint('YNAV_GUIDE advance → stepIdx=$_stepIdx label=${_steps[_stepIdx].label}');
     }
   }
 
@@ -478,7 +509,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _durationMin = routes[selIdx].durationMin;
           _applyRouteGuidance(routes[selIdx].maneuvers);
         });
-        _announceStep(0);
+        debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
+        // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
+        _vps?.speak('reroute');
+        _lastAnnouncedIdx = 0; // 출발 step 중복 방지
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
@@ -496,7 +530,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setLanguage('ko-KR');
     await _tts!.setSpeechRate(0.5);
     await _tts!.setVolume(1.0);
-    // 첫 번째 안내 발화
+    _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _announceStep(0);
   }
 
@@ -505,10 +539,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (idx == _lastAnnouncedIdx) return; // 중복 방지
     _lastAnnouncedIdx = idx;
     final step = _steps[idx];
-    final text = step.dist.isNotEmpty
-        ? '${step.dist} 앞 ${step.label}'
-        : step.label;
-    _tts?.speak(text);
+    if (step.label == '출발') {
+      _vps?.speak('departure');
+      return;
+    }
+    debugPrint('YNAV_GUIDE tts idx=$idx direction="${step.label}"');
+    _vps?.speak('approach_300', vars: {'direction': step.label});
   }
 
   void _checkArrival(LatLng loc) {
@@ -517,6 +553,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (dest == null) return;
     if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
       _arrived = true;
+      _vps?.speak('arrival');
       _fetchNearbyPois(dest).then((pois) {
         if (mounted) _showArrivalDialog(pois);
       });
@@ -781,6 +818,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   @override
   Widget build(BuildContext context) {
     final step = _steps[_stepIdx];
+    // 카드에 표시할 "다가오는 회전" — 마지막 step이면 step 자신(목적지)으로 폴백
+    final upcoming = _stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1] : step;
     final daylightCycle = ref.watch(daylightCycleProvider);
     final daylightProgress = daylightCycle?.progress ?? 0.5;
     final isDay = daylightCycle?.isDay ?? true;
@@ -940,16 +979,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                   color: cs.tertiary,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: Icon(step.icon, color: Colors.white, size: 30),
+                                child: Icon(upcoming.icon, color: Colors.white, size: 30),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (step.dist.isNotEmpty)
+                                    if (_cardRemainingM > 0 || step.dist.isNotEmpty)
                                       Text(
-                                        step.dist,
+                                        _cardRemainingM > 0
+                                            ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                                            : step.dist,
                                         style: TextStyle(
                                           color: cs.tertiary,
                                           fontSize: 13,
@@ -957,7 +998,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                         ),
                                       ),
                                     Text(
-                                      step.label,
+                                      upcoming.label,
                                       style: TextStyle(
                                         color: cs.onSurface,
                                         fontSize: 20,
@@ -1223,14 +1264,15 @@ class _TurnStep {
     switch (type) {
       case 1: case 2: case 3: return Icons.play_arrow_rounded;
       case 4: case 5: case 6: return Icons.flag_rounded;
-      case 8: return Icons.straight_rounded;
-      case 9: case 17: return Icons.turn_slight_right;
-      case 10: case 25: return Icons.turn_right_rounded;
-      case 11: return Icons.turn_right_rounded; // sharp right
+      case 8: case 17: case 22: return Icons.straight_rounded;
+      case 9: case 18: case 23: return Icons.turn_slight_right;
+      case 10: case 20: case 26: case 27: return Icons.turn_right_rounded;
+      case 11: return Icons.turn_right_rounded;
       case 12: case 13: return Icons.u_turn_right_rounded;
-      case 14: return Icons.turn_left_rounded;  // sharp left
-      case 15: case 26: return Icons.turn_left_rounded;
-      case 16: case 18: return Icons.turn_slight_left;
+      case 14: return Icons.turn_left_rounded;
+      case 15: case 21: return Icons.turn_left_rounded;
+      case 16: case 19: case 24: return Icons.turn_slight_left;
+      case 25: return Icons.straight_rounded;
       default: return Icons.straight_rounded;
     }
   }
@@ -1240,7 +1282,7 @@ class _TurnStep {
       case 1: case 2: case 3: return '출발';
       case 4: case 5: case 6: return '목적지 도착';
       case 7: return '도로명 변경';
-      case 8: return '직진';
+      case 8: case 22: return '직진';
       case 9: return '약간 우회전';
       case 10: return '우회전';
       case 11: return '급우회전';
@@ -1248,11 +1290,18 @@ class _TurnStep {
       case 14: return '급좌회전';
       case 15: return '좌회전';
       case 16: return '약간 좌회전';
-      case 17: return '진출로 직진';
-      case 25: return '진출로 우측';
-      case 26: return '진출로 좌측';
-      case 27: return '우측 출구';
-      case 28: return '좌측 출구';
+      case 17: return '램프 직진';
+      case 18: return '램프 우측';
+      case 19: return '램프 좌측';
+      case 20: return '우측 출구';
+      case 21: return '좌측 출구';
+      case 23: return '우측 유지';
+      case 24: return '좌측 유지';
+      case 25: return '합류';
+      case 26: return '회전교차로 진입';
+      case 27: return '회전교차로 진출';
+      case 28: return '도선 탑승';
+      case 29: return '도선 하차';
       default: return '직진';
     }
   }
