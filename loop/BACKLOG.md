@@ -5,6 +5,12 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 작업 전 관련 SPEC_*.md를 읽고 RECON과 대조. 충돌 시 SPEC 우선.
 
 ## READY
+- [x] **RECON-1hz** (RECON) 1Hz 요청이 5초로 전달되는 코드 원인 규명 ✓ 2026-06-17
+  - 산출물: loop/RECON_1hz.md 생성 완료
+  - 원인: geolocator_android-5.0.2 싱글턴 캐시 (`_positionStream != null` → settings 무시)
+    main_map_screen(:193) 이 먼저 `LocationSettings(distanceFilter:10, timeInterval:null=5000ms)` 로 스트림 생성
+    nav_screen(:232) 의 `AndroidSettings(intervalDuration:1000ms)` 는 캐시 히트로 완전히 무시됨
+  - 수정 방향: _startNavigation() 에서 NavScreen push 직전 main_map 구독 해제 (옵션A) + LOC-UNIFY (옵션B)
 - [x] **RECON-manifest** (RECON) Android 위치 전달 제약 진단 ✓ 2026-06-17
   - 산출물: loop/RECON_manifest.md 생성 완료
   - ACCESS_FINE_LOCATION ✅ manifest:4, FOREGROUND_SERVICE_LOCATION ✅ manifest:7
@@ -32,16 +38,12 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 - [x] **TTS-PACK** (T2/설계) 음성안내 팩 구조 모듈화 ✓ 2026-06-16
   - 산출물: VoicePackService + default_ko.json, nav_screen 8곳 재배선, main 머지 완료
   - SPEC §4 전 항목 PASS + analyze No issues
-- [ ] **RECON-heading** (RECON) 증상3 재탐색 heading 미전달
-  - 산출물: RECON_reroute.md §D 기준, Valhalla 포크 heading 수용 curl A/B
-  - 선행조건: 없음
-
 - [ ] **LOC-UNIFY** (설계+T2) 위치 파이프라인 통합 + 시작 워밍업
   - SPEC: loop/SPEC_location.md (필독, 우선)
   - 스코프: 분산된 getPositionStream 3곳 → 단일 위치 소스(provider)로 통합 + 앱 시작 워밍업
   - 코드 검증(객관): getPositionStream 호출처가 1곳 / analyze 통과
   - 실세계 검증(라이딩): 콜드 0km/h 소멸, 마커 추종 — 코드 통과해도 main 머지는 라이딩 후
-  - 선행조건: INSTR-fixrate로 fix 간극 원인 확정 후 (워밍업 LocationSettings 값이 거기 달림)
+  - 선행조건: 없음 (RECON_1hz로 원인·설정값 확정 2026-06-17)
   - 주의: SPEC §3 미확정값 임의 결정 금지. 모호하면 BACKLOG에 질문 남기고 중단.
 
 ## RIDING_QUEUE (구현 완료 · 라이딩 검증 대기 · main 머지 금지)
@@ -54,6 +56,12 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
 - [ ] T3 2단 안내 카드 재설계 — 미착수, 라이딩 가능 세션에서
 
 ## DONE (main 반영 완료)
+- **RECON-heading** (RECON) ✓ 2026-06-17 — loop/RECON_reroute.md §D
+  - Valhalla 포크 heading 수용 ✅ (curl B HTTP 200, heading 에코 확인)
+  - Flutter 코드 heading 미전달 확인: routing_service.dart:128–133 (lon/lat만), nav_screen.dart:68 (_currentHeading 없음), nav_screen.dart:493 (_reroute(LatLng) — heading 인자 없음)
+  - 제자리 유턴 원인: Valhalla가 진행 방향을 모르므로 유턴이 거리상 유리할 경우 선택됨
+  - 수정 방향: LOC-UNIFY 시 _currentHeading 상태 추가 + fetchRoutes(heading:) 전달 권장
+- **RECON-1hz** (RECON) ✓ 2026-06-17 — loop/RECON_1hz.md
 - **RECON-manifest** (RECON) ✓ 2026-06-17 — loop/RECON_manifest.md
 - **RECON-location** (RECON) ✓ 2026-06-17 — loop/RECON_location.md
 - **RECON-tts-pack** (RECON) ✓ 2026-06-16 — loop/RECON_tts_pack.md
