@@ -5,6 +5,18 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 작업 전 관련 SPEC_*.md를 읽고 RECON과 대조. 충돌 시 SPEC 우선.
 
 ## READY
+- [x] **RECON-locunify-plan** (RECON) LOC-UNIFY 실행계획 정찰 ✓ 2026-06-17
+  - 산출물: loop/RECON_locunify_plan.md 생성 완료
+  - locationStreamProvider → map_providers.dart (currentLocationProvider 위)
+  - main_map_screen.dart:193 / nav_screen.dart:232 → streamProvider 구독 전환
+  - 워밍업: main_map_screen initState 구독으로 자연 충족 (별도 커밋 불필요)
+  - 커밋 분할: 3커밋 (map_providers 추가 → main_map 전환 → nav 전환), 전부 analyze 객관검증
+  - LOC-UNIFY 전체 유형: T3 (라이딩 후 main 머지)
+- [x] **RECON-marker** (RECON) 목적지 마커 위치 고정 버그(증상2) ✓ 2026-06-17
+  - 산출물: loop/RECON_marker.md 생성 완료
+  - nav_screen:898 FlutterMap Marker(point: widget.destination!) — 카메라 미동기화 → 화면좌표 고정
+  - main_map_screen:315–329 MapLibre Symbol — 스타일 재주입 시 onStyleLoadedCallback:809 _destMarker=null 후 미복구
+  - 수정 방향: nav_screen→MapLibre 네이티브 Symbol 교체(옵션A); main_map_screen→onStyleLoadedCallback에 _ensureDestMarker 재호출 추가
 - [x] **RECON-1hz** (RECON) 1Hz 요청이 5초로 전달되는 코드 원인 규명 ✓ 2026-06-17
   - 산출물: loop/RECON_1hz.md 생성 완료
   - 원인: geolocator_android-5.0.2 싱글턴 캐시 (`_positionStream != null` → settings 무시)
@@ -28,10 +40,7 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
   - "5초 갱신" 코드값 없음 — Android Doze/배터리 절약으로 OS가 임의 연장이 유력
   - 1Hz 강제: 현재 이미 1Hz 요청. OS 보장은 배터리 최적화 제외·매니페스트 foregroundServiceType으로 해결
   - 적응 throttle: nav_screen.dart:317 (≤10km/h→500ms, 나머지→1000ms)
-- [ ] **RECON-marker** (RECON) 목적지 마커 위치 고정 버그
-  - 산출물: RECON_marker.md — 목적지 마커에 LatLng 부여하는 지점 file:line,
-    화면좌표 고정 vs 지도좌표 추적 여부, 스타일 재주입 시 마커 파괴/재생성 경로와의 관계
-  - 코드 변경 0. 선행조건: 없음
+- [x] **RECON-marker** (RECON) 목적지 마커 위치 고정 버그 ✓ 2026-06-17 (중복항목 — 위 항목 참조)
 - [x] **RECON-tts-pack** (RECON) 팩 구조 착수 전 정찰 ✓ 2026-06-16
   - 산출물: loop/RECON_tts_pack.md 생성 완료
   - 발화 지점 8개 전수, 변경 파일 1개(nav_screen.dart) + 신규 2개, 단일커밋 불가(2커밋 권장)
@@ -56,11 +65,16 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
 - [ ] T3 2단 안내 카드 재설계 — 미착수, 라이딩 가능 세션에서
 
 ## DONE (main 반영 완료)
+- **RECON-locunify-plan** (RECON) ✓ 2026-06-17 — loop/RECON_locunify_plan.md
+  - locationStreamProvider 위치(map_providers.dart), 전환 file:line, 3커밋 분할안, T3 확정
 - **RECON-heading** (RECON) ✓ 2026-06-17 — loop/RECON_reroute.md §D
   - Valhalla 포크 heading 수용 ✅ (curl B HTTP 200, heading 에코 확인)
   - Flutter 코드 heading 미전달 확인: routing_service.dart:128–133 (lon/lat만), nav_screen.dart:68 (_currentHeading 없음), nav_screen.dart:493 (_reroute(LatLng) — heading 인자 없음)
   - 제자리 유턴 원인: Valhalla가 진행 방향을 모르므로 유턴이 거리상 유리할 경우 선택됨
   - 수정 방향: LOC-UNIFY 시 _currentHeading 상태 추가 + fetchRoutes(heading:) 전달 권장
+- **RECON-marker** (RECON) ✓ 2026-06-17 — loop/RECON_marker.md
+  - nav_screen:898 FlutterMap Marker — FlutterMap 카메라 미동기화 → 화면좌표 고정
+  - main_map_screen:315–329 MapLibre Symbol — 스타일 재주입(onStyleLoadedCallback:809) 시 _destMarker 미복구
 - **RECON-1hz** (RECON) ✓ 2026-06-17 — loop/RECON_1hz.md
 - **RECON-manifest** (RECON) ✓ 2026-06-17 — loop/RECON_manifest.md
 - **RECON-location** (RECON) ✓ 2026-06-17 — loop/RECON_location.md
