@@ -8,7 +8,7 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 - [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
   - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
   - 커밋 분할 (각 단일파일·1논리·analyze 게이트):
-    - 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함**
+    - [x] 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함** ✓ f3ae69b
       (설정값: AndroidSettings bestForNavigation / 1000ms / distanceFilter:0 / fgNotificationConfig)
     - 커밋2: main_map_screen.dart:193 — getPositionStream → ref.read(locationStreamProvider.stream) 구독 전환
     - 커밋3: nav_screen.dart:232 — getPositionStream → 동 provider 구독 전환 (_onPosition 로직 불변)
