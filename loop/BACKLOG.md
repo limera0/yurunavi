@@ -5,6 +5,25 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 작업 전 관련 SPEC_*.md를 읽고 RECON과 대조. 충돌 시 SPEC 우선.
 
 ## READY
+- [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
+  - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
+  - 커밋 분할 (각 단일파일·1논리·analyze 게이트):
+    - 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함**
+      (설정값: AndroidSettings bestForNavigation / 1000ms / distanceFilter:0 / fgNotificationConfig)
+    - 커밋2: main_map_screen.dart:193 — getPositionStream → ref.read(locationStreamProvider.stream) 구독 전환
+    - 커밋3: nav_screen.dart:232 — getPositionStream → 동 provider 구독 전환 (_onPosition 로직 불변)
+    - 커밋4: splash 화면 — ConsumerWidget 전환 + locationStreamProvider 구독으로 시작 워밍업
+  - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
+  - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
+  - 주의: ref.watch 금지(중복구독) — ref.read().listen. geolocator import 삭제 금지(getLastKnownPosition/LocationPermission 사용).
+  - 선행조건: 없음
+- [ ] **MARKER-FIX** (T3) nav 목적지 마커 화면고정 버그(증상2)
+  - 근거: RECON_marker.md — nav가 MapLibre 위 FlutterMap 오버레이(initialCenter 고정)에 마커를 얹어 카메라 미추종
+  - 옵션 A 채택: nav의 FlutterMap 오버레이 제거 → 목적지·경유지를 MapLibre 네이티브 Symbol로 (_onStyleLoaded에서 이미지등록+Symbol생성)
+  - 곁다리: main_map 스타일 재주입 후 _ensureDestMarker 미호출로 목적지 마커 소멸(RECON_marker §C) — onStyleLoadedCallback에 재생성 추가
+  - 라이딩검증: 주행 중 목적지 마커가 지도에 고정 추종
+  - 선행조건: LOC-UNIFY 라이딩 검증 완료 후 (둘 다 nav 화면 건드림, 충돌 회피)
+
 - [x] **RECON-locunify-plan** (RECON) LOC-UNIFY 실행계획 정찰 ✓ 2026-06-17
   - 산출물: loop/RECON_locunify_plan.md 생성 완료
   - locationStreamProvider → map_providers.dart (currentLocationProvider 위)

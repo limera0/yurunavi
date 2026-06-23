@@ -7,6 +7,9 @@
   중단·주기 완화·정확도 하향 금지. (마스터 결정 2026-06-17)
 - 앱 시작 시점부터 위치 스트림을 워밍업한다. 홈/지도 화면 조작 중에도 계속 수신,
   nav 진입 시 GPS 락·fix 버퍼가 이미 따뜻한 상태여야 한다.
+- 위치 스트림은 keepAlive(autoDispose 아님). 앱 시작 시 SplashScreen에서 구독을 걸어
+  권한 승인 즉시 GPS를 기동한다 — main_map 진입 전에 이미 따뜻해야 함.
+  (자율계획 §A "autoDispose로 충분"은 기각: 구독자 의존 시작이라 워밍업이 main_map 진입까지 지연됨. 마스터 결정 2026-06-17)
 - 위치 소스는 단일화한다. 화면별 개별 getPositionStream 금지 →
   앱 수명주기 동안 사는 단일 소스(Riverpod provider 등)를 nav·main_map·속도계가 구독.
   (현 분산: nav_screen:232 / main_map_screen:193 / driving_screen:97 — RECON_location §B)
