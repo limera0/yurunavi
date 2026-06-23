@@ -24,3 +24,21 @@
 - 전체 LOC-UNIFY: T3 — 라이딩 필수, main 머지 전 확인:
   (1) 콜드 0km/h 구간 소멸 (2) 위치마커 1~2초 추종 (3) 속도계 즉시 정상
 - 라이딩 통과 후에만 main 머지.
+
+## 커밋5 — 워밍업 권한 타이밍 수정 (회귀 픽스, 2026-06-24)
+증상: 앱이 GPS 못 잡음. logcat "Unhandled Exception: CanceledError".
+원인 확정: Splash initState에서 ref.listenManual(locationStreamProvider)가 권한 승인 전 실행
+  → 스트림이 권한 없이 시작하다 CanceledError로 죽음 → keepAlive라 죽은 스트림이 캐시에 박제
+  → 이후 main_map/nav가 죽은 스트림 물려받아 영영 fix 없음.
+
+수정 (둘 다 적용):
+1. splash_screen.dart: initState의 ref.listenManual 제거 →
+   권한 요청/승인이 끝나는 지점(_runSequence 내 권한 granted 분기 직후)에서 구독.
+   미승인 시 구독하지 않음.
+2. map_providers.dart locationStreamProvider: 스트림 권한 에러에 죽어 박제되지 않도록 방어.
+   - 구독 전 LocationPermission 확인(whileInUse/always 아니면 스트림 생성 보류),
+   - 또는 .handleError로 CanceledError 시 재구독 가능하게.
+   keepAlive 유지하되 "죽은 스트림 박제" 불가하게.
+
+검증: analyze 통과. 라이딩(필수): 앱 시작 시 GPS 정상 획득 + 콜드스타트 0km/h 소멸.
+단일 변경 단위로 커밋 분리(splash / provider).
