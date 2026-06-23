@@ -42,3 +42,13 @@
 
 검증: analyze 통과. 라이딩(필수): 앱 시작 시 GPS 정상 획득 + 콜드스타트 0km/h 소멸.
 단일 변경 단위로 커밋 분리(splash / provider).
+
+## 커밋6 — provider 권한 게이트 견고화 (2026-06-24)
+문제: locationStreamProvider가 async*에서 권한 없으면 else 없이 종료 → 빈 스트림을
+  keepAlive로 박제 → 권한 생겨도 죽은 빈 스트림 물려줌(커밋5 회귀 잔존).
+수정 (map_providers.dart locationStreamProvider):
+1. checkPermission()이 denied면 requestPermission()으로 요청.
+2. 최종 권한이 whileInUse/always 아니면: ref.keepAlive() 호출 전에 return (빈 종료 박제 금지).
+3. 권한 확보된 경우에만 ref.keepAlive() + getPositionStream yield*.
+   → 권한 미승인 상태의 구독은 캐시에 박제되지 않아, 다음 구독에서 재시도 가능.
+검증: analyze 통과. 라이딩: 앱 시작 GPS 정상 획득.
