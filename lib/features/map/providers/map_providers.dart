@@ -61,23 +61,27 @@ class SavedRoutesNotifier extends AsyncNotifier<List<SavedRoute>> {
 // ── Location ──────────────────────────────────────────────────────────────────
 
 final locationStreamProvider = StreamProvider<Position>((ref) async* {
-  ref.keepAlive();
-  final permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.whileInUse ||
-      permission == LocationPermission.always) {
-    yield* Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        intervalDuration: const Duration(milliseconds: 1000),
-        distanceFilter: 0,
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: "유루나비 주행 중",
-          notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
-          enableWakeLock: true,
-        ),
-      ),
-    );
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
   }
+  if (permission != LocationPermission.whileInUse &&
+      permission != LocationPermission.always) {
+    return;
+  }
+  ref.keepAlive();
+  yield* Geolocator.getPositionStream(
+    locationSettings: AndroidSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      intervalDuration: const Duration(milliseconds: 1000),
+      distanceFilter: 0,
+      foregroundNotificationConfig: const ForegroundNotificationConfig(
+        notificationTitle: "유루나비 주행 중",
+        notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
+        enableWakeLock: true,
+      ),
+    ),
+  );
 });
 
 final currentLocationProvider =
