@@ -12,7 +12,8 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
       (설정값: AndroidSettings bestForNavigation / 1000ms / distanceFilter:0 / fgNotificationConfig)
     - [x] 커밋2: main_map_screen.dart:193 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ dcf6019
       (주의: Riverpod 3에서 StreamProvider.stream 없음 → listenManual 사용. _locationSub 타입 ProviderSubscription으로 변경, dispose: cancel→close)
-    - 커밋3: nav_screen.dart:232 — getPositionStream → 동 provider 구독 전환 (_onPosition 로직 불변)
+    - [x] 커밋3: nav_screen.dart:232 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ 7aae78a
+      (note: driving_screen.dart:97 잔존 — RECON-manifest 확정 dead code, 범위 밖)
     - 커밋4: splash 화면 — ConsumerWidget 전환 + locationStreamProvider 구독으로 시작 워밍업
   - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
   - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
