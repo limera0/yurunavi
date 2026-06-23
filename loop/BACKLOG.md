@@ -14,7 +14,7 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
       (주의: Riverpod 3에서 StreamProvider.stream 없음 → listenManual 사용. _locationSub 타입 ProviderSubscription으로 변경, dispose: cancel→close)
     - [x] 커밋3: nav_screen.dart:232 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ 7aae78a
       (note: driving_screen.dart:97 잔존 — RECON-manifest 확정 dead code, 범위 밖)
-    - 커밋4: splash 화면 — ConsumerWidget 전환 + locationStreamProvider 구독으로 시작 워밍업
+    - [x] 커밋4: splash_screen.dart — ConsumerStatefulWidget 전환 + locationStreamProvider 워밍업 구독 ✓ b1fefc1
   - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
   - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
   - 주의: ref.watch 금지(중복구독) — ref.read().listen. geolocator import 삭제 금지(getLastKnownPosition/LocationPermission 사용).
