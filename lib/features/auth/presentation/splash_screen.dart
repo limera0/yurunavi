@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../map/presentation/main_map_screen.dart';
+import '../../map/providers/map_providers.dart';
 
 /// YuruNavi Splash Screen
 /// - 로고 fade + scale 애니메이션
 /// - 위치·알림 권한 OS 팝업 1회 요청 (미허용 시 skip, 2회차는 granted라 skip)
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _scale;
@@ -39,6 +41,7 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
 
+    ref.listenManual(locationStreamProvider, (prev, next) {});
     _runSequence();
   }
 
