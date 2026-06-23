@@ -17,6 +17,7 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
     - [x] 커밋4: splash_screen.dart — ConsumerStatefulWidget 전환 + locationStreamProvider 워밍업 구독 ✓ b1fefc1
     - [x] 커밋5a: splash_screen.dart — initState listenManual 제거 → 권한 granted 후 구독 ✓ c39c5d6
     - [x] 커밋5b: map_providers.dart — locationStreamProvider 권한 방어 (async* + checkPermission 게이트) ✓ a9b859a
+    - [x] 커밋6: map_providers.dart — 권한 게이트 견고화 (denied→requestPermission, 미승인 keepAlive 전 return) ✓ e875da5
   - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
   - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
   - 주의: ref.watch 금지(중복구독) — ref.read().listen. geolocator import 삭제 금지(getLastKnownPosition/LocationPermission 사용).
