@@ -41,7 +41,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       ),
     );
 
-    ref.listenManual(locationStreamProvider, (prev, next) {});
     _runSequence();
   }
 
@@ -60,6 +59,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   Future<void> _requestPermissions() async {
     if (!(await Permission.location.status).isGranted) {
       await Permission.location.request();
+    }
+    if ((await Permission.location.status).isGranted) {
+      ref.listenManual(locationStreamProvider, (_, _) {});
     }
     if (!mounted) return;
     if (!(await Permission.notification.status).isGranted) {
