@@ -9,7 +9,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart'; // 임시 오버레이용 — ②③에서 제거
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
@@ -58,6 +57,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   String? _styleJson;
 
   ml.Circle? _locMarker;
+  ml.Symbol? _destMarker;
+  List<ml.Symbol> _waypointMarkers = [];
+  static const String _kDestIcon = 'pointer_red';
+  static const double _kDestIconSize = 1.5;
+  static const String _kWpIcon = 'pointer_yellow';
+  static const double _kWpIconSize = 1.5;
   static const String _kLocColor = '#00C853';
 
   static const _navRouteSourceId = 'nav-route-source';
@@ -787,15 +792,62 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
+  Future<void> _ensureDestMarker(LatLng dest) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final geo = _toMl(dest);
+    if (_destMarker == null) {
+      _destMarker = await c.addSymbol(ml.SymbolOptions(
+        geometry: geo,
+        iconImage: _kDestIcon,
+        iconSize: _kDestIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 10,
+      ));
+    } else {
+      await c.updateSymbol(_destMarker!, ml.SymbolOptions(geometry: geo));
+    }
+  }
+
+  Future<void> _syncNavWaypointMarkers() async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    for (final s in _waypointMarkers) {
+      await c.removeSymbol(s);
+    }
+    _waypointMarkers = [];
+    for (final wp in widget.waypoints) {
+      final s = await c.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(wp),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 5,
+      ));
+      _waypointMarkers.add(s);
+    }
+  }
+
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
-    // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
-    _initRouteLayer().whenComplete(() {
-      if (_routePoints.length >= 2 && mounted) {
-        _mlCtrl?.setGeoJsonSource(
-            _navRouteSourceId, _buildRouteGeoJson(_routePoints));
+    _locMarker = null;
+    _destMarker = null;
+    _waypointMarkers = [];
+    _initRouteLayer().whenComplete(() async {
+      if (!mounted) return;
+      final c = _mlCtrl;
+      if (c == null) return;
+      if (_routePoints.length >= 2) {
+        await c.setGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
-      _ensureLocationMarker(); // unawaited — ③
+      final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
+      await c.addImage(_kDestIcon, pinBytes.buffer.asUint8List());
+      final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
+      await c.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+      await c.setSymbolIconAllowOverlap(true);
+      await _ensureLocationMarker();
+      if (widget.destination != null) await _ensureDestMarker(widget.destination!);
+      if (widget.waypoints.isNotEmpty) await _syncNavWaypointMarkers();
     });
   }
 
@@ -856,47 +908,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
               compassEnabled: false,
               onMapCreated: (c) => _mlCtrl = c,
               onStyleLoadedCallback: _onStyleLoaded,
-            ),
-          ),
-
-          // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
-          // ② GeoJSON LineLayer로, ③ Circle/Symbol로 교체 후 이 블록 제거
-          IgnorePointer(
-            child: FlutterMap(
-              options: MapOptions(
-                backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
-                initialCenter: _currentPos ?? _kInitialMapView,
-                initialZoom: _navZoom,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.none,
-                ),
-              ),
-              children: [
-                // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
-                MarkerLayer(markers: [
-                  ...widget.waypoints.map(
-                    (wp) => Marker(
-                      point: wp,
-                      width: 34,
-                      height: 34,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(
-                        Icons.location_pin,
-                        color: Color(0xFFFFB300),
-                        size: 34,
-                      ),
-                    ),
-                  ),
-                  if (widget.destination != null)
-                    Marker(
-                      point: widget.destination!,
-                      width: 38,
-                      height: 38,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
-                    ),
-                ]),
-              ],
             ),
           ),
 
