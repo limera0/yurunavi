@@ -8,11 +8,17 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 - [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
   - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
   - 커밋 분할 (각 단일파일·1논리·analyze 게이트):
-    - 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함**
+    - [x] 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함** ✓ f3ae69b
       (설정값: AndroidSettings bestForNavigation / 1000ms / distanceFilter:0 / fgNotificationConfig)
-    - 커밋2: main_map_screen.dart:193 — getPositionStream → ref.read(locationStreamProvider.stream) 구독 전환
-    - 커밋3: nav_screen.dart:232 — getPositionStream → 동 provider 구독 전환 (_onPosition 로직 불변)
-    - 커밋4: splash 화면 — ConsumerWidget 전환 + locationStreamProvider 구독으로 시작 워밍업
+    - [x] 커밋2: main_map_screen.dart:193 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ dcf6019
+      (주의: Riverpod 3에서 StreamProvider.stream 없음 → listenManual 사용. _locationSub 타입 ProviderSubscription으로 변경, dispose: cancel→close)
+    - [x] 커밋3: nav_screen.dart:232 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ 7aae78a
+      (note: driving_screen.dart:97 잔존 — RECON-manifest 확정 dead code, 범위 밖)
+    - [x] 커밋4: splash_screen.dart — ConsumerStatefulWidget 전환 + locationStreamProvider 워밍업 구독 ✓ b1fefc1
+    - [x] 커밋5a: splash_screen.dart — initState listenManual 제거 → 권한 granted 후 구독 ✓ c39c5d6
+    - [x] 커밋5b: map_providers.dart — locationStreamProvider 권한 방어 (async* + checkPermission 게이트) ✓ a9b859a
+    - [x] 커밋6: map_providers.dart — 권한 게이트 견고화 (denied→requestPermission, 미승인 keepAlive 전 return) ✓ e875da5
+    - [x] 회귀픽스: AndroidManifest.xml — WAKE_LOCK 권한 추가 (enableWakeLock:true 대응) ✓ a9ba52f
   - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
   - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
   - 주의: ref.watch 금지(중복구독) — ref.read().listen. geolocator import 삭제 금지(getLastKnownPosition/LocationPermission 사용).

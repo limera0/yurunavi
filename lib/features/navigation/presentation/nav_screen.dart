@@ -69,7 +69,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   double _speedKmh = 0;
   bool _isManualMode = false;
   Timer? _recenterTimer;
-  StreamSubscription<Position>? _locationSub;
+  ProviderSubscription<AsyncValue<Position>>? _locationSub;
 
   // ZUPT 링버퍼: 최근 12초 GPS fix {lat, lon, t, acc} (1Hz·5초 fix 양쪽 호환)
   final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
@@ -191,7 +191,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
     _speedTicker?.cancel();
-    _locationSub?.cancel();
+    _locationSub?.close();
     _pulseCtrl.dispose();
     _tts?.stop();
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
@@ -229,18 +229,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       } catch (_) {}
     }
 
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: AndroidSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        intervalDuration: const Duration(milliseconds: 1000), // 1Hz 현실 목표
-        distanceFilter: 0,
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: "유루나비 주행 중",
-          notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
-          enableWakeLock: true,
-        ),
-      ),
-    ).listen(_onPosition);
+    _locationSub = ref.listenManual<AsyncValue<Position>>(
+      locationStreamProvider,
+      (_, next) {
+        next.whenData(_onPosition);
+      },
+    );
 
     // 200ms 속도 외삽 ticker 가동 (fix 사이 부드러운 추종 + staleness 흡수)
     _speedTicker?.cancel();

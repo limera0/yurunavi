@@ -105,7 +105,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // marker / distance badge from rendering at a hardcoded mock location.
   LatLng? _origin;
   LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
-  StreamSubscription<Position>? _locationSub;
+  ProviderSubscription<AsyncValue<Position>>? _locationSub;
 
   // 뒤로 연타 종료
   DateTime? _lastBackPress;
@@ -158,7 +158,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   @override
   void dispose() {
-    _locationSub?.cancel();
+    _locationSub?.close();
     _mapCtrl.dispose();
     _sheetCtrl.dispose();
     super.dispose();
@@ -190,24 +190,25 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
-    _locationSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((pos) {
-      final loc = LatLng(pos.latitude, pos.longitude);
-      ref.read(currentLocationProvider.notifier).set(loc);
-      final isFirstFix = _origin == null;
-      setState(() => _origin = loc);
-      if (isFirstFix) {
-        // Snap the camera to the rider the moment GPS resolves.
-        _mlCtrl?.animateCamera(
-          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
-        );
-      }
-      _ensureLocationMarker(); // unawaited — B1
-    });
+    _locationSub = ref.listenManual<AsyncValue<Position>>(
+      locationStreamProvider,
+      (_, next) {
+        next.whenData((pos) {
+          final loc = LatLng(pos.latitude, pos.longitude);
+          ref.read(currentLocationProvider.notifier).set(loc);
+          final isFirstFix = _origin == null;
+          setState(() => _origin = loc);
+          if (isFirstFix) {
+            // Snap the camera to the rider the moment GPS resolves.
+            _mlCtrl?.animateCamera(
+              ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
+            );
+          }
+          _ensureLocationMarker(); // unawaited — B1
+        });
+      },
+      fireImmediately: true,
+    );
   }
 
   void _recenterMap() {
