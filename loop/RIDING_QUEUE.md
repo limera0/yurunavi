@@ -7,3 +7,4 @@
 | 브랜치 | 무엇을 확인 | 어디서 / 방법 |
 |---|---|---|
 | `debug/fix-rate-probe` | YN_FIX 로그 타임스탬프 간격 = 실제 GPS 전달 주기 | 2~3분 주행 후 `adb logcat -s flutter` 로 YN_FIX 줄 캡처. 간격 5s이면 OS Doze, 1s이면 코드단 정상. 결과를 BACKLOG LOC-UNIFY 선행조건 기록 후 브랜치 폐기. |
+| `phase2/marker-fix` | 주행 중 목적지·경유지 마커가 지도 좌표에 고정 추종 (화면 고정 아님) | 내비 진입 후 카메라 이동 시 목적지 핀이 지도와 함께 움직이는지 확인. PASS 시 main 머지. |
