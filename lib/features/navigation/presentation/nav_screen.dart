@@ -27,6 +27,9 @@ import '../../settings/providers/settings_providers.dart';
 /// The real position arrives from the GPS stream below.
 const LatLng _kInitialMapView = LatLng(37.5665, 126.9780);
 
+// ignore: unused_field
+enum _ArrivalPhase { guiding, arrivedHold, stopReady }
+
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
@@ -93,7 +96,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   int _durationMin = 0;
 
   // 도착 감지
-  bool _arrived = false;
+  _ArrivalPhase _phase = _ArrivalPhase.guiding;
   static const _kArrivalM = 20.0; // 경로잔여거리 도착 판정 임계값(m)
 
   // 음성 안내 + GPS 거리 기반 자동 진행
@@ -365,7 +368,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
 
     _checkArrival(loc);
-    if (!_arrived && _routePoints.length >= 2) {
+    if (_phase == _ArrivalPhase.guiding && _routePoints.length >= 2) {
       _checkOffRoute(loc);
       _updateStepByDistance(loc);
     }
@@ -547,18 +550,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _checkArrival(LatLng loc) {
-    if (_arrived) return;
+    if (_phase != _ArrivalPhase.guiding) return;
     final dest = widget.destination;
     if (dest == null) return;
 
     // 더미 폴백(경로 거리 정보 없음) → 직선 20m 안전망
     if (_stepEndDistM.isEmpty || _stepEndDistM.last == 0.0) {
       if (_distanceM(loc, dest) <= _kArrivalM) {
-        _arrived = true;
+        setState(() => _phase = _ArrivalPhase.arrivedHold);
         _vps?.speak('arrival');
-        _fetchNearbyPois(dest).then((pois) {
-          if (mounted) _showArrivalDialog(pois);
-        });
       }
       return;
     }
@@ -569,15 +569,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 경로 잔여거리 ≤ 20m → 도착
     final remaining = (_stepEndDistM.last - _traveledDistM(loc)).clamp(0.0, double.maxFinite);
     if (remaining <= _kArrivalM) {
-      _arrived = true;
+      setState(() => _phase = _ArrivalPhase.arrivedHold);
       _vps?.speak('arrival');
-      _fetchNearbyPois(dest).then((pois) {
-        if (mounted) _showArrivalDialog(pois);
-      });
     }
   }
 
   /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
+  // ignore: unused_element
   Future<List<({String name, String type})>> _fetchNearbyPois(LatLng dest) async {
     final query =
         '[out:json][timeout:5];'
@@ -644,6 +642,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return (parked: bufRadius < parkThresh, bufRadius: bufRadius, parkThresh: parkThresh);
   }
 
+  // ignore: unused_element
   void _showArrivalDialog(List<({String name, String type})> pois) {
     if (!mounted) return;
     showDialog<void>(
@@ -683,7 +682,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              if (mounted) Navigator.of(context).pop();
             },
             child: const Text('확인'),
           ),
@@ -982,50 +980,80 @@ class _NavScreenState extends ConsumerState<NavScreen>
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        LinearProgressIndicator(
-                          value: (_stepIdx + 1) / _steps.length,
-                          backgroundColor: cs.outline,
-                          color: cs.tertiary,
-                          minHeight: 3,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 58,
-                                height: 58,
-                                decoration: BoxDecoration(
-                                  color: cs.tertiary,
-                                  borderRadius: BorderRadius.circular(16),
+                    child: _phase == _ArrivalPhase.arrivedHold
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 58,
+                                  height: 58,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF008080),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: const Icon(Icons.flag_rounded, color: Colors.white, size: 30),
                                 ),
-                                child: Icon(upcoming.icon, color: Colors.white, size: 30),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('0 m', style: TextStyle(color: cs.tertiary, fontSize: 13, fontWeight: FontWeight.w600)),
+                                      Text('목적지 도착', style: TextStyle(color: cs.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              LinearProgressIndicator(
+                                value: (_stepIdx + 1) / _steps.length,
+                                backgroundColor: cs.outline,
+                                color: cs.tertiary,
+                                minHeight: 3,
                               ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                child: Row(
                                   children: [
-                                    if (_cardRemainingM > 0 || step.dist.isNotEmpty)
-                                      Text(
-                                        _cardRemainingM > 0
-                                            ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
-                                            : step.dist,
-                                        style: TextStyle(
-                                          color: cs.tertiary,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                    Container(
+                                      width: 58,
+                                      height: 58,
+                                      decoration: BoxDecoration(
+                                        color: cs.tertiary,
+                                        borderRadius: BorderRadius.circular(16),
                                       ),
-                                    Text(
-                                      upcoming.label,
-                                      style: TextStyle(
-                                        color: cs.onSurface,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
+                                      child: Icon(upcoming.icon, color: Colors.white, size: 30),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          if (_cardRemainingM > 0 || step.dist.isNotEmpty)
+                                            Text(
+                                              _cardRemainingM > 0
+                                                  ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                                                  : step.dist,
+                                              style: TextStyle(
+                                                color: cs.tertiary,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          Text(
+                                            upcoming.label,
+                                            style: TextStyle(
+                                              color: cs.onSurface,
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ],
@@ -1033,9 +1061,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
                               ),
                             ],
                           ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ),
