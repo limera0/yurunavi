@@ -101,6 +101,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   int _countdownSec = 0;
   Timer? _countdownTimer;
   DateTime? _parkGateAt;
+  bool _arrivalAnnounced = false;
+  List<({String name, String type})> _arrivalPois = [];
 
   // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
@@ -563,7 +565,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (_stepEndDistM.isEmpty || _stepEndDistM.last == 0.0) {
       if (_distanceM(loc, dest) <= _kArrivalM) {
         setState(() => _phase = _ArrivalPhase.arrivedHold);
-        _vps?.speak('arrival');
+        _onArrivedHoldEntered(dest);
       }
       return;
     }
@@ -575,7 +577,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final remaining = (_stepEndDistM.last - _traveledDistM(loc)).clamp(0.0, double.maxFinite);
     if (remaining <= _kArrivalM) {
       setState(() => _phase = _ArrivalPhase.arrivedHold);
-      _vps?.speak('arrival');
+      _onArrivedHoldEntered(dest);
     }
   }
 
@@ -615,8 +617,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
+  void _onArrivedHoldEntered(LatLng dest) {
+    if (_arrivalAnnounced) return;
+    _arrivalAnnounced = true;
+    _vps?.speak('arrival');
+    _fetchNearbyPois(dest).then((pois) {
+      if (mounted) setState(() => _arrivalPois = pois);
+    });
+  }
+
   /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
-  // ignore: unused_element
   Future<List<({String name, String type})>> _fetchNearbyPois(LatLng dest) async {
     final query =
         '[out:json][timeout:5];'
@@ -1042,6 +1052,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                     children: [
                                       Text('0 m', style: TextStyle(color: cs.tertiary, fontSize: 13, fontWeight: FontWeight.w600)),
                                       Text('목적지 도착', style: TextStyle(color: cs.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
+                                      if (_arrivalPois.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        ..._arrivalPois.map((p) => Text(
+                                          '${p.type}  ${p.name}',
+                                          style: TextStyle(color: cs.onSurface.withValues(alpha: 0.7), fontSize: 12),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        )),
+                                      ],
                                     ],
                                   ),
                                 ),
