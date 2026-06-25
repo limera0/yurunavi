@@ -94,7 +94,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
-  static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
+  static const _kArrivalM = 20.0; // 경로잔여거리 도착 판정 임계값(m)
 
   // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
@@ -550,7 +550,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (_arrived) return;
     final dest = widget.destination;
     if (dest == null) return;
-    if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
+
+    // 더미 폴백(경로 거리 정보 없음) → 직선 20m 안전망
+    if (_stepEndDistM.isEmpty || _stepEndDistM.last == 0.0) {
+      if (_distanceM(loc, dest) <= _kArrivalM) {
+        _arrived = true;
+        _vps?.speak('arrival');
+        _fetchNearbyPois(dest).then((pois) {
+          if (mounted) _showArrivalDialog(pois);
+        });
+      }
+      return;
+    }
+
+    // 마지막 step 미도달 → 도착 판정 보류
+    if (_stepIdx < _steps.length - 1) return;
+
+    // 경로 잔여거리 ≤ 20m → 도착
+    final remaining = (_stepEndDistM.last - _traveledDistM(loc)).clamp(0.0, double.maxFinite);
+    if (remaining <= _kArrivalM) {
       _arrived = true;
       _vps?.speak('arrival');
       _fetchNearbyPois(dest).then((pois) {
