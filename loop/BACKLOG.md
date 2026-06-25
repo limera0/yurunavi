@@ -5,6 +5,12 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 작업 전 관련 SPEC_*.md를 읽고 RECON과 대조. 충돌 시 SPEC 우선.
 
 ## READY
+- [ ] **ARRIVAL-C1+C2** (T3) 도착 판정 조건 교체 + _ArrivalPhase enum + 도착카드 골격 ← **라이딩 대기** (branch: feat/arrival-fix)
+  - C1(363efb0): _checkArrival 경로잔여거리+마지막step 복합조건으로 교체, _kArrivalM=20.0, 더미폴백 직선20m
+  - C2(7883569): _ArrivalPhase {guiding,arrivedHold,stopReady} 도입, _arrived→_phase 전환, _showArrivalDialog 호출 제거, 상단카드 arrivedHold 분기('목적지 도착' 골격), analyze No issues
+  - 라이딩검증: 마지막 회전 후 20m 이내 → 상단카드 '목적지 도착' 전환 + 정차 2초 후 카운트다운 10→0 자동종료 or '지금 종료' 버튼 확인 → PASS 시 main 머지
+  - C3(✓ pending): 정차게이트/카운트다운/종료버튼 — analyze PASS, auditor 7/7 PASS
+  - C4(POI/TTS) 미착수
 - [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
   - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
   - 커밋 분할 (각 단일파일·1논리·analyze 게이트):

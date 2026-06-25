@@ -98,6 +98,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 도착 감지
   _ArrivalPhase _phase = _ArrivalPhase.guiding;
   static const _kArrivalM = 20.0; // 경로잔여거리 도착 판정 임계값(m)
+  int _countdownSec = 0;
+  Timer? _countdownTimer;
+  DateTime? _parkGateAt;
 
   // 음성 안내 + GPS 거리 기반 자동 진행
   FlutterTts? _tts;
@@ -198,6 +201,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
+    _countdownTimer?.cancel();
     _speedTicker?.cancel();
     _locationSub?.close();
     _pulseCtrl.dispose();
@@ -368,6 +372,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
 
     _checkArrival(loc);
+    _checkStopGate(parked);
     if (_phase == _ArrivalPhase.guiding && _routePoints.length >= 2) {
       _checkOffRoute(loc);
       _updateStepByDistance(loc);
@@ -571,6 +576,42 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (remaining <= _kArrivalM) {
       setState(() => _phase = _ArrivalPhase.arrivedHold);
       _vps?.speak('arrival');
+    }
+  }
+
+  void _checkStopGate(bool parked) {
+    if (_phase == _ArrivalPhase.arrivedHold) {
+      if (parked && !_moving && _speedKmh < 1.0) {
+        _parkGateAt ??= DateTime.now();
+        if (DateTime.now().difference(_parkGateAt!).inSeconds >= 2) {
+          _parkGateAt = null;
+          _countdownTimer?.cancel();
+          setState(() {
+            _phase = _ArrivalPhase.stopReady;
+            _countdownSec = 10;
+          });
+          _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+            if (!mounted) { _countdownTimer?.cancel(); return; }
+            if (_countdownSec <= 1) {
+              _countdownTimer?.cancel();
+              _countdownTimer = null;
+              setState(() => _countdownSec = 0);
+              if (mounted) Navigator.of(context).pop();
+            } else {
+              setState(() => _countdownSec--);
+            }
+          });
+        }
+      } else {
+        _parkGateAt = null;
+      }
+    } else if (_phase == _ArrivalPhase.stopReady) {
+      if (_moving || _speedKmh >= 3.0) {
+        _countdownTimer?.cancel();
+        _countdownTimer = null;
+        _parkGateAt = null;
+        setState(() => _phase = _ArrivalPhase.arrivedHold);
+      }
     }
   }
 
@@ -1111,69 +1152,102 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 하단 ETA 바 ─────────────────────────────────────────────────────
+          // ── 하단 패널 (ETA 바 / stopReady 종료 버튼) ──────────────────────────
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
-            child: Container(
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _etaText(_durationMin),
-                              style: TextStyle(
-                                color: cs.onSurface,
+            child: _phase == _ArrivalPhase.stopReady
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(context).pop(),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade800,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '지금 종료 ($_countdownSec)',
+                              style: const TextStyle(
+                                color: Colors.white,
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            Row(
-                              children: [
-                                Text(_remainingText(_durationMin), style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
-                                const SizedBox(width: 8),
-                                Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
-                              ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : Container(
+                    decoration: BoxDecoration(
+                      color: cs.surface,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _etaText(_durationMin),
+                                    style: TextStyle(
+                                      color: cs.onSurface,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Row(
+                                    children: [
+                                      Text(_remainingText(_durationMin), style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
+                                      const SizedBox(width: 8),
+                                      Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
+                            GestureDetector(
+                              onTap: () => Navigator.of(context).pop(),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade900.withValues(alpha: 0.8),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                                    SizedBox(height: 2),
+                                    Text('종료', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
-                      GestureDetector(
-                        onTap: () => Navigator.of(context).pop(),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade900.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.close_rounded, color: Colors.white, size: 20),
-                              SizedBox(height: 2),
-                              Text('종료', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
           ),
 
           // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
