@@ -99,6 +99,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kArrivalM = 20.0; // 경로잔여거리 도착 판정 임계값(m)
   static const _kGeofenceM   = 30.0;
   static const _kExitSpeedKmh = 30.0;
+  static const _kExitBtnRadiusM = 8.0;
   bool _canExit = false;
   bool _arrivalAnnounced = false;
   List<({String name, String type})> _arrivalPois = [];
@@ -596,7 +597,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       return;
     }
 
-    final can = _speedKmh <= _kExitSpeedKmh;
+    final can = dist <= _kExitBtnRadiusM && _speedKmh <= _kExitSpeedKmh;
     if (can != _canExit) setState(() => _canExit = can);
   }
 
