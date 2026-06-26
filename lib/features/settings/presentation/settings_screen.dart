@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../features/settings/providers/settings_providers.dart';
-import '../models/map_language.dart';
-import 'profile_screen.dart';
+import '../providers/settings_providers.dart';
+import '../../../models/map_language.dart';
+import '../../profile/presentation/profile_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});

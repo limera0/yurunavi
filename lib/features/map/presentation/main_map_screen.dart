@@ -24,7 +24,7 @@ import '../providers/map_providers.dart';
 import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
 import '../../settings/providers/settings_providers.dart';
-import '../../../screens/settings_screen.dart';
+import '../../settings/presentation/settings_screen.dart';
 
 export 'main_map_screen.dart';
 

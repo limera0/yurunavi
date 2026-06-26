@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/bike_profile.dart';
-import '../models/user_profile.dart';
-import '../providers/app_providers.dart';
+import '../../../models/bike_profile.dart';
+import '../../../models/user_profile.dart';
+import '../../../providers/app_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
