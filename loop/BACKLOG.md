@@ -9,26 +9,9 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
   - C1(363efb0): _checkArrival 경로잔여거리+마지막step 복합조건으로 교체, _kArrivalM=20.0, 더미폴백 직선20m
   - C2(7883569): _ArrivalPhase {guiding,arrivedHold,stopReady} 도입, _arrived→_phase 전환, _showArrivalDialog 호출 제거, 상단카드 arrivedHold 분기('목적지 도착' 골격), analyze No issues
   - 라이딩검증: 마지막 회전 후 20m 이내 → 상단카드 '목적지 도착' 전환 + 정차 2초 후 카운트다운 10→0 자동종료 or '지금 종료' 버튼 확인 → PASS 시 main 머지
-  - C3(✓ pending): 정차게이트/카운트다운/종료버튼 — analyze PASS, auditor 7/7 PASS
-  - C4(POI/TTS) 미착수
-- [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
-  - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
-  - 커밋 분할 (각 단일파일·1논리·analyze 게이트):
-    - [x] 커밋1: map_providers.dart — locationStreamProvider(StreamProvider) 추가, **ref.keepAlive() 포함** ✓ f3ae69b
-      (설정값: AndroidSettings bestForNavigation / 1000ms / distanceFilter:0 / fgNotificationConfig)
-    - [x] 커밋2: main_map_screen.dart:193 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ dcf6019
-      (주의: Riverpod 3에서 StreamProvider.stream 없음 → listenManual 사용. _locationSub 타입 ProviderSubscription으로 변경, dispose: cancel→close)
-    - [x] 커밋3: nav_screen.dart:232 — getPositionStream → ref.listenManual(locationStreamProvider) 구독 전환 ✓ 7aae78a
-      (note: driving_screen.dart:97 잔존 — RECON-manifest 확정 dead code, 범위 밖)
-    - [x] 커밋4: splash_screen.dart — ConsumerStatefulWidget 전환 + locationStreamProvider 워밍업 구독 ✓ b1fefc1
-    - [x] 커밋5a: splash_screen.dart — initState listenManual 제거 → 권한 granted 후 구독 ✓ c39c5d6
-    - [x] 커밋5b: map_providers.dart — locationStreamProvider 권한 방어 (async* + checkPermission 게이트) ✓ a9b859a
-    - [x] 커밋6: map_providers.dart — 권한 게이트 견고화 (denied→requestPermission, 미승인 keepAlive 전 return) ✓ e875da5
-    - [x] 회귀픽스: AndroidManifest.xml — WAKE_LOCK 권한 추가 (enableWakeLock:true 대응) ✓ a9ba52f
-  - 객관검증: getPositionStream 호출처 grep 1곳(provider 내부) + analyze 통과
-  - 라이딩검증(필수, main 머지 전): 콜드 0km/h 소멸 / 마커 1~2초 추종
-  - 주의: ref.watch 금지(중복구독) — ref.read().listen. geolocator import 삭제 금지(getLastKnownPosition/LocationPermission 사용).
-  - 선행조건: 없음
+  - C3(✓ 3de7887): 정차게이트/카운트다운/종료버튼 — analyze PASS, auditor 7/7 PASS
+  - C4(✓ 9a8b11c): TTS _arrivalAnnounced 1회 가드 + _arrivalPois POI 바인딩 — analyze PASS, auditor 7/7 PASS, 라이딩 대기
+  - RIDING_QUEUE 등록: feat/arrival-fix (2026-06-26)
 - [ ] **MARKER-FIX** (T3) nav 목적지 마커 화면고정 버그(증상2) ← **라이딩 대기** (커밋1: 6af8d7b, branch: phase2/marker-fix)
   - 근거: RECON_marker.md — nav가 MapLibre 위 FlutterMap 오버레이(initialCenter 고정)에 마커를 얹어 카메라 미추종
   - 커밋1 완료: FlutterMap 오버레이 제거 → 목적지·경유지를 MapLibre 네이티브 Symbol로 전환 (analyze PASS, code-auditor PASS)
@@ -77,14 +60,6 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 - [x] **TTS-PACK** (T2/설계) 음성안내 팩 구조 모듈화 ✓ 2026-06-16
   - 산출물: VoicePackService + default_ko.json, nav_screen 8곳 재배선, main 머지 완료
   - SPEC §4 전 항목 PASS + analyze No issues
-- [ ] **LOC-UNIFY** (설계+T2) 위치 파이프라인 통합 + 시작 워밍업
-  - SPEC: loop/SPEC_location.md (필독, 우선)
-  - 스코프: 분산된 getPositionStream 3곳 → 단일 위치 소스(provider)로 통합 + 앱 시작 워밍업
-  - 코드 검증(객관): getPositionStream 호출처가 1곳 / analyze 통과
-  - 실세계 검증(라이딩): 콜드 0km/h 소멸, 마커 추종 — 코드 통과해도 main 머지는 라이딩 후
-  - 선행조건: 없음 (RECON_1hz로 원인·설정값 확정 2026-06-17)
-  - 주의: SPEC §3 미확정값 임의 결정 금지. 모호하면 BACKLOG에 질문 남기고 중단.
-
 ## RIDING_QUEUE (구현 완료 · 라이딩 검증 대기 · main 머지 금지)
 phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-17 확인).
 - [ ] type18 아이콘 반전 + type17 불일치 (65528b7) — 카드 아이콘 방향 육안 확인
@@ -95,6 +70,10 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
 - [ ] T3 2단 안내 카드 재설계 — 미착수, 라이딩 가능 세션에서
 
 ## DONE (main 반영 완료)
+- **LOC-UNIFY** (T3) ✓ 2026-06-24 (merge abced22) — 위치 파이프라인 통합 + 워밍업 + WAKE_LOCK
+  - 커밋: f3ae69b/dcf6019/7aae78a/b1fefc1/c39c5d6/a9b859a/e875da5/a9ba52f → merge abced22
+  - locationStreamProvider(map_providers.dart) 단일 소스, listenManual 전환, 권한 게이트, WAKE_LOCK 추가
+  - 라이딩검증 완료(merge 시 확인): 콜드 0km/h 소멸, 마커 1~2초 추종
 - **RECON-locunify-plan** (RECON) ✓ 2026-06-17 — loop/RECON_locunify_plan.md
   - locationStreamProvider 위치(map_providers.dart), 전환 file:line, 3커밋 분할안, T3 확정
 - **RECON-heading** (RECON) ✓ 2026-06-17 — loop/RECON_reroute.md §D
