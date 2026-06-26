@@ -27,8 +27,7 @@ import '../../settings/providers/settings_providers.dart';
 /// The real position arrives from the GPS stream below.
 const LatLng _kInitialMapView = LatLng(37.5665, 126.9780);
 
-// ignore: unused_field
-enum _ArrivalPhase { guiding, arrivedHold, stopReady }
+enum _ArrivalPhase { guiding, arrivedHold }
 
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
@@ -98,9 +97,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 도착 감지
   _ArrivalPhase _phase = _ArrivalPhase.guiding;
   static const _kArrivalM = 20.0; // 경로잔여거리 도착 판정 임계값(m)
-  int _countdownSec = 0;
-  Timer? _countdownTimer;
-  DateTime? _parkGateAt;
+  static const _kGeofenceM   = 30.0;
+  static const _kExitSpeedKmh = 30.0;
+  bool _canExit = false;
   bool _arrivalAnnounced = false;
   List<({String name, String type})> _arrivalPois = [];
 
@@ -203,7 +202,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
-    _countdownTimer?.cancel();
     _speedTicker?.cancel();
     _locationSub?.close();
     _pulseCtrl.dispose();
@@ -374,7 +372,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
 
     _checkArrival(loc);
-    _checkStopGate(parked);
+    _checkArrivedGeofence(loc);
     if (_phase == _ArrivalPhase.guiding && _routePoints.length >= 2) {
       _checkOffRoute(loc);
       _updateStepByDistance(loc);
@@ -581,40 +579,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  void _checkStopGate(bool parked) {
-    if (_phase == _ArrivalPhase.arrivedHold) {
-      if (parked && !_moving && _speedKmh < 1.0) {
-        _parkGateAt ??= DateTime.now();
-        if (DateTime.now().difference(_parkGateAt!).inSeconds >= 2) {
-          _parkGateAt = null;
-          _countdownTimer?.cancel();
-          setState(() {
-            _phase = _ArrivalPhase.stopReady;
-            _countdownSec = 10;
-          });
-          _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-            if (!mounted) { _countdownTimer?.cancel(); return; }
-            if (_countdownSec <= 1) {
-              _countdownTimer?.cancel();
-              _countdownTimer = null;
-              setState(() => _countdownSec = 0);
-              if (mounted) Navigator.of(context).pop();
-            } else {
-              setState(() => _countdownSec--);
-            }
-          });
-        }
-      } else {
-        _parkGateAt = null;
-      }
-    } else if (_phase == _ArrivalPhase.stopReady) {
-      if (_moving || _speedKmh >= 3.0) {
-        _countdownTimer?.cancel();
-        _countdownTimer = null;
-        _parkGateAt = null;
-        setState(() => _phase = _ArrivalPhase.arrivedHold);
-      }
+  void _checkArrivedGeofence(LatLng loc) {
+    if (_phase != _ArrivalPhase.arrivedHold) return;
+    final dest = widget.destination;
+    if (dest == null) return;
+
+    final dist = _distanceM(loc, dest);
+
+    if (dist > _kGeofenceM) {
+      setState(() {
+        _phase = _ArrivalPhase.guiding;
+        _canExit = false;
+        _arrivalAnnounced = false;
+      });
+      _reroute(loc);
+      return;
     }
+
+    final can = _speedKmh <= _kExitSpeedKmh;
+    if (can != _canExit) setState(() => _canExit = can);
   }
 
   void _onArrivedHoldEntered(LatLng dest) {
@@ -1171,12 +1154,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 하단 패널 (ETA 바 / stopReady 종료 버튼) ──────────────────────────
+          // ── 하단 패널 (ETA 바 / 지오펜스 종료 버튼) ──────────────────────────
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
-            child: _phase == _ArrivalPhase.stopReady
+            child: _phase == _ArrivalPhase.arrivedHold && _canExit
                 ? Container(
                     decoration: BoxDecoration(
                       color: cs.surface,
@@ -1197,7 +1180,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             ),
                             alignment: Alignment.center,
                             child: Text(
-                              '지금 종료 ($_countdownSec)',
+                              '지금 종료',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 22,
