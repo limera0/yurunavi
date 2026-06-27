@@ -73,18 +73,27 @@ class NavStateNotifier extends Notifier<NavigationState?> {
   }
 
   Future<void> _seed() async {
-    final last = await Geolocator.getLastKnownPosition();
-    if (last == null || state != null) return;
-    _pos = LatLng(last.latitude, last.longitude);
-    _fixAt = DateTime.now();
-    state = NavigationState(
-      pos: _pos!,
-      speedKmh: 0,
-      moving: false,
-      headingDeg: null,
-      firstFix: false,
-      fixAt: _fixAt!,
-    );
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm != LocationPermission.whileInUse &&
+          perm != LocationPermission.always) {
+        return;
+      }
+      final last = await Geolocator.getLastKnownPosition();
+      if (last == null || state != null) return;
+      _pos = LatLng(last.latitude, last.longitude);
+      _fixAt = DateTime.now();
+      state = NavigationState(
+        pos: _pos!,
+        speedKmh: 0,
+        moving: false,
+        headingDeg: null,
+        firstFix: false,
+        fixAt: _fixAt!,
+      );
+    } catch (_) {
+      return;
+    }
   }
 
   void _onFix(Position pos) {
