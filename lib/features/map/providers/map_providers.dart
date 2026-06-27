@@ -62,10 +62,7 @@ class SavedRoutesNotifier extends AsyncNotifier<List<SavedRoute>> {
 // ── Location ──────────────────────────────────────────────────────────────────
 
 final locationStreamProvider = StreamProvider<Position>((ref) async* {
-  var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
+  final permission = await Geolocator.checkPermission();
   if (permission != LocationPermission.whileInUse &&
       permission != LocationPermission.always) {
     return;
