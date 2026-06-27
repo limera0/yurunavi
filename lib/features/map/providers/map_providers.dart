@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../models/poi.dart';
+import '../../navigation/providers/nav_state_provider.dart';
 import '../../../models/saved_place.dart';
 import '../../../models/saved_route.dart';
 import '../../../models/user_profile.dart';
@@ -85,13 +86,7 @@ final locationStreamProvider = StreamProvider<Position>((ref) async* {
 });
 
 final currentLocationProvider =
-    NotifierProvider<_LatLngNotifier, LatLng?>(_LatLngNotifier.new);
-
-class _LatLngNotifier extends Notifier<LatLng?> {
-  @override
-  LatLng? build() => null;
-  void set(LatLng loc) => state = loc;
-}
+    Provider<LatLng?>((ref) => ref.watch(navStateProvider)?.pos);
 
 // ── Map Interaction (pageLayout.md: MapInteractionNotifier) ───────────────────
 
