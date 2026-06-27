@@ -79,7 +79,16 @@ class NavStateNotifier extends Notifier<NavigationState?> {
           perm != LocationPermission.always) {
         return;
       }
-      final last = await Geolocator.getLastKnownPosition();
+if (state != null) return; // 이미 첫 fix가 채웠으면 seed 불필요
+      // cold start: 캐시(getLastKnownPosition)가 null이면 능동 fix(getCurrentPosition).
+      // getPositionStream은 위성 lock까지 침묵하므로, 첫 좌표를 OS에 능동 요청한다.
+      var last = await Geolocator.getLastKnownPosition();
+      last ??= await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium, // 빠른 첫 fix 우선
+          timeLimit: Duration(seconds: 10),
+        ),
+      ).catchError((_) => null);
       if (last == null || state != null) return;
       _pos = LatLng(last.latitude, last.longitude);
       _fixAt = DateTime.now();
