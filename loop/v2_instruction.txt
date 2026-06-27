@@ -1,0 +1,6 @@
+추가 지시: SPEC_arrival_v2.md 전부 구현. 단일 커밋. 
+(1) 상수 _kGeofenceM=30.0, _kExitSpeedKmh=30.0 추가. 
+(2) enum에서 stopReady 제거, bool _canExit=false 추가. 
+(3) _countdownSec/_countdownTimer/_parkGateAt 필드+dispose cancel 삭제. 
+(4) _checkStopGate 함수를 SPEC §5 _checkArrivedGeofence로 완전 교체, 호출부 :377 인자 loc로 교체(parked 변수 자체는 삭제 금지). 
+(5) 하단 종료버튼 노출조건을 _phase==arrivedHold && _canExit로, 텍스트를 '지금 종료'로(카운터 제거). 도착카드/_checkArrival/_onArrivedHoldEntered는 손대지 말 것. flutter analyze No issues + auditor 7/7 후 단일커밋.

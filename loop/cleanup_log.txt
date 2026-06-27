@@ -1,0 +1,13 @@
+C3: 7/7 PASS.
+
+---
+
+全タスク完了。
+
+| チェックポイント | 内容 | 結果 |
+|---|---|---|
+| **C1** `chore(cleanup): remove dead legacy screens` | driving/intro/main_map shim/route_options 削除 | 7/7 PASS |
+| **C2** `refactor(structure): move settings/profile into features tree` | profile→features/profile/presentation, settings→features/settings/presentation、import 7箇所修正、lib/screens/ 削除 | 7/7 PASS |
+| **C3** `chore(cleanup): remove committed backup file` | native_engine.dart.bak 削除 | 7/7 PASS |
+
+`flutter analyze` は終始 2 info (既存の deprecated_member_use) のみ、新エラー 0。`route_service.dart` / `routing_service.dart` / `settings_providers.dart` は一切未変更。

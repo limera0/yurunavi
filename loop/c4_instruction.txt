@@ -1,0 +1,5 @@
+추가 지시: SPEC_arrival.md C4만 구현. 
+(1) TTS: speak('arrival')이 arrivedHold 진입 시 정확히 1회만 발화하도록 _phase 가드 추가(중복 발화 방지). 
+(2) POI: _fetchNearbyPois 결과를 신규 필드 _arrivalPois에 담아 C2에서 만든 도착카드 리스트에 바인딩(주유소/편의점/식당 표시). 
+조회 시작은 arrivedHold 진입 즉시(현행 타이밍 유지). 상태머신/카운트다운/도착감지 로직은 손대지 말 것. 
+analyze 후 단일커밋.

@@ -408,9 +408,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // ── Map tap ───────────────────────────────────────────────────────────────
 
 Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
-    // 출발점: navState 첫 fix(_origin) 우선, 없으면 캐시 좌표(_lastKnown) 폴백.
-    // cold start에서 navState가 아직 null이어도 캐시로 탐색 가능 (298·794와 동일 패턴).
-    // stream 첫 fix가 들어오면 _origin 갱신 → 재탐색으로 보정됨.
     final origin = _origin ?? _lastKnown;
     if (origin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -420,7 +417,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         ),
       );
       return;
-    }
     }
     final interaction = ref.read(mapInteractionProvider);
     if (interaction.isLoading) return;

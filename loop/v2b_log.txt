@@ -1,0 +1,1 @@
+완료. `_kExitBtnRadiusM = 8.0` 상수 추가, `_canExit` 조건에 `dist <= 8m` 가드 추가, 오버슈트 분기 무변경 — code-auditor 7/7 PASS 후 단일 커밋(`4332804`).
