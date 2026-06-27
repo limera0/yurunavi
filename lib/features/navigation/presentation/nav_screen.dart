@@ -258,12 +258,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
     _voiceStepIdx = -1;
-    if (widget.destination != null) {
-      ref.read(routeProgressProvider.notifier).setRoute(
-        points: _routePoints,
-        maneuvers: maneuvers,
-        destination: widget.destination!,
-      );
+if (widget.destination != null) {
+      // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
+      // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(routeProgressProvider.notifier).setRoute(
+          points: _routePoints,
+          maneuvers: maneuvers,
+          destination: widget.destination!,
+        );
+      });
     }
   }
 
