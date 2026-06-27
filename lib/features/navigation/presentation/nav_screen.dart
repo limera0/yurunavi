@@ -23,6 +23,7 @@ import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
+import '../providers/nav_state_provider.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -63,26 +64,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
 
-  // Nullable until the first real GPS fix arrives — prevents the position
-  // marker from rendering at a hardcoded mock location.
-  LatLng? _currentPos;
-  double _speedKmh = 0;
   bool _isManualMode = false;
   Timer? _recenterTimer;
-  ProviderSubscription<AsyncValue<Position>>? _locationSub;
-
-  // ZUPT 링버퍼: 최근 12초 GPS fix {lat, lon, t, acc} (1Hz·5초 fix 양쪽 호환)
-  final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
-  DateTime? _lastSpeedAt; // 적응 갱신 타이밍
-  bool _moving = false; // 도플러+히스테리시스 이동 상태
-  bool _firstFixReceived = false; // 콜드스타트: 첫 GPS fix 수신 전 "GPS 검색 중" 표시
-
-  // 200ms 속도 외삽 ticker (Organic Maps 패턴): 직전 2개 실측 fix의
-  // 도플러 속도(m/s)·수신시각·위치를 보관해 fix 사이를 선형 외삽한다.
-  Timer? _speedTicker;
-  double? _vPrev, _vCur;        // 직전/최근 fix 도플러 속도 (m/s)
-  DateTime? _vPrevAt, _vCurAt;  // 직전/최근 fix 수신시각 (pos.timestamp 불신 → 수신시각 기반)
-  LatLng? _vPrevPos, _vCurPos;  // 직전/최근 fix 위치 (점프 가드용)
+  ProviderSubscription<NavigationState?>? _locationSub;
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -163,12 +147,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       });
       return;
     }
-    // Seoul flicker 방지: GPS fix가 이미 있으면 initState에서 즉시 _currentPos 초기화
-    final initLoc = ref.read(currentLocationProvider);
-    if (initLoc != null) {
-      _currentPos = initLoc;
-      _firstFixReceived = true;
-    }
     _startLocation();
     _loadRawStyle();
   }
@@ -190,7 +168,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
-    _speedTicker?.cancel();
     _locationSub?.close();
     _pulseCtrl.dispose();
     _tts?.stop();
@@ -200,170 +177,37 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _startLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) return;
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
+    final perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return;
+    }
 
-    // GPS 선점 기동: MainMapScreen 스트림이 이미 fix를 받아뒀으면 즉시 숫자 모드
-    // (하드웨어 GPS는 이미 워밍업됐으므로 NavScreen 스트림도 빠르게 fix를 받는다)
+    // 이미 알려진 위치가 있으면 카메라 이동
     final knownLoc = ref.read(currentLocationProvider);
     if (knownLoc != null && mounted) {
-      setState(() {
-        _currentPos = knownLoc;
-        _firstFixReceived = true;
-      });
       _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(knownLoc), _navZoom));
     }
 
-    // GPS 콜드스타트 전 캐시된 위치로 즉시 카메라 이동 (knownLoc 없을 때 폴백)
-    if (knownLoc == null) {
-      try {
-        final last = await Geolocator.getLastKnownPosition();
-        if (last != null && mounted && _currentPos == null) {
-          final loc = LatLng(last.latitude, last.longitude);
-          setState(() => _currentPos = loc);
-          _mlCtrl?.animateCamera(
-            ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom),
-          );
-        }
-      } catch (_) {}
-    }
-
-    _locationSub = ref.listenManual<AsyncValue<Position>>(
-      locationStreamProvider,
+    // navStateProvider 구독 (운동학 소비 + 카메라 + 경로/도착)
+    _locationSub = ref.listenManual<NavigationState?>(
+      navStateProvider,
       (_, next) {
-        next.whenData(_onPosition);
+        if (next == null || !mounted) return;
+        final loc = next.pos;
+        if (!_isManualMode) _recenter(loc, speedKmh: next.speedKmh);
+        if (next.headingDeg != null && next.speedKmh > 2 && _styleLoaded) {
+          _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(next.headingDeg!));
+        }
+        _ensureLocationMarker();
+        _checkArrival(loc);
+        if (!_arrived && _routePoints.length >= 2) {
+          _checkOffRoute(loc);
+          _updateStepByDistance(loc);
+        }
       },
+      fireImmediately: true,
     );
-
-    // 200ms 속도 외삽 ticker 가동 (fix 사이 부드러운 추종 + staleness 흡수)
-    _speedTicker?.cancel();
-    _speedTicker = Timer.periodic(const Duration(milliseconds: 200), (_) => _tickSpeed());
-  }
-
-  /// 직전 2개 실측 fix로부터 현재 속도를 선형 외삽한다 (Organic Maps 패턴).
-  /// fix 사이 200ms 간격으로 속도계를 갱신하고, fix 두절 시 0으로 수렴시킨다.
-  void _tickSpeed() {
-    if (!mounted) return;
-    final curAt = _vCurAt;
-    final vCur = _vCur;
-    if (curAt == null || vCur == null) return;
-
-    final sinceFix = DateTime.now().difference(curAt).inMilliseconds;
-
-    // staleness: 8초간 새 fix 없으면 정차로 간주 → 0 (고착 차단)
-    if (sinceFix > 8000) {
-      if (_speedKmh != 0.0 || _moving) {
-        setState(() { _speedKmh = 0.0; _moving = false; });
-      }
-      return;
-    }
-    // 빠른 정차: fix가 1500ms 이상 오지 않고 posBuffer가 정지 기준이면 표시만 0
-    // (_moving은 건드리지 않음 — 히스테리시스는 _onPosition 책임)
-    if (sinceFix > 1500 && _calcParkState().parked) {
-      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
-      return;
-    }
-    // ZUPT 존중: 히스테리시스 정차 판정이면 0 유지
-    if (!_moving) {
-      if (_speedKmh != 0.0) setState(() => _speedKmh = 0.0);
-      return;
-    }
-
-    final measured = (vCur * 3.6).clamp(0.0, 270.0);
-    final vPrev = _vPrev;
-    final prevAt = _vPrevAt;
-    // 직전 fix 부재(첫 fix) → 외삽 불가, 마지막 실측 표시
-    if (vPrev == null || prevAt == null) {
-      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
-      return;
-    }
-
-    final dtFix = curAt.difference(prevAt).inMilliseconds;
-    final jumpM = (_vPrevPos != null && _vCurPos != null)
-        ? _distanceM(_vPrevPos!, _vCurPos!) : 0.0;
-    final avgMs = dtFix > 0 ? jumpM / (dtFix / 1000.0) : double.maxFinite;
-    // 가드: timestamp 역전 / 큰 fix 간격 / GPS 점프 / 비현실 평균속도 → 보간 OFF
-    if (dtFix <= 0 || dtFix > 6500 || jumpM > 150.0 || avgMs > 75.0) {
-      if ((_speedKmh - measured).abs() > 0.05) setState(() => _speedKmh = measured);
-      return;
-    }
-
-    // 선형 외삽: v = v2 + (기울기)*경과시간, 0~75 m/s clamp
-    final slope = (vCur - vPrev) / dtFix; // m/s per ms
-    final v = (vCur + slope * sinceFix).clamp(0.0, 75.0);
-    final kmh = v * 3.6;
-    if ((_speedKmh - kmh).abs() > 0.05) setState(() => _speedKmh = kmh);
-  }
-
-  void _onPosition(Position pos) {
-    final loc = LatLng(pos.latitude, pos.longitude);
-    ref.read(currentLocationProvider.notifier).set(loc);
-    if (!_isManualMode) _recenter(loc);
-
-    final now = DateTime.now();
-
-    // ZUPT: 매 fix를 링버퍼에 push (적응 throttle 전)
-    _posBuffer.add((lat: pos.latitude, lon: pos.longitude, t: now, acc: pos.accuracy));
-    _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > 12);
-
-    // 적응 갱신: ≤10 km/h → 2Hz(500ms), 나머지 → 1Hz(1000ms)
-    final intervalMs = _speedKmh <= 10.0 ? 500 : 1000;
-    final elapsedMs = _lastSpeedAt == null
-        ? intervalMs
-        : now.difference(_lastSpeedAt!).inMilliseconds;
-
-    if (elapsedMs < intervalMs) {
-      setState(() {
-        _currentPos = loc;
-        if (!_firstFixReceived) _firstFixReceived = true;
-      });
-      _ensureLocationMarker(); // unawaited — ③
-      return;
-    }
-    _lastSpeedAt = now;
-
-    // 도플러+히스테리시스 속도 게이트 (위치 군집을 ZUPT 앵커로 사용)
-    final double d = (pos.speed.isNaN || pos.speed < 0) ? 0.0 : pos.speed; // m/s
-
-    final (:parked, :bufRadius, :parkThresh) = _calcParkState();
-
-    if (parked) {
-      _moving = false;
-    } else if (d >= 2.0) {
-      _moving = true;
-    } else if (d < 1.5) {
-      _moving = false;
-    }
-    // 1.5 <= d < 2.0 (비주차): _moving 직전상태 유지 = 히스테리시스
-
-    // 외삽 ticker용 실측 fix 보관 (직전→2칸 시프트)
-    _vPrev = _vCur; _vPrevAt = _vCurAt; _vPrevPos = _vCurPos;
-    _vCur = d; _vCurAt = now; _vCurPos = loc;
-
-    final speedKmh = _moving ? d * 3.6 : 0.0;
-    setState(() {
-      _currentPos = loc;
-      _speedKmh = speedKmh;
-      if (!_firstFixReceived) _firstFixReceived = true;
-    });
-    _ensureLocationMarker(); // unawaited — ③
-
-    debugPrint('SPD d=${d.toStringAsFixed(2)} r=${bufRadius.toStringAsFixed(1)} '
-               'thr=${parkThresh.toStringAsFixed(1)} parked=$parked mov=$_moving '
-               '=> ${speedKmh.toStringAsFixed(1)}km/h');
-
-    // 진행 방향에 맞춰 지도 회전 (heading ≥ 0 = 유효값, 속도 > 2 km/h)
-    // maplibre: bearing 0=북, pos.heading 0=북 → 부호 반전 불필요 (flutter_map과 반대)
-    if (pos.heading >= 0 && _speedKmh > 2.0 && _styleLoaded) {
-      _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(pos.heading));
-    }
-
-    _checkArrival(loc);
-    if (!_arrived && _routePoints.length >= 2) {
-      _checkOffRoute(loc);
-      _updateStepByDistance(loc);
-    }
   }
 
   void _computeStepEndDistances() {
@@ -460,7 +304,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
         _offRouteDebounce = null;
         // 타이머 발화 시점의 현재 위치로 재탐색 (생성 시점 loc보다 최신)
-        final current = _currentPos;
+        final current = ref.read(navStateProvider)?.pos;
         if (current != null) _reroute(current);
       });
     } else {
@@ -604,23 +448,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 2 * r * asin(sqrt(h));
   }
 
-  /// posBuffer 군집 반경으로 정차 여부를 판정한다.
-  /// 샘플 부족(< 3)이면 parked=false 반환.
-  ({bool parked, double bufRadius, double parkThresh}) _calcParkState() {
-    if (_posBuffer.length < 3) {
-      return (parked: false, bufRadius: 0.0, parkThresh: 6.0);
-    }
-    final cLat = _posBuffer.map((e) => e.lat).reduce((a, b) => a + b) / _posBuffer.length;
-    final cLon = _posBuffer.map((e) => e.lon).reduce((a, b) => a + b) / _posBuffer.length;
-    final bufRadius = _posBuffer
-        .map((e) => _distanceM(LatLng(cLat, cLon), LatLng(e.lat, e.lon)))
-        .reduce((a, b) => a > b ? a : b);
-    final accs = _posBuffer.map((e) => e.acc).toList()..sort();
-    final medAcc = accs[accs.length ~/ 2];
-    final parkThresh = (6.0 > 1.2 * medAcc) ? 6.0 : 1.2 * medAcc;
-    return (parked: bufRadius < parkThresh, bufRadius: bufRadius, parkThresh: parkThresh);
-  }
-
   void _showArrivalDialog(List<({String name, String type})> pois) {
     if (!mounted) return;
     showDialog<void>(
@@ -717,9 +544,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
-  void _recenter(LatLng loc, {bool animate = false}) {
+  void _recenter(LatLng loc, {bool animate = false, double speedKmh = 0}) {
     if (!_styleLoaded) return;
-    final target = _zoomForSpeed(_speedKmh);
+    final target = _zoomForSpeed(speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
@@ -771,7 +598,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Future<void> _ensureLocationMarker() async {
     final c = _mlCtrl;
     if (c == null || !_styleLoaded) return;
-    final p = _currentPos;
+    final p = ref.read(navStateProvider)?.pos;
     if (p == null) return;
     final geo = _toMl(p);
     if (_locMarker == null) {
@@ -803,14 +630,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isManualMode = true);
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
-      final pos = _currentPos;
       setState(() => _isManualMode = false);
-      if (pos != null) _recenter(pos, animate: true);
+      final pos = ref.read(navStateProvider)?.pos;
+      if (pos != null) _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final navState = ref.watch(navStateProvider);
     final step = _steps[_stepIdx];
     // 카드에 표시할 "다가오는 회전" — 마지막 step이면 step 자신(목적지)으로 폴백
     final upcoming = _stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1] : step;
@@ -848,7 +676,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             child: ml.MapLibreMap(
               styleString: _styleJson!,
               initialCameraPosition: ml.CameraPosition(
-                target: _toMl(_currentPos ?? _kInitialMapView),
+                target: _toMl(ref.read(navStateProvider)?.pos ?? _kInitialMapView),
                 zoom: 15,
               ),
               rotateGesturesEnabled: false, // North-up 고정 (바이크 거치)
@@ -865,7 +693,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             child: FlutterMap(
               options: MapOptions(
                 backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
-                initialCenter: _currentPos ?? _kInitialMapView,
+                initialCenter: ref.read(navStateProvider)?.pos ?? _kInitialMapView,
                 initialZoom: _navZoom,
                 interactionOptions: const InteractionOptions(
                   flags: InteractiveFlag.none,
@@ -1019,7 +847,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             top: MediaQuery.of(context).size.height * 0.30,
             child: ScaleTransition(
               scale: _pulseAnim,
-              child: _Speedometer(speedKmh: _speedKmh, firstFixReceived: _firstFixReceived),
+              child: _Speedometer(speedKmh: navState?.speedKmh ?? 0, firstFixReceived: navState?.firstFix ?? false),
             ),
           ),
 
@@ -1046,11 +874,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 _NavIconBtn(
                   icon: _isManualMode ? Icons.gps_fixed : Icons.my_location,
                   onTap: () {
-                    final pos = _currentPos;
+                    final pos = ref.read(navStateProvider)?.pos;
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(pos, animate: true);
+                    _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
                   },
                 ),
               ],
