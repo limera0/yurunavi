@@ -177,9 +177,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _startLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) return;
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
+    final perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return;
+    }
 
     // 이미 알려진 위치가 있으면 카메라 이동
     final knownLoc = ref.read(currentLocationProvider);
