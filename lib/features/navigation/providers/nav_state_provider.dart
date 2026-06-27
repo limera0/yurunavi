@@ -89,7 +89,7 @@ if (state != null) return;
         speedKmh: 0,
         moving: false,
         headingDeg: null,
-        firstFix: false,
+        firstFix: true,
         fixAt: _fixAt!,
       );
     } catch (_) {
