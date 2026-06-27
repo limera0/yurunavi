@@ -35,10 +35,14 @@ class ManeuverStep {
   final String instruction;
   /// 이 구간 거리 (km).
   final double distanceKm;
+  final int beginShapeIdx;   // 전역 인덱스 (leg 오프셋 적용 후)
+  final int endShapeIdx;     // 전역 인덱스
   const ManeuverStep({
     required this.type,
     required this.instruction,
     required this.distanceKm,
+    this.beginShapeIdx = 0,
+    this.endShapeIdx = 0,
   });
 }
 
@@ -313,16 +317,12 @@ class RoutingService {
       );
       final realisticMins = (km / _courseSpeeds[i] * 60).round();
 
-      // maneuvers 수집 — 전 leg 이어붙임
-      final maneuvers = <ManeuverStep>[];
-      for (final leg in legs) {
-        for (final m in (leg['maneuvers'] as List? ?? [])) {
-          maneuvers.add(ManeuverStep(
-            type: (m['type'] as num?)?.toInt() ?? 0,
-            instruction: (m['instruction'] as String?) ?? '',
-            distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
-          ));
-        }
+      final maneuvers = _collectManeuvers(legs);
+      if (maneuvers.isNotEmpty) {
+        dev.log(
+          'shape_index check: lastEnd=${maneuvers.last.endShapeIdx} pts=${pts.length}',
+          name: 'RoutingService',
+        );
       }
 
       dev.log(
@@ -380,15 +380,12 @@ class RoutingService {
               );
               // ETA 는 기존과 동일하게 _courseSpeeds[0] 로 재계산 (회귀 방지 핵심)
               final realisticMins = (km / _courseSpeeds[0] * 60).round();
-              final maneuvers = <ManeuverStep>[];
-              for (final leg in legs) {
-                for (final m in (leg['maneuvers'] as List? ?? [])) {
-                  maneuvers.add(ManeuverStep(
-                    type: (m['type'] as num?)?.toInt() ?? 0,
-                    instruction: (m['instruction'] as String?) ?? '',
-                    distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
-                  ));
-                }
+              final maneuvers = _collectManeuvers(legs);
+              if (maneuvers.isNotEmpty) {
+                dev.log(
+                  'shape_index check (balanced): lastEnd=${maneuvers.last.endShapeIdx} pts=${pts.length}',
+                  name: 'RoutingService',
+                );
               }
               results[0] = RouteResult(
                 points: pts,
@@ -412,6 +409,30 @@ class RoutingService {
     }
 
     return results;
+  }
+
+  /// leg별 maneuvers를 전역 shape 인덱스로 변환해 수집.
+  /// Valhalla begin/end_shape_index는 leg 내부 기준 → leg 누적 오프셋을 더한다.
+  /// 오프셋 누적은 _extractPoints의 skip(1) 병합과 정확히 대응(leg당 points-1).
+  static List<ManeuverStep> _collectManeuvers(List legs) {
+    final out = <ManeuverStep>[];
+    int shapeOffset = 0;
+    for (final leg in legs) {
+      for (final m in (leg['maneuvers'] as List? ?? [])) {
+        final b = (m['begin_shape_index'] as num?)?.toInt() ?? 0;
+        final e = (m['end_shape_index'] as num?)?.toInt() ?? 0;
+        out.add(ManeuverStep(
+          type: (m['type'] as num?)?.toInt() ?? 0,
+          instruction: (m['instruction'] as String?) ?? '',
+          distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
+          beginShapeIdx: shapeOffset + b,
+          endShapeIdx: shapeOffset + e,
+        ));
+      }
+      final legPts = _decodePolyline6(leg['shape'] as String? ?? '');
+      shapeOffset += legPts.isEmpty ? 0 : legPts.length - 1;
+    }
+    return out;
   }
 
   static List<LatLng> _extractPoints(List legs) {
