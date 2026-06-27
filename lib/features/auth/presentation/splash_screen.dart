@@ -61,6 +61,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       await Permission.location.request();
     }
     if ((await Permission.location.status).isGranted) {
+      // 첫 실행: 권한 denied 상태로 이미 닫힌(죽은) 스트림을 폐기 → 권한 있는 상태로 재생성.
+      ref.invalidate(locationStreamProvider);
       ref.listenManual(locationStreamProvider, (_, _) {});
     }
     if (!mounted) return;
@@ -68,7 +70,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       await Permission.notification.request();
     }
   }
-
   void _goToMain() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
