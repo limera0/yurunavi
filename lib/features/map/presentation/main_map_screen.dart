@@ -407,8 +407,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // ── Map tap ───────────────────────────────────────────────────────────────
 
-  Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
-    final origin = _origin;
+Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
+    final origin = _origin ?? _lastKnown;
     if (origin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -494,7 +494,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   }
 
   void _applyDestination(LatLng dest) {
-    final origin = _origin;
+    final origin = _origin ?? _lastKnown;
     if (origin == null) return;
     final dist = _haversineKm(origin, dest);
     ref.read(mapInteractionProvider.notifier).setDestination(dest, dist);
@@ -646,7 +646,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final state = ref.read(mapInteractionProvider);
     final dest = state.destination;
     if (dest == null) return;
-    final origin = _origin;
+    final origin = _origin ?? _lastKnown;
     // 최근 경로 저장
     if (origin != null) {
       ref.read(recentRoutesProvider.notifier).add(RecentRoute(
@@ -695,7 +695,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     }
 
     // 저장된 경로가 없을 때만 fallback으로 Valhalla 호출
-    final origin = _origin;
+    final origin = _origin ?? _lastKnown;
     final dest = state.destination;
     if (origin == null || dest == null) return;
 

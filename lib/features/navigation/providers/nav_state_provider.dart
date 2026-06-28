@@ -79,6 +79,7 @@ class NavStateNotifier extends Notifier<NavigationState?> {
           perm != LocationPermission.always) {
         return;
       }
+if (state != null) return; 
       final last = await Geolocator.getLastKnownPosition();
       if (last == null || state != null) return;
       _pos = LatLng(last.latitude, last.longitude);
@@ -88,7 +89,7 @@ class NavStateNotifier extends Notifier<NavigationState?> {
         speedKmh: 0,
         moving: false,
         headingDeg: null,
-        firstFix: false,
+        firstFix: true,
         fixAt: _fixAt!,
       );
     } catch (_) {

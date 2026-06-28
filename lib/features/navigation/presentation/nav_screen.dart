@@ -24,6 +24,7 @@ import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/nav_state_provider.dart';
+import '../providers/route_progress_provider.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -73,16 +74,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
-  static const _kArrivalRadiusM = 30.0; // 목적지 도달 판정 반경
 
-  // 음성 안내 + GPS 거리 기반 자동 진행
+  // 음성 안내
   FlutterTts? _tts;
   VoicePackService? _vps;
-  int _lastAnnouncedIdx = -1;      // 중복 발화 방지
-  List<double> _stepEndDistM = []; // 각 step 종점까지의 누적 거리(m)
-  bool _pre500 = false;
-  bool _pre300 = false;
-  bool _pre50 = false;
+  int _lastAnnouncedIdx = -1;  // 중복 발화 방지 (_announceStep용)
+  int _voiceStepIdx = -1;
+  bool _said500 = false, _said300 = false, _said50 = false;
+
+  // progress 구독
+  ProviderSubscription<RouteProgress?>? _progressSub;
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
@@ -91,7 +92,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
   bool _isRerouting = false;
   Timer? _offRouteDebounce;
-  static const _kOffRouteM = 20.0; // 이탈 판정 거리 (미터)
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
@@ -169,6 +169,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
     _locationSub?.close();
+    _progressSub?.close();
     _pulseCtrl.dispose();
     _tts?.stop();
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
@@ -189,7 +190,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(knownLoc), _navZoom));
     }
 
-    // navStateProvider 구독 (운동학 소비 + 카메라 + 경로/도착)
+    // navStateProvider 구독 — 카메라/속도만. 진행 파생은 progressSub에서.
     _locationSub = ref.listenManual<NavigationState?>(
       navStateProvider,
       (_, next) {
@@ -200,22 +201,63 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(next.headingDeg!));
         }
         _ensureLocationMarker();
-        _checkArrival(loc);
-        if (!_arrived && _routePoints.length >= 2) {
-          _checkOffRoute(loc);
-          _updateStepByDistance(loc);
-        }
       },
       fireImmediately: true,
     );
+
+    // routeProgressProvider 구독 — step/카드/TTS/도착/이탈
+    _progressSub = ref.listenManual<RouteProgress?>(
+      routeProgressProvider,
+      (_, prog) {
+        if (prog == null || !mounted) return;
+        setState(() {
+          _cardRemainingM = prog.distToNextTurnM;
+          _stepIdx = prog.activeStepIdx.clamp(0, _steps.length - 1);
+        });
+        _handleVoice(prog);
+        if (prog.arrived && !_arrived) {
+          _arrived = true;
+          _vps?.speak('arrival');
+          _fetchNearbyPois(widget.destination!).then((pois) {
+            if (mounted) _showArrivalDialog(pois);
+          });
+        }
+        if (prog.offRoute) {
+          _triggerReroute();
+        } else {
+          _offRouteDebounce?.cancel();
+          _offRouteDebounce = null;
+        }
+      },
+    );
   }
 
-  void _computeStepEndDistances() {
-    _stepEndDistM = [];
-    double cum = 0.0;
-    for (final step in _steps) {
-      cum += step.rawDistKm * 1000.0;
-      _stepEndDistM.add(cum);
+  void _handleVoice(RouteProgress prog) {
+    final step = prog.activeStepIdx;
+    final stepChanged = step != _voiceStepIdx;
+    if (stepChanged) _voiceStepIdx = step;
+    if (step + 1 >= _steps.length) return; // 마지막 = 도착, 턴 발화 없음
+    final dir = _steps[step].label;
+    final d = prog.distToNextTurnM;
+    if (stepChanged) {
+      _said500 = d <= 500;
+      _said300 = d <= 300;
+      _said50  = d <=  50;
+    }
+    if (d <= 500 && !_said500) {
+      _said500 = true;
+      debugPrint('YNAV_TTS thr=500 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_500', vars: {'direction': dir});
+    }
+    if (d <= 300 && !_said300) {
+      _said300 = true;
+      debugPrint('YNAV_TTS thr=300 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_300', vars: {'direction': dir});
+    }
+    if (d <=  50 && !_said50) {
+      _said50  = true;
+      debugPrint('YNAV_TTS thr=50 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_50',  vars: {'direction': dir});
     }
   }
 
@@ -227,105 +269,31 @@ class _NavScreenState extends ConsumerState<NavScreen>
             _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
             _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
           ];
-    _computeStepEndDistances();
     _stepIdx = 0;
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
-    _pre500 = false;
-    _pre300 = false;
-    _pre50 = false;
-  }
-
-  /// 현재 위치까지의 경로 누적 주행 거리 추정 (가장 가까운 경로 세그먼트까지)
-  double _traveledDistM(LatLng pos) {
-    if (_routePoints.length < 2) return 0.0;
-    double minDist = double.maxFinite;
-    int minIdx = 0;
-    for (int i = 0; i < _routePoints.length - 1; i++) {
-      final d = _segmentDistM(pos, _routePoints[i], _routePoints[i + 1]);
-      if (d < minDist) { minDist = d; minIdx = i; }
-    }
-    // 해당 세그먼트까지의 누적 거리
-    double traveled = 0.0;
-    for (int i = 0; i < minIdx; i++) {
-      traveled += _distanceM(_routePoints[i], _routePoints[i + 1]);
-    }
-    return traveled;
-  }
-
-  void _updateStepByDistance(LatLng loc) {
-    if (_stepIdx >= _steps.length - 1) return;
-    if (_stepEndDistM.isEmpty) return;
-    final traveled = _traveledDistM(loc);
-    final stepEnd = _stepIdx < _stepEndDistM.length ? _stepEndDistM[_stepIdx] : 0.0;
-    final remaining = (stepEnd - traveled).clamp(0.0, double.maxFinite);
-
-    // 카드 잔여 거리 실시간 갱신
-    setState(() => _cardRemainingM = remaining);
-
-    debugPrint('YNAV_GUIDE tick stepIdx=$_stepIdx total=${_steps.length} '
-        'remaining=${remaining.toStringAsFixed(0)} '
-        'cur=${_steps[_stepIdx].label} '
-        'upcoming=${_stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1].label : "DEST"}');
-
-    // 500m 예비 발화
-    if (remaining < 500 && !_pre500 && _stepIdx + 1 < _steps.length) {
-      _pre500 = true;
-      final direction = _steps[_stepIdx + 1].label;
-      _vps?.speak('approach_500', vars: {'direction': direction});
-    }
-    // 300m 예비 발화
-    if (remaining < 300 && !_pre300 && _stepIdx + 1 < _steps.length) {
-      _pre300 = true;
-      final direction = _steps[_stepIdx + 1].label;
-      _vps?.speak('approach_300', vars: {'direction': direction});
-    }
-    // 50m → 자동 진행
-    if (remaining < 50 && !_pre50) {
-      _pre50 = true;
-      final direction = (_stepIdx + 1 < _steps.length) ? _steps[_stepIdx + 1].label : '';
-      _vps?.speak('approach_50', vars: {'direction': direction});
-      _pre500 = false;
-      _pre300 = false;
-      setState(() => _stepIdx++);
-      debugPrint('YNAV_GUIDE advance → stepIdx=$_stepIdx label=${_steps[_stepIdx].label}');
-    }
-  }
-
-  void _checkOffRoute(LatLng loc) {
-    if (_isRerouting) return;
-    var minDist = double.maxFinite;
-    for (int i = 0; i < _routePoints.length - 1; i++) {
-      final d = _segmentDistM(loc, _routePoints[i], _routePoints[i + 1]);
-      if (d < minDist) minDist = d;
-    }
-    if (minDist > _kOffRouteM) {
-      // 디바운스: 3초 연속 이탈 확인 후 재탐색
-      _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
-        _offRouteDebounce = null;
-        // 타이머 발화 시점의 현재 위치로 재탐색 (생성 시점 loc보다 최신)
-        final current = ref.read(navStateProvider)?.pos;
-        if (current != null) _reroute(current);
+    _voiceStepIdx = -1;
+if (widget.destination != null) {
+      // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
+      // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(routeProgressProvider.notifier).setRoute(
+          points: _routePoints,
+          maneuvers: maneuvers,
+          destination: widget.destination!,
+        );
       });
-    } else {
-      _offRouteDebounce?.cancel();
-      _offRouteDebounce = null;
     }
   }
 
-  // 점-선분 최단거리 (미터)
-  double _segmentDistM(LatLng p, LatLng a, LatLng b) {
-    final ax = b.latitude - a.latitude;
-    final ay = b.longitude - a.longitude;
-    final lenSq = ax * ax + ay * ay;
-    final t = lenSq < 1e-12
-        ? 0.0
-        : (((p.latitude - a.latitude) * ax + (p.longitude - a.longitude) * ay) / lenSq)
-            .clamp(0.0, 1.0);
-    return _distanceM(
-      LatLng(a.latitude + t * ax, a.longitude + t * ay),
-      p,
-    );
+  void _triggerReroute() {
+    if (_isRerouting) return;
+    _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
+      _offRouteDebounce = null;
+      final current = ref.read(navStateProvider)?.pos;
+      if (current != null) _reroute(current);
+    });
   }
 
   Future<void> _reroute(LatLng origin) async {
@@ -379,23 +347,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final step = _steps[idx];
     if (step.label == '출발') {
       _vps?.speak('departure');
-      return;
     }
-    debugPrint('YNAV_GUIDE tts idx=$idx direction="${step.label}"');
-    _vps?.speak('approach_300', vars: {'direction': step.label});
-  }
-
-  void _checkArrival(LatLng loc) {
-    if (_arrived) return;
-    final dest = widget.destination;
-    if (dest == null) return;
-    if (_distanceM(loc, dest) <= _kArrivalRadiusM) {
-      _arrived = true;
-      _vps?.speak('arrival');
-      _fetchNearbyPois(dest).then((pois) {
-        if (mounted) _showArrivalDialog(pois);
-      });
-    }
+    // 비-출발 접근 안내는 임계 경로(_handleVoice)가 담당 — 여기서 발화하지 않음
+    debugPrint('YNAV_GUIDE announceStep idx=$idx label="${step.label}"');
   }
 
   /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
@@ -434,18 +388,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       case 'restaurant': return '식당';
       default: return amenity;
     }
-  }
-
-  double _distanceM(LatLng a, LatLng b) {
-    const r = 6371000.0;
-    const deg2rad = 0.017453292519943295;
-    final lat1 = a.latitude * deg2rad;
-    final lat2 = b.latitude * deg2rad;
-    final dLat = (b.latitude - a.latitude) * deg2rad;
-    final dLon = (b.longitude - a.longitude) * deg2rad;
-    final h = sin(dLat / 2) * sin(dLat / 2) +
-        cos(lat1) * cos(lat2) * sin(dLon / 2) * sin(dLon / 2);
-    return 2 * r * asin(sqrt(h));
   }
 
   void _showArrivalDialog(List<({String name, String type})> pois) {

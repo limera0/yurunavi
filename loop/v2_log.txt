@@ -1,0 +1,12 @@
+완료. 결과 요약:
+
+- **단일 커밋** `3afbd46` — `nav_screen.dart` 1파일, +26/-43 lines
+- `flutter analyze` No issues, code-auditor **7/7 PASS**
+- 변경 내용:
+  - `enum _ArrivalPhase` — `stopReady` 제거
+  - 상수 `_kGeofenceM=30.0`, `_kExitSpeedKmh=30.0` 추가
+  - 필드 `_countdownSec/_countdownTimer/_parkGateAt` 삭제, `_canExit=false` 추가
+  - `_checkStopGate(parked)` → `_checkArrivedGeofence(loc)` 완전 교체
+  - 종료버튼 조건 `arrivedHold && _canExit`, 텍스트 `'지금 종료'`
+
+다음 단계는 SPEC §8 라이딩 검증(T3) — main 머지 전 실기기로 오버슈트·속도초과·자동종료부재 케이스 확인 필요.

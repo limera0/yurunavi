@@ -1,0 +1,6 @@
+추가 지시: SPEC_arrival.md C3만 구현. 
+(1) 필드 _countdownSec(int), Timer? _countdownTimer 추가, dispose()에서 cancel 필수. 
+(2) T2: _phase==arrivedHold 에서 _calcParkState().parked && (not)_moving && _speedKmh<1.0 가 연속 2초 이상 유지되면 _phase=stopReady, _countdownSec=10, 1초 주기 Timer로 감소. 
+(3) T4: _countdownSec==0 또는 하단 '지금 종료' 버튼 탭 -> Navigator.of(context).pop()로 종료. 
+(4) T3: _phase==stopReady 중 _moving==true 또는 _speedKmh>=3.0 감지 시 Timer cancel + _phase=arrivedHold 복귀. 
+(5) UI: 하단 정보패널 영역(Positioned bottom:0)에 _phase==stopReady 분기로 큰 '지금 종료 (N)' 버튼. C1,C2 도착감지/상단카드는 손대지 말 것. analyze 후 단일커밋.
