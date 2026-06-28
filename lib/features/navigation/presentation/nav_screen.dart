@@ -347,10 +347,9 @@ if (widget.destination != null) {
     final step = _steps[idx];
     if (step.label == '출발') {
       _vps?.speak('departure');
-      return;
     }
-    debugPrint('YNAV_GUIDE tts idx=$idx direction="${step.label}"');
-    _vps?.speak('approach_300', vars: {'direction': step.label});
+    // 비-출발 접근 안내는 임계 경로(_handleVoice)가 담당 — 여기서 발화하지 않음
+    debugPrint('YNAV_GUIDE announceStep idx=$idx label="${step.label}"');
   }
 
   /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
