@@ -241,9 +241,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (step + 1 >= _steps.length) return; // 마지막 = 도착, 턴 발화 없음
     final dir = _steps[step].label;
     final d = prog.distToNextTurnM;
-    if (d <= 500 && !_said500) { _said500 = true; _vps?.speak('approach_500', vars: {'direction': dir}); }
-    if (d <= 300 && !_said300) { _said300 = true; _vps?.speak('approach_300', vars: {'direction': dir}); }
-    if (d <=  50 && !_said50)  { _said50  = true; _vps?.speak('approach_50',  vars: {'direction': dir}); }
+    if (d <= 500 && !_said500) {
+      _said500 = true;
+      debugPrint('YNAV_TTS thr=500 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_500', vars: {'direction': dir});
+    }
+    if (d <= 300 && !_said300) {
+      _said300 = true;
+      debugPrint('YNAV_TTS thr=300 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_300', vars: {'direction': dir});
+    }
+    if (d <=  50 && !_said50) {
+      _said50  = true;
+      debugPrint('YNAV_TTS thr=50 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
+      _vps?.speak('approach_50',  vars: {'direction': dir});
+    }
   }
 
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
