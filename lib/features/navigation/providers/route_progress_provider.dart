@@ -86,6 +86,10 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _cumFromStartM = cum;
     _totalM = acc;
 
+    if (maneuvers.isNotEmpty) {
+      debugPrint('YNAV_ROUTE steps=${maneuvers.length} pts=${points.length} lastBegin=${maneuvers.last.beginShapeIdx} lastEnd=${maneuvers.last.endShapeIdx}');
+    }
+
     state = RouteProgress(
       snapIdx: 0,
       activeStepIdx: 0,
@@ -138,6 +142,15 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
         .clamp(0.0, double.maxFinite);
     final distToDest = (_totalM - traveledM).clamp(0.0, double.maxFinite);
     final arrived = distToDest <= _kArrivalM;
+
+    if (activeStep != (state?.activeStepIdx ?? -1) && activeStep < _maneuvers.length) {
+      final m = _maneuvers[activeStep];
+      debugPrint('YNAV_STEP from=${state?.activeStepIdx ?? -1} to=$activeStep maneuver=${m.type} beginShape=${m.beginShapeIdx} endShape=${m.endShapeIdx}');
+    }
+    if (arrived && !(state?.arrived ?? false)) {
+      debugPrint('YNAV_ARR dest=${distToDest.toStringAsFixed(1)} snap=$bestSeg lastShape=${_pts.length - 1}');
+    }
+    debugPrint('YNAV_PROG snap=$bestSeg step=$activeStep next=${distToNext.toStringAsFixed(1)} dest=${distToDest.toStringAsFixed(1)} off=$offRoute perp=${bestPerp.toStringAsFixed(1)}');
 
     state = RouteProgress(
       snapIdx: bestSeg,
