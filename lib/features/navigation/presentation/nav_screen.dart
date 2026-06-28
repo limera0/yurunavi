@@ -234,13 +234,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _handleVoice(RouteProgress prog) {
     final step = prog.activeStepIdx;
-    if (step != _voiceStepIdx) {
-      _voiceStepIdx = step;
-      _said500 = _said300 = _said50 = false;
-    }
+    final stepChanged = step != _voiceStepIdx;
+    if (stepChanged) _voiceStepIdx = step;
     if (step + 1 >= _steps.length) return; // 마지막 = 도착, 턴 발화 없음
     final dir = _steps[step].label;
     final d = prog.distToNextTurnM;
+    if (stepChanged) {
+      _said500 = d <= 500;
+      _said300 = d <= 300;
+      _said50  = d <=  50;
+    }
     if (d <= 500 && !_said500) {
       _said500 = true;
       debugPrint('YNAV_TTS thr=500 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
