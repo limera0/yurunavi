@@ -1070,6 +1070,21 @@ class _TurnStep {
     }
   }
 
+  static String? _eventForType(int type) {
+    switch (type) {
+      case 14: case 15: case 16: return 'turn_left';
+      case 9:  case 10: case 11: return 'turn_right';
+      case 12: case 13:          return 'uturn';
+      case 17: case 18: case 19: return 'ramp';
+      case 20: case 21:          return 'exit';
+      case 22: case 23: case 24: return 'keep';
+      case 25: case 37: case 38: return 'merge';
+      case 26: case 27:          return 'roundabout';
+      case 4:  case 5:  case 6:  return 'destination';
+      default:                   return null;
+    }
+  }
+
   static String _formatDist(double km) {
     if (km <= 0) return '';
     if (km < 1.0) return '${(km * 1000).round()}m';
