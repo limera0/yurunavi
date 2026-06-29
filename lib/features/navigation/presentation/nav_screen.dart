@@ -26,6 +26,7 @@ import '../../settings/providers/settings_providers.dart';
 import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
+import '../voice_engine.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -80,9 +81,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   FlutterTts? _tts;
   VoicePackService? _vps;
   int _lastAnnouncedIdx = -1;  // 중복 발화 방지 (_announceStep용)
-  int _voiceStepIdx = -1;
-  List<double> _pendingPoints = [];
   GuidanceProfile? _profile;
+  VoiceEngine? _voiceEngine;
 
   // progress 구독
   ProviderSubscription<RouteProgress?>? _progressSub;
@@ -97,6 +97,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
+  List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
 
@@ -236,31 +237,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _handleVoice(RouteProgress prog) {
     if (_profile == null) return;
-    final step = prog.activeStepIdx;
-    final d = prog.distToNextTurnM;
-
-    final turnIdx = step + 1;
-    if (turnIdx >= _steps.length) return;
-    final event = _TurnStep._eventForType(_steps[turnIdx].type);
-    if (event == null) return;
-
-    if (step != _voiceStepIdx) {
-      _voiceStepIdx = step;
-      final entryD = d;
-      final tier = _profile!.tierFor(entryD);
-      final pts = [...tier.pointsM, _profile!.imminentM];
-      _pendingPoints = pts.where((p) => p < entryD).toList()
-        ..sort((a, b) => b.compareTo(a));
-    }
-
-    while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
-      final point = _pendingPoints.removeAt(0);
-      final isImminent = point == _profile!.imminentM;
-      if (_profile!.isEnabled(event)) {
-        final key = '${event}_${isImminent ? 'imminent' : 'approach'}';
-        _vps?.speak(key, vars: {'dist': point.toStringAsFixed(0)});
-      }
-      debugPrint('YNAV_TTS point=${point.toStringAsFixed(0)} d=${d.toStringAsFixed(1)} step=$step turnIdx=$turnIdx event=$event');
+    final intents = _voiceEngine!.onProgress(
+        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers);
+    for (final it in intents) {
+      _vps?.speak(it.key, vars: it.vars);
+      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
     }
   }
 
@@ -272,11 +253,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
             _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
             _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
           ];
+    _maneuvers = maneuvers;
     _stepIdx = 0;
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
-    _voiceStepIdx = -1;
-    _pendingPoints = [];
+    _voiceEngine?.reset();
     if (widget.destination != null) {
       // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
       // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
@@ -342,6 +323,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setVolume(1.0);
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
+    _voiceEngine = VoiceEngine(_profile!);
     _announceStep(0);
   }
 
@@ -1074,21 +1056,6 @@ class _TurnStep {
       case 28: return '도선 탑승';
       case 29: return '도선 하차';
       default: return '직진';
-    }
-  }
-
-  static String? _eventForType(int type) {
-    switch (type) {
-      case 14: case 15: case 16: return 'turn_left';
-      case 9:  case 10: case 11: return 'turn_right';
-      case 12: case 13:          return 'uturn';
-      case 17: case 18: case 19: return 'ramp';
-      case 20: case 21:          return 'exit';
-      case 22: case 23: case 24: return 'keep';
-      case 25: case 37: case 38: return 'merge';
-      case 26: case 27:          return 'roundabout';
-      case 4:  case 5:  case 6:  return 'destination';
-      default:                   return null;
     }
   }
 
