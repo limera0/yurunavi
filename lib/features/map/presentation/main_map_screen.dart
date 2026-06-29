@@ -597,7 +597,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
 
-    // POI 지명 해석 — 다음 슬라이스에서 addRecent에 사용
     final poiName = await _resolveTappedPoiName(dest);
     if (mounted) {
       ref.read(mapInteractionProvider.notifier).setDestinationName(poiName);
@@ -717,6 +716,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     final origin = _origin ?? _lastKnown;
     // 최근 경로 저장
     if (origin != null) {
+      final dn = ref.read(mapInteractionProvider).destinationName;
       ref.read(recentRoutesProvider.notifier).add(RecentRoute(
             id: DateTime.now().millisecondsSinceEpoch.toString(),
             originLat: origin.latitude,
@@ -724,6 +724,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             destLat: dest.latitude,
             destLng: dest.longitude,
             at: DateTime.now(),
+            destName: dn,
           ));
     }
     final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx
