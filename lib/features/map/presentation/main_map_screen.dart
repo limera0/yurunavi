@@ -1892,7 +1892,7 @@ class _PlacesSheet extends ConsumerWidget {
                             leading: const Icon(Icons.history_rounded,
                                 color: AppColors.secondary, size: 22),
                             title: Text(
-                              '→ ${r.destLat.toStringAsFixed(3)}, ${r.destLng.toStringAsFixed(3)}',
+                              _routeTitle(r),
                               style: const TextStyle(fontSize: 13),
                             ),
                             subtitle: Text(date,
@@ -1911,6 +1911,12 @@ class _PlacesSheet extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _routeTitle(RecentRoute r) {
+    final n = r.destName;
+    if (n != null && n.trim().isNotEmpty) return n;
+    return '→ ${r.destLat.toStringAsFixed(3)}, ${r.destLng.toStringAsFixed(3)}';
   }
 }
 
