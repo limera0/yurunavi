@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show cos, sqrt, asin;
+import 'dart:math' show Point, cos, sqrt, asin;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
@@ -26,6 +26,8 @@ import '../../navigation/presentation/nav_screen.dart';
 import '../../navigation/providers/nav_state_provider.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../poi_feature_picker.dart';
+import '../poi_name_resolver.dart';
 
 export 'main_map_screen.dart';
 
@@ -405,6 +407,66 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     return 12742 * asin(sqrt(h));
   }
 
+  // ── POI name resolution helpers ───────────────────────────────────────────
+
+  Future<double> _screenDistFromTap(
+    Point<num> tapScreen,
+    dynamic geom,
+    ml.MapLibreMapController c,
+  ) async {
+    final type = (geom as Map)['type'] as String;
+    final rawCoords = geom['coordinates'] as List;
+    final List coordPair;
+    if (type == 'Point') {
+      coordPair = rawCoords;
+    } else if (type == 'LineString') {
+      coordPair = rawCoords.first as List;
+    } else {
+      coordPair = (rawCoords.first as List).first as List;
+    }
+    final lng = (coordPair[0] as num).toDouble();
+    final lat = (coordPair[1] as num).toDouble();
+    final screenPt = await c.toScreenLocation(ml.LatLng(lat, lng));
+    final dx = screenPt.x.toDouble() - tapScreen.x.toDouble();
+    final dy = screenPt.y.toDouble() - tapScreen.y.toDouble();
+    return sqrt(dx * dx + dy * dy);
+  }
+
+  Future<String?> _resolveTappedPoiName(LatLng tap) async {
+    final c = _mlCtrl;
+    if (c == null) return null;
+    final center = await c.toScreenLocation(_toMl(tap));
+    const r = 24.0;
+    final rect = Rect.fromCenter(
+      center: Offset(center.x.toDouble(), center.y.toDouble()),
+      width: r * 2,
+      height: r * 2,
+    );
+    const ids = [
+      'poi-level-1', 'poi-level-2', 'poi-level-3', 'poi-railway',
+      'place-city', 'place-town', 'place-village', 'place-other',
+    ];
+    final picks = <PickFeature>[];
+    for (final id in ids) {
+      final fs = await c.queryRenderedFeaturesInRect(rect, [id], null);
+      for (final f in fs) {
+        try {
+          final m = f as Map;
+          final props = (m['properties'] as Map).cast<String, dynamic>();
+          final g = m['geometry'];
+          final sd = await _screenDistFromTap(center, g, c);
+          picks.add(PickFeature(layerId: id, screenDist: sd, props: props));
+        } catch (_) {
+          continue;
+        }
+      }
+    }
+    final best = PoiFeaturePicker.pick(picks);
+    if (best == null) return null;
+    final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
+    return PoiNameResolver(lang).resolve(best.props);
+  }
+
   // ── Map tap ───────────────────────────────────────────────────────────────
 
 Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
@@ -493,7 +555,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     );
   }
 
-  void _applyDestination(LatLng dest) {
+  Future<void> _applyDestination(LatLng dest) async {
     final origin = _origin ?? _lastKnown;
     if (origin == null) return;
     final dist = _haversineKm(origin, dest);
@@ -534,6 +596,12 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
 
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
+
+    // POI 지명 해석 — 다음 슬라이스에서 addRecent에 사용
+    final poiName = await _resolveTappedPoiName(dest);
+    if (mounted) {
+      ref.read(mapInteractionProvider.notifier).setDestinationName(poiName);
+    }
   }
 
   Future<void> _fetchAndStoreAllRoutes(LatLng origin, LatLng dest) async {

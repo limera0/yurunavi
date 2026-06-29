@@ -103,6 +103,7 @@ class MapInteractionState {
   final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (Valhalla 3회 병렬 페치)
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
   final List<({double km, int mins, double windingScore})> allRouteMeta; // 각 경로의 거리·시간 메타
+  final String? destinationName; // POI 탭 지명
 
   const MapInteractionState({
     this.mode = MapInteractionMode.idle,
@@ -114,6 +115,7 @@ class MapInteractionState {
     this.allRoutes = const [],
     this.selectedRouteIdx = 2,
     this.allRouteMeta = const [],
+    this.destinationName,
   });
 
   /// 단일 경유지 편의 getter (기존 코드 호환)
@@ -129,9 +131,11 @@ class MapInteractionState {
     List<List<LatLng>>? allRoutes,
     int? selectedRouteIdx,
     List<({double km, int mins, double windingScore})>? allRouteMeta,
+    String? destinationName,
     bool clearDestination = false,
     bool clearWaypoints = false,
     bool clearRoute = false,
+    bool clearDestinationName = false,
   }) {
     return MapInteractionState(
       mode: mode ?? this.mode,
@@ -143,6 +147,7 @@ class MapInteractionState {
       allRoutes: clearRoute ? [] : allRoutes ?? this.allRoutes,
       selectedRouteIdx: selectedRouteIdx ?? this.selectedRouteIdx,
       allRouteMeta: clearRoute ? [] : allRouteMeta ?? this.allRouteMeta,
+      destinationName: clearDestinationName ? null : destinationName ?? this.destinationName,
     );
   }
 }
@@ -199,6 +204,11 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
 
   void setSelectedRouteIdx(int idx) =>
       state = state.copyWith(selectedRouteIdx: idx);
+
+  void setDestinationName(String? name) => state = state.copyWith(
+        destinationName: name,
+        clearDestinationName: name == null,
+      );
 
   void reset() => state = const MapInteractionState();
 }
