@@ -25,6 +25,8 @@ import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
+import '../guidance_profile.dart';
+import '../voice_engine.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -79,8 +81,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   FlutterTts? _tts;
   VoicePackService? _vps;
   int _lastAnnouncedIdx = -1;  // 중복 발화 방지 (_announceStep용)
-  int _voiceStepIdx = -1;
-  bool _said500 = false, _said300 = false, _said50 = false;
+  GuidanceProfile? _profile;
+  VoiceEngine? _voiceEngine;
 
   // progress 구독
   ProviderSubscription<RouteProgress?>? _progressSub;
@@ -95,6 +97,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
+  List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
 
@@ -233,31 +236,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _handleVoice(RouteProgress prog) {
-    final step = prog.activeStepIdx;
-    final stepChanged = step != _voiceStepIdx;
-    if (stepChanged) _voiceStepIdx = step;
-    if (step + 1 >= _steps.length) return; // 마지막 = 도착, 턴 발화 없음
-    final dir = _steps[step].label;
-    final d = prog.distToNextTurnM;
-    if (stepChanged) {
-      _said500 = d <= 500;
-      _said300 = d <= 300;
-      _said50  = d <=  50;
-    }
-    if (d <= 500 && !_said500) {
-      _said500 = true;
-      debugPrint('YNAV_TTS thr=500 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
-      _vps?.speak('approach_500', vars: {'direction': dir});
-    }
-    if (d <= 300 && !_said300) {
-      _said300 = true;
-      debugPrint('YNAV_TTS thr=300 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
-      _vps?.speak('approach_300', vars: {'direction': dir});
-    }
-    if (d <=  50 && !_said50) {
-      _said50  = true;
-      debugPrint('YNAV_TTS thr=50 next=${d.toStringAsFixed(1)} step=$step maneuver=${step < widget.maneuvers.length ? widget.maneuvers[step].type : -1}');
-      _vps?.speak('approach_50',  vars: {'direction': dir});
+    if (_profile == null) return;
+    final intents = _voiceEngine!.onProgress(
+        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers);
+    for (final it in intents) {
+      _vps?.speak(it.key, vars: it.vars);
+      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
     }
   }
 
@@ -269,11 +253,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
             _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
             _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
           ];
+    _maneuvers = maneuvers;
     _stepIdx = 0;
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
-    _voiceStepIdx = -1;
-if (widget.destination != null) {
+    _voiceEngine?.reset();
+    if (widget.destination != null) {
       // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
       // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -337,6 +322,8 @@ if (widget.destination != null) {
     await _tts!.setSpeechRate(0.5);
     await _tts!.setVolume(1.0);
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
+    _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
+    _voiceEngine = VoiceEngine(_profile!);
     _announceStep(0);
   }
 
@@ -1013,7 +1000,8 @@ class _TurnStep {
   final String label;
   final String dist;
   final double rawDistKm; // GPS 거리 자동 진행용 원시 거리(km)
-  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0]);
+  final int type;
+  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0]);
 
   factory _TurnStep.fromManeuver(ManeuverStep m) {
     return _TurnStep(
@@ -1021,6 +1009,7 @@ class _TurnStep {
       _labelForType(m.type),
       _formatDist(m.distanceKm),
       m.distanceKm,
+      m.type,
     );
   }
 

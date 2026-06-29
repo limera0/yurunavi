@@ -45,3 +45,4 @@ flutter:
   assets:
     - assets/images/
     - assets/voice_packs/
+    - assets/config/guidance_profile.json
