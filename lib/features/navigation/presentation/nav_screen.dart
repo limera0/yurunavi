@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:http/http.dart' as http;
@@ -290,9 +289,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isRerouting = true);
     final navState = ref.read(navStateProvider);
     final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    debugPrint('YNAV_REROUTE hdg_src spd=${navState?.speedKmh} rawHdg=${navState?.headingDeg} used=$heading');
     final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
     final routeOrigin = LatLng(off.lat, off.lng);
-    developer.log('YNAV_REROUTE off origin hdg=$heading d=40', name: 'NavScreen');
+    debugPrint('YNAV_REROUTE off origin hdg=$heading d=40');
     try {
       final routes = await RoutingService.fetchRoutes(
         origin: routeOrigin,
