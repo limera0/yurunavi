@@ -239,7 +239,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _handleVoice(RouteProgress prog) {
     if (_profile == null) return;
     final intents = _voiceEngine!.onProgress(
-        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers);
+        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
+        speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
     for (final it in intents) {
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
