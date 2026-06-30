@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:http/http.dart' as http;
@@ -27,6 +28,7 @@ import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
 import '../voice_engine.dart';
+import '../../route/offset_origin.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -286,9 +288,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final dest = widget.destination;
     if (dest == null) return;
     setState(() => _isRerouting = true);
+    final navState = ref.read(navStateProvider);
+    final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
+    final routeOrigin = LatLng(off.lat, off.lng);
+    developer.log('YNAV_REROUTE off origin hdg=$heading d=40', name: 'NavScreen');
     try {
       final routes = await RoutingService.fetchRoutes(
-        origin: origin,
+        origin: routeOrigin,
         destination: dest,
         waypoints: widget.waypoints,
       );
