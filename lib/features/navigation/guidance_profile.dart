@@ -27,7 +27,7 @@ class GuidanceProfile {
   });
 
   static GuidanceProfile get _fallback => GuidanceProfile(
-        imminentM: 5,
+        imminentM: 10,
         tiers: const [
           GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
           GuidanceTier(minEntryM: 150, pointsM: [300, 50]),

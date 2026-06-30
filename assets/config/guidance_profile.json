@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "profile_id": "default",
-  "imminent_m": 5,
+  "imminent_m": 10,
   "tiers": [
     { "min_entry_m": 500, "points_m": [500, 300, 50] },
     { "min_entry_m": 150, "points_m": [300, 50] },

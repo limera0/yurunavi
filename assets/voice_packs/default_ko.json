@@ -25,6 +25,6 @@
     "roundabout_approach":      "{dist}미터 앞 회전교차로",
     "roundabout_imminent":      "회전교차로",
     "destination_approach":     "{dist}미터 앞 목적지",
-    "destination_imminent":     "목적지 도착"
+    "destination_imminent":     "목적지 부근입니다"
   }
 }
