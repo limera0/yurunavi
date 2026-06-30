@@ -38,7 +38,11 @@ class VoiceEngine {
     if (step != _voiceStepIdx) {
       _voiceStepIdx = step;
       final entryD = d;
-      final tier = profile.tierFor(entryD);
+      final eventTierList = profile.tiersForEvent(event);
+      final tier = eventTierList.firstWhere(
+        (t) => entryD >= t.minEntryM,
+        orElse: () => eventTierList.last,
+      );
       final pts = [...tier.pointsM, profile.imminentM];
       _pendingPoints = pts.where((p) => p < entryD).toList()
         ..sort((a, b) => b.compareTo(a));
