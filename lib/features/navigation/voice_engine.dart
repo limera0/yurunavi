@@ -29,7 +29,7 @@ class VoiceEngine {
   int _voiceStepIdx = -1;
   List<double> _pendingPoints = [];
 
-  List<SpeakIntent> onProgress(int step, double d, List<ManeuverStep> steps) {
+  List<SpeakIntent> onProgress(int step, double d, List<ManeuverStep> steps, {double speedKmh = 0}) {
     final turnIdx = step + 1;
     if (turnIdx >= steps.length) return const [];
     final event = eventForType(steps[turnIdx].type);
@@ -53,8 +53,14 @@ class VoiceEngine {
       final point = _pendingPoints.removeAt(0);
       final isImminent = point == profile.imminentM;
       if (profile.isEnabled(event)) {
+        final phase = isImminent ? 'imminent' : 'approach';
+        final suffix = isImminent &&
+                speedKmh >= 20 &&
+                (event == 'turn_left' || event == 'turn_right')
+            ? '_fast'
+            : '';
         out.add(SpeakIntent(
-          '${event}_${isImminent ? 'imminent' : 'approach'}',
+          '${event}_$phase$suffix',
           {'dist': point.toStringAsFixed(0)},
         ));
       }
