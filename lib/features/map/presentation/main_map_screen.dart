@@ -28,10 +28,17 @@ import '../../settings/providers/settings_providers.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../poi_feature_picker.dart';
 import '../poi_name_resolver.dart';
+import '../poi_category.dart';
 
 export 'main_map_screen.dart';
 
 enum _TapAction { destination, waypoint }
+
+class _TappedPoi {
+  final String? name;
+  final String? category;
+  const _TappedPoi({this.name, this.category});
+}
 
 /// Last-resort map framing: first install + no last-known position.
 /// Camera only — never treated as the rider's location.
@@ -432,7 +439,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     return sqrt(dx * dx + dy * dy);
   }
 
-  Future<String?> _resolveTappedPoiName(LatLng tap) async {
+  Future<_TappedPoi?> _resolveTappedPoi(LatLng tap) async {
     final c = _mlCtrl;
     if (c == null) return null;
     final center = await c.toScreenLocation(_toMl(tap));
@@ -464,7 +471,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final best = PoiFeaturePicker.pick(picks);
     if (best == null) return null;
     final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
-    return PoiNameResolver(lang).resolve(best.props);
+    final name = PoiNameResolver(lang).resolve(best.props);
+    final cat = poiCategoryKo(best.props);
+    return _TappedPoi(name: name, category: cat);
   }
 
   // ── Map tap ───────────────────────────────────────────────────────────────
@@ -483,36 +492,40 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     final interaction = ref.read(mapInteractionProvider);
     if (interaction.isLoading) return;
 
-    // 경로가 표시 중이면 도착지변경 vs 경유지추가 선택 시트 표시
-    if (_showCourseSheet) {
-      final action = await _showTapActionSheet(tapped);
-      if (!mounted) return;
-      if (action == _TapAction.waypoint) {
-        ref.read(mapInteractionProvider.notifier).addWaypoint(tapped);
-        final dest = ref.read(mapInteractionProvider).destination;
-        if (dest != null) {
-          ref.read(mapInteractionProvider.notifier).setLoading(true);
-          try {
-            await _fetchAndStoreAllRoutes(origin, dest);
-          } finally {
-            if (mounted) {
-              ref.read(mapInteractionProvider.notifier).setLoading(false);
-            }
+    final poi = await _resolveTappedPoi(tapped);
+    if (!mounted) return;
+    final hasRoute = _showCourseSheet;
+    final act = await _showTapConfirmSheet(tapped, poi, hasRoute);
+    if (!mounted) return;
+
+    if (act == _TapAction.waypoint) {
+      ref.read(mapInteractionProvider.notifier).addWaypoint(tapped);
+      final dest = ref.read(mapInteractionProvider).destination;
+      if (dest != null) {
+        ref.read(mapInteractionProvider.notifier).setLoading(true);
+        try {
+          await _fetchAndStoreAllRoutes(origin, dest);
+        } finally {
+          if (mounted) {
+            ref.read(mapInteractionProvider.notifier).setLoading(false);
           }
         }
-        return;
       }
-      if (action != _TapAction.destination) return; // cancelled
+      return;
     }
+    if (act != _TapAction.destination) return;
 
     setState(() {
       _touchPoint = tapped;
       _touchDistKm = _haversineKm(origin, tapped);
     });
-    _applyDestination(tapped);
+    await _applyDestination(tapped, preResolved: poi?.name);
   }
 
-  Future<_TapAction?> _showTapActionSheet(LatLng tapped) {
+  Future<_TapAction?> _showTapConfirmSheet(LatLng tapped, _TappedPoi? poi, bool hasRoute) {
+    final title = poi?.name ?? '선택 위치';
+    final subtitle = poi?.category ??
+        '${tapped.latitude.toStringAsFixed(5)}, ${tapped.longitude.toStringAsFixed(5)}';
     return showModalBottomSheet<_TapAction>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -534,18 +547,42 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
               const SizedBox(height: 4),
+              const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.flag_outlined, color: Color(0xFF008080)),
-                title: const Text('도착지 변경'),
+                title: const Text('여기로 안내'),
                 onTap: () => Navigator.pop(context, _TapAction.destination),
               ),
+              if (hasRoute)
+                ListTile(
+                  leading: const Icon(Icons.add_location_alt_outlined,
+                      color: Color(0xFF008080)),
+                  title: const Text('경유지 추가'),
+                  subtitle: const Text('현재 경로에 경유지를 삽입합니다',
+                      style: TextStyle(fontSize: 12)),
+                  onTap: () => Navigator.pop(context, _TapAction.waypoint),
+                ),
               ListTile(
-                leading: const Icon(Icons.add_location_alt_outlined, color: Color(0xFF008080)),
-                title: const Text('경유지 추가'),
-                subtitle: const Text('현재 경로에 경유지를 삽입합니다',
-                    style: TextStyle(fontSize: 12)),
-                onTap: () => Navigator.pop(context, _TapAction.waypoint),
+                leading: const Icon(Icons.close, color: Colors.grey),
+                title: const Text('닫기'),
+                onTap: () => Navigator.pop(context, null),
               ),
               const SizedBox(height: 8),
             ],
@@ -555,7 +592,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     );
   }
 
-  Future<void> _applyDestination(LatLng dest) async {
+  Future<void> _applyDestination(LatLng dest, {String? preResolved}) async {
     final origin = _origin ?? _lastKnown;
     if (origin == null) return;
     final dist = _haversineKm(origin, dest);
@@ -597,9 +634,13 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
 
-    final poiName = await _resolveTappedPoiName(dest);
-    if (mounted) {
-      ref.read(mapInteractionProvider.notifier).setDestinationName(poiName);
+    if (preResolved != null) {
+      ref.read(mapInteractionProvider.notifier).setDestinationName(preResolved);
+    } else {
+      final resolved = await _resolveTappedPoi(dest);
+      if (mounted) {
+        ref.read(mapInteractionProvider.notifier).setDestinationName(resolved?.name);
+      }
     }
   }
 
