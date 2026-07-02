@@ -32,7 +32,14 @@
     },
     "keep":        { "enabled": true },
     "merge":       { "enabled": true },
-    "roundabout":  { "enabled": true },
+    "roundabout": {
+      "enabled": true,
+      "tiers": [
+        { "min_entry_m": 300, "points_m": [300, 100, 30] },
+        { "min_entry_m": 80,  "points_m": [80, 20] },
+        { "min_entry_m": 0,   "points_m": [20] }
+      ]
+    },
     "continue":    { "enabled": false },
     "destination": { "enabled": true }
   }
