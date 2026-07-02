@@ -414,6 +414,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setLanguage('ko-KR');
     await _tts!.setSpeechRate(0.5);
     await _tts!.setVolume(1.0);
+    await _tts!.setAudioAttributesForNavigation();
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
     _voiceEngine = VoiceEngine(_profile!);
