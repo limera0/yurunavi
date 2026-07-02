@@ -77,6 +77,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
+  bool _arrivalDialogShown = false;
 
   // 음성 안내
   FlutterTts? _tts;
@@ -387,6 +388,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _showArrivalDialog(List<({String name, String type})> pois) {
     if (!mounted) return;
+    _arrivalDialogShown = true;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -430,7 +432,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           ),
         ],
       ),
-    );
+    ).whenComplete(() => _arrivalDialogShown = false);
   }
 
   static String _etaText(int durationMin) {
