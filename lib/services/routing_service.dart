@@ -37,12 +37,16 @@ class ManeuverStep {
   final double distanceKm;
   final int beginShapeIdx;   // 전역 인덱스 (leg 오프셋 적용 후)
   final int endShapeIdx;     // 전역 인덱스
+  /// Valhalla가 로터리 진입(type 26) maneuver에서 반환하는 출구 번호 (nth exit).
+  /// 로터리 진입이 아닌 maneuver에서는 null.
+  final int? roundaboutExitCount;
   const ManeuverStep({
     required this.type,
     required this.instruction,
     required this.distanceKm,
     this.beginShapeIdx = 0,
     this.endShapeIdx = 0,
+    this.roundaboutExitCount,
   });
 }
 
@@ -427,6 +431,7 @@ class RoutingService {
           distanceKm: (m['length'] as num?)?.toDouble() ?? 0.0,
           beginShapeIdx: shapeOffset + b,
           endShapeIdx: shapeOffset + e,
+          roundaboutExitCount: (m['roundabout_exit_count'] as num?)?.toInt(),
         ));
       }
       final legPts = _decodePolyline6(leg['shape'] as String? ?? '');
