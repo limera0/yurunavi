@@ -17,15 +17,17 @@ class GuidanceProfile {
   final double imminentM;
   final List<GuidanceTier> tiers;
   final Set<String> enabledEvents;
+  final Map<String, List<GuidanceTier>> eventTiers;
 
   const GuidanceProfile({
     required this.imminentM,
     required this.tiers,
     required this.enabledEvents,
+    this.eventTiers = const <String, List<GuidanceTier>>{},
   });
 
   static GuidanceProfile get _fallback => GuidanceProfile(
-        imminentM: 5,
+        imminentM: 10,
         tiers: const [
           GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
           GuidanceTier(minEntryM: 150, pointsM: [300, 50]),
@@ -52,8 +54,21 @@ class GuidanceProfile {
           .where((e) => (e.value as Map<String, dynamic>)['enabled'] == true)
           .map((e) => e.key)
           .toSet();
+      final eventTiersMap = <String, List<GuidanceTier>>{};
+      for (final entry in rawEvents.entries) {
+        final eventData = entry.value as Map<String, dynamic>;
+        if (eventData['tiers'] is List) {
+          eventTiersMap[entry.key] = (eventData['tiers'] as List)
+              .map((e) => GuidanceTier.fromJson(e as Map<String, dynamic>))
+              .toList()
+            ..sort((a, b) => b.minEntryM.compareTo(a.minEntryM));
+        }
+      }
       return GuidanceProfile(
-          imminentM: imminentM, tiers: rawTiers, enabledEvents: enabledEvents);
+          imminentM: imminentM,
+          tiers: rawTiers,
+          enabledEvents: enabledEvents,
+          eventTiers: eventTiersMap);
     } catch (_) {
       return _fallback;
     }
@@ -62,6 +77,8 @@ class GuidanceProfile {
   GuidanceTier tierFor(double entryD) =>
       tiers.firstWhere((t) => entryD >= t.minEntryM,
           orElse: () => tiers.last);
+
+  List<GuidanceTier> tiersForEvent(String event) => eventTiers[event] ?? tiers;
 
   bool isEnabled(String event) => enabledEvents.contains(event);
 }

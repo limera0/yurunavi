@@ -10,8 +10,10 @@
     "arrival":   "목적지에 도착했습니다",
     "turn_left_approach":       "{dist}미터 앞 좌회전",
     "turn_left_imminent":       "좌회전입니다",
+    "turn_left_imminent_fast":  "곧 좌회전입니다",
     "turn_right_approach":      "{dist}미터 앞 우회전",
     "turn_right_imminent":      "우회전입니다",
+    "turn_right_imminent_fast": "곧 우회전입니다",
     "uturn_approach":           "{dist}미터 앞 유턴",
     "uturn_imminent":           "유턴입니다",
     "ramp_approach":            "{dist}미터 앞 진입",
@@ -25,6 +27,6 @@
     "roundabout_approach":      "{dist}미터 앞 회전교차로",
     "roundabout_imminent":      "회전교차로",
     "destination_approach":     "{dist}미터 앞 목적지",
-    "destination_imminent":     "목적지 도착"
+    "destination_imminent":     "목적지 부근입니다"
   }
 }

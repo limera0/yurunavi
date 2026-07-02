@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:http/http.dart' as http;
@@ -240,7 +239,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _handleVoice(RouteProgress prog) {
     if (_profile == null) return;
     final intents = _voiceEngine!.onProgress(
-        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers);
+        prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
+        speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
     for (final it in intents) {
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
@@ -290,9 +290,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isRerouting = true);
     final navState = ref.read(navStateProvider);
     final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    debugPrint('YNAV_REROUTE hdg_src spd=${navState?.speedKmh} rawHdg=${navState?.headingDeg} used=$heading');
     final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
     final routeOrigin = LatLng(off.lat, off.lng);
-    developer.log('YNAV_REROUTE off origin hdg=$heading d=40', name: 'NavScreen');
+    debugPrint('YNAV_REROUTE off origin hdg=$heading d=40');
     try {
       final routes = await RoutingService.fetchRoutes(
         origin: routeOrigin,
@@ -745,16 +746,36 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     if (_cardRemainingM > 0 || step.dist.isNotEmpty)
-                                      Text(
-                                        _cardRemainingM > 0
+                                      Builder(builder: (ctx) {
+                                        final raw = _cardRemainingM > 0
                                             ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
-                                            : step.dist,
-                                        style: TextStyle(
-                                          color: cs.tertiary,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
+                                            : step.dist;
+                                        final parts = _TurnStep._splitDistStr(raw);
+                                        return RichText(
+                                          text: TextSpan(
+                                            children: [
+                                              TextSpan(
+                                                text: parts.$1,
+                                                style: TextStyle(
+                                                  color: cs.tertiary,
+                                                  fontSize: 38,
+                                                  fontWeight: FontWeight.w800,
+                                                  height: 1.1,
+                                                ),
+                                              ),
+                                              TextSpan(
+                                                text: parts.$2,
+                                                style: TextStyle(
+                                                  color: cs.tertiary,
+                                                  fontSize: 17,
+                                                  fontWeight: FontWeight.w700,
+                                                  height: 1.1,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
                                     Text(
                                       upcoming.label,
                                       style: TextStyle(
@@ -1070,5 +1091,11 @@ class _TurnStep {
     if (km <= 0) return '';
     if (km < 1.0) return '${(km * 1000).round()}m';
     return '${km.toStringAsFixed(1)}km';
+  }
+
+  static (String, String) _splitDistStr(String s) {
+    if (s.endsWith('km')) return (s.substring(0, s.length - 2), 'km');
+    if (s.endsWith('m')) return (s.substring(0, s.length - 1), 'm');
+    return (s, '');
   }
 }
