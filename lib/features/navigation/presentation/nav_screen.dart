@@ -286,6 +286,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _reroute(LatLng origin) async {
     if (_isRerouting || !mounted) return;
+    if (_arrivalDialogShown && mounted) Navigator.of(context).pop();
     final dest = widget.destination;
     if (dest == null) return;
     setState(() => _isRerouting = true);
