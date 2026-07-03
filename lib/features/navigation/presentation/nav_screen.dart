@@ -211,7 +211,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       (_, next) {
         if (next == null || !mounted) return;
         final loc = next.pos;
-        if (!_isManualMode) _recenter(loc, speedKmh: next.speedKmh);
+        if (!_isManualMode) _recenter(loc, speedKmh: next.speedKmh, headingDeg: next.headingDeg);
         if (next.headingDeg != null && next.speedKmh > 2 && _styleLoaded) {
           _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(next.headingDeg!));
         }
@@ -485,13 +485,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
-  void _recenter(LatLng loc, {bool animate = false, double speedKmh = 0}) {
+  Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg}) async {
     if (!_styleLoaded) return;
     final target = _zoomForSpeed(speedKmh);
     // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    final update = ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom);
+
+    var camTarget = loc;
+    if (headingDeg != null && speedKmh > 2) {
+      final metersPerPixel = await _mlCtrl?.getMetersPerPixelAtLatitude(loc.latitude);
+      if (metersPerPixel != null && mounted) {
+        final screenHeightPx = MediaQuery.of(context).size.height;
+        final metersAhead = metersPerPixel * screenHeightPx * 0.35;
+        final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
+        camTarget = LatLng(off.lat, off.lng);
+      }
+    }
+
+    final update = ml.CameraUpdate.newLatLngZoom(_toMl(camTarget), _navZoom);
     if (animate) {
       _mlCtrl?.animateCamera(update);
     } else {
@@ -573,7 +585,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer = Timer(const Duration(seconds: 10), () {
       setState(() => _isManualMode = false);
       final pos = ref.read(navStateProvider)?.pos;
-      if (pos != null) _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
+      if (pos != null) {
+        final ns = ref.read(navStateProvider);
+        _recenter(pos, animate: true, speedKmh: ns?.speedKmh ?? 0, headingDeg: ns?.headingDeg);
+      }
     });
   }
 
@@ -913,7 +928,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
+                    final ns = ref.read(navStateProvider);
+                    _recenter(pos, animate: true, speedKmh: ns?.speedKmh ?? 0, headingDeg: ns?.headingDeg);
                   },
                 ),
                 const SizedBox(height: 10),
