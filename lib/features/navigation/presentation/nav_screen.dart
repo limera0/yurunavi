@@ -77,7 +77,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
-  bool _arrivalDialogShown = false;
   bool _arrivalBannerVisible = false;
   List<({String name, String type})> _arrivalPois = const [];
 
@@ -311,9 +310,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _reroute(LatLng origin) async {
     if (_isRerouting || !mounted) return;
-    if (_arrivalDialogShown && mounted) {
-      Navigator.of(context).pop();
-      _arrived = false;
+    if (_arrivalBannerVisible) {
+      setState(() {
+        _arrivalBannerVisible = false;
+        _arrivalPois = const [];
+        _arrived = false;
+      });
     }
     final dest = widget.destination;
     if (dest == null) return;
@@ -427,55 +429,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       case 'restaurant': return '식당';
       default: return amenity;
     }
-  }
-
-  void _showArrivalDialog(List<({String name, String type})> pois) {
-    if (!mounted) return;
-    _arrivalDialogShown = true;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(children: [
-          Icon(Icons.flag_rounded, color: Color(0xFF008080)),
-          SizedBox(width: 8),
-          Text('도착했습니다!'),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('목적지에 도착했습니다.\n내비게이션을 종료합니다.'),
-            if (pois.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text('근처 장소',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-              const SizedBox(height: 4),
-              ...pois.map((p) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(children: [
-                      const Icon(Icons.place, size: 14, color: Color(0xFF008080)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text('${p.type}: ${p.name}',
-                              style: const TextStyle(fontSize: 12))),
-                    ]),
-                  )),
-            ],
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              if (mounted) Navigator.of(context).pop();
-            },
-            child: const Text('확인'),
-          ),
-        ],
-      ),
-    ).whenComplete(() => _arrivalDialogShown = false);
   }
 
   static String _etaText(int durationMin) {
