@@ -78,6 +78,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 도착 감지
   bool _arrived = false;
   bool _arrivalDialogShown = false;
+  bool _arrivalBannerVisible = false;
+  List<({String name, String type})> _arrivalPois = const [];
 
   // 음성 안내
   FlutterTts? _tts;
@@ -232,8 +234,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (prog.arrived && !_arrived) {
           _arrived = true;
           _vps?.speak('arrival');
+          setState(() => _arrivalBannerVisible = true);
           _fetchNearbyPois(widget.destination!).then((pois) {
-            if (mounted) _showArrivalDialog(pois);
+            if (mounted) setState(() => _arrivalPois = pois);
           });
         }
         if (_rerouteFallback) {
@@ -726,6 +729,80 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     const SizedBox(width: 6),
                     Text('10초 후 현위치 복귀',
                         style: TextStyle(color: cs.onSurface, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── 도착 배너 (비침습, dim 없음) ──────────────────────────────────────
+          if (_arrivalBannerVisible)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.flag_rounded, color: cs.tertiary),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text('목적지에 도착했습니다',
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                        ),
+                        GestureDetector(
+                          onTap: () => setState(() => _arrivalBannerVisible = false),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.close_rounded, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_arrivalPois.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      ..._arrivalPois.map((p) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(children: [
+                              Icon(Icons.place, size: 14, color: cs.tertiary),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                  child: Text('${p.type}: ${p.name}',
+                                      style: const TextStyle(fontSize: 12))),
+                            ]),
+                          )),
+                    ],
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: GestureDetector(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: cs.tertiary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Text('종료',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
