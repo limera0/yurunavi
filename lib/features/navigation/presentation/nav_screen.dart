@@ -340,6 +340,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
       // 재탐색 실패 — 기존 경로 유지
     } finally {
       if (mounted) setState(() => _isRerouting = false);
+      final now = DateTime.now();
+      _lastRerouteAt = now;
+      _rerouteHistory.add(now);
+      _rerouteHistory.removeWhere(
+          (t) => now.difference(t) > _kFailureWindow);
+      final stillOffRoute = ref.read(routeProgressProvider)?.offRoute ?? false;
+      if (_rerouteHistory.length >= _kFailureCount && stillOffRoute) {
+        _rerouteFallback = true;
+        debugPrint('YNAV_REROUTE fallback enter n=${_rerouteHistory.length}');
+        if (!_saidPassedDest) {
+          _saidPassedDest = true;
+          _vps?.speak('dest_passed');
+        }
+      }
     }
   }
 
