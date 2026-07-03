@@ -1040,7 +1040,7 @@ class _TurnStep {
   factory _TurnStep.fromManeuver(ManeuverStep m) {
     return _TurnStep(
       _iconForType(m.type),
-      _labelForType(m.type),
+      _labelForType(m.type, m.roundaboutExitCount),
       _formatDist(m.distanceKm),
       m.distanceKm,
       m.type,
@@ -1064,7 +1064,7 @@ class _TurnStep {
     }
   }
 
-  static String _labelForType(int type) {
+  static String _labelForType(int type, [int? roundaboutExitCount]) {
     switch (type) {
       case 1: case 2: case 3: return '출발';
       case 4: case 5: case 6: return '목적지 도착';
@@ -1085,7 +1085,7 @@ class _TurnStep {
       case 23: return '우측 유지';
       case 24: return '좌측 유지';
       case 25: return '합류';
-      case 26: return '회전교차로 진입';
+      case 26: return roundaboutExitCount != null ? '회전교차로 $roundaboutExitCount번째 출구' : '회전교차로 진입';
       case 27: return '회전교차로 진출';
       case 28: return '도선 탑승';
       case 29: return '도선 하차';
