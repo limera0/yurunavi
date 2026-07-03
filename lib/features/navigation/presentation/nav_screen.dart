@@ -94,6 +94,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
+  double? _lastMovingZoom; // 3km/h 미만에서 줌 진동 방지용 마지막 주행 중 줌
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
 
   // 이탈 재탐색
@@ -508,10 +509,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // headingDeg는 호출부가 _resolveHeading()으로 이미 확정한 값이어야 한다.
   Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg}) async {
     if (!_styleLoaded) return;
-    final target = _zoomForSpeed(speedKmh);
-    // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
-    final diff = target - _navZoom;
-    _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
+    // 3km/h 미만은 정차/저속으로 보고 줌을 갱신하지 않는다 — 정지 시 GPS
+    // 속도 잡음(mpp가 0.238↔1.18처럼 튐)으로 줌이 진동하는 것을 방지.
+    if (speedKmh >= 3) {
+      final target = _zoomForSpeed(speedKmh);
+      // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
+      final diff = target - _navZoom;
+      _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
+      _lastMovingZoom = _navZoom;
+    } else if (_lastMovingZoom != null) {
+      _navZoom = _lastMovingZoom!;
+    }
 
     var camTarget = loc;
     if (headingDeg != null) {
