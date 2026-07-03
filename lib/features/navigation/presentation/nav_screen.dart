@@ -498,11 +498,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     var camTarget = loc;
     if (effectiveHeadingDeg != null) {
+      // getMetersPerPixelAtLatitude returns meters-per-NATIVE(physical)-pixel,
+      // but MediaQuery's size.height is logical px. Dividing by devicePixelRatio
+      // brings the two onto the same (physical) footing so the 0.25 fraction
+      // means "quarter of the actual screen", not a dpr-scaled multiple of it.
       final metersPerPixel = await _mlCtrl?.getMetersPerPixelAtLatitude(loc.latitude);
       if (metersPerPixel != null && mounted) {
         final screenHeightPx = MediaQuery.of(context).size.height;
-        final metersAhead = metersPerPixel * screenHeightPx * 0.35;
-        debugPrint('YNAV_CAM anchor hdg=$effectiveHeadingDeg mpp=$metersPerPixel mAhead=$metersAhead');
+        final dpr = MediaQuery.of(context).devicePixelRatio;
+        const frac = 0.25;
+        final metersAhead = metersPerPixel * screenHeightPx * frac / dpr;
+        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel frac=$frac mAhead=$metersAhead');
         final off = offsetOrigin(loc.latitude, loc.longitude, effectiveHeadingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
       }
