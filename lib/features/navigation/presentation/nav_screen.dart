@@ -98,6 +98,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Timer? _offRouteDebounce;
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
 
+  // 재탐색 쿨다운 + 수렴 실패 폴백 (RECON_heading_reroute.md §3)
+  DateTime? _lastRerouteAt;                     // 마지막 재탐색 완료 시각
+  static const _kRerouteCooldown = Duration(seconds: 8);
+  final List<DateTime> _rerouteHistory = [];    // 최근 재탐색 완료 시각들
+  static const _kFailureWindow = Duration(seconds: 12);
+  static const _kFailureCount = 3;
+  bool _rerouteFallback = false;                // true면 재탐색 중단, 기존 경로 유지
+  bool _saidPassedDest = false;                 // '목적지를 지나쳤습니다' 중복 발화 방지
+
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
   List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
@@ -276,7 +285,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _triggerReroute() {
-    if (_isRerouting) return;
+    if (_isRerouting || _rerouteFallback) return;
+    if (_lastRerouteAt != null &&
+        DateTime.now().difference(_lastRerouteAt!) < _kRerouteCooldown) {
+      debugPrint('YNAV_REROUTE cooldown skip');
+      return;
+    }
     _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
       _offRouteDebounce = null;
       final current = ref.read(navStateProvider)?.pos;
