@@ -238,7 +238,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
         if (_rerouteFallback) {
           // 목적지 150m 밖으로 벗어나거나 다시 경로 위로 복귀하면 폴백 해제
-          if (!prog.offRoute || prog.distToDestM > 150) {
+          if (!prog.offRoute || prog.distToDestM > 30) {
             _rerouteFallback = false;
             _rerouteHistory.clear();
             _saidPassedDest = false;
