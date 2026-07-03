@@ -337,6 +337,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _arrivalBannerVisible = false;
         _arrivalPois = const [];
         _arrived = false;
+        _saidArrival = false;
       });
     }
     final dest = widget.destination;
