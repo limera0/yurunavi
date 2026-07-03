@@ -613,9 +613,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _navLocSourceId,
       _navLocLayerId,
       const ml.CircleLayerProperties(
-        circleRadius: 9,
+        circleRadius: 12,
         circleColor: _kLocColor,
-        circleStrokeWidth: 3,
+        circleStrokeWidth: 4,
         circleStrokeColor: '#FFFFFF',
       ),
     );
