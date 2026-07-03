@@ -9,7 +9,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart'; // 임시 오버레이용 — ②③에서 제거
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
@@ -771,47 +770,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
               compassEnabled: false,
               onMapCreated: (c) => _mlCtrl = c,
               onStyleLoadedCallback: _onStyleLoaded,
-            ),
-          ),
-
-          // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
-          // ② GeoJSON LineLayer로, ③ Circle/Symbol로 교체 후 이 블록 제거
-          IgnorePointer(
-            child: FlutterMap(
-              options: MapOptions(
-                backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
-                initialCenter: ref.read(navStateProvider)?.pos ?? _kInitialMapView,
-                initialZoom: _navZoom,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.none,
-                ),
-              ),
-              children: [
-                // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
-                MarkerLayer(markers: [
-                  ...widget.waypoints.map(
-                    (wp) => Marker(
-                      point: wp,
-                      width: 34,
-                      height: 34,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(
-                        Icons.location_pin,
-                        color: Color(0xFFFFB300),
-                        size: 34,
-                      ),
-                    ),
-                  ),
-                  if (widget.destination != null)
-                    Marker(
-                      point: widget.destination!,
-                      width: 38,
-                      height: 38,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
-                    ),
-                ]),
-              ],
             ),
           ),
 
