@@ -62,11 +62,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
   String? _rawStyle;
   String? _styleJson;
 
-  ml.Circle? _locMarker;
-  static const String _kLocColor = '#00C853';
+  bool _locLayerReady = false;
+  static const String _kLocColor = '#2D7DF6';
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
+  static const _navLocSourceId = 'nav-loc-source';
+  static const _navLocLayerId  = 'nav-loc-layer';
 
   bool _isManualMode = false;
   Timer? _recenterTimer;
@@ -557,6 +559,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ],
       };
 
+  Map<String, dynamic> _buildLocGeoJson(LatLng p) => {
+        'type': 'FeatureCollection',
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              // GeoJSON은 [longitude, latitude] 순서
+              'coordinates': [p.longitude, p.latitude],
+            },
+            'properties': <String, dynamic>{},
+          }
+        ],
+      };
+
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
@@ -570,27 +587,39 @@ class _NavScreenState extends ConsumerState<NavScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
-      // belowLayerId: ③에서 Circle 레이어 추가 후 z-order 삽입
     );
+  }
+
+  /// route 레이어가 이미 추가된 뒤(호출 순서 보장) 위치점 레이어를 1회 추가.
+  /// 나중에 추가된 레이어가 위(전면)에 그려지므로 route 위에 puck이 온다
+  /// (RECON_camera_redesign.md §1-2, RECON_ZORDER.md). belowLayerId 없이
+  /// call order만으로 z-order를 확정하기 위해 _locLayerReady로 1회만 실행 보장.
+  Future<void> _initLocationLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _locLayerReady) return;
+    final p = ref.read(navStateProvider)?.pos ?? _kInitialMapView;
+    await ctrl.addGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
+    await ctrl.addCircleLayer(
+      _navLocSourceId,
+      _navLocLayerId,
+      const ml.CircleLayerProperties(
+        circleRadius: 9,
+        circleColor: _kLocColor,
+        circleStrokeWidth: 3,
+        circleStrokeColor: '#FFFFFF',
+      ),
+    );
+    _locLayerReady = true;
   }
 
   Future<void> _ensureLocationMarker() async {
     final c = _mlCtrl;
-    if (c == null || !_styleLoaded) return;
+    // _locLayerReady 이전엔 no-op — _initLocationLayer가 route 레이어
+    // 추가 이후에만 puck 레이어를 만들도록 해 z-order 레이스를 막는다.
+    if (c == null || !_styleLoaded || !_locLayerReady) return;
     final p = ref.read(navStateProvider)?.pos;
     if (p == null) return;
-    final geo = _toMl(p);
-    if (_locMarker == null) {
-      _locMarker = await c.addCircle(ml.CircleOptions(
-        geometry: geo,
-        circleRadius: 8,
-        circleColor: _kLocColor,
-        circleStrokeWidth: 3,
-        circleStrokeColor: '#FFFFFF',
-      ));
-    } else {
-      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
-    }
+    await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
   }
 
   void _onStyleLoaded() {
@@ -601,7 +630,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
-      _ensureLocationMarker(); // unawaited — ③
+      _initLocationLayer().whenComplete(_ensureLocationMarker); // unawaited — ③
     });
   }
 
