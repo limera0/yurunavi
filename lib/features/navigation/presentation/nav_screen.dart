@@ -212,9 +212,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
       (_, next) {
         if (next == null || !mounted) return;
         final loc = next.pos;
-        if (!_isManualMode) _recenter(loc, speedKmh: next.speedKmh, headingDeg: next.headingDeg);
-        if (next.headingDeg != null && next.speedKmh > 2 && _styleLoaded) {
-          _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(next.headingDeg!));
+        // 이 틱의 heading을 한 번만 확정해 bearing 회전과 offset 계산에
+        // 동일하게 전달 — 서로 다른 heading 세대를 쓰는 순서 역전 방지
+        // (RECON §6, _recenter가 await를 포함한 비동기라 호출부가 다음 틱을
+        // 기다리지 않고 흘려보내는 구조에서 발생).
+        final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
+        if (!_isManualMode) {
+          _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
+        }
+        if (effectiveHeadingDeg != null && next.speedKmh > 2 && _styleLoaded) {
+          _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(effectiveHeadingDeg));
         }
         _ensureLocationMarker();
       },
@@ -486,6 +493,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
+  /// 3km/h 미만(정차/저속)에서는 GPS heading 잡음을 무시하고 마지막으로
+  /// 이동 중 관측된 heading을 그대로 유지한다 — 정지 시 offset이 매 틱
+  /// 잡음을 따라 흔들리는 것을 막는다 (RECON §4/§5). 호출부(GPS 틱 핸들러)가
+  /// 틱당 한 번만 호출해 그 결과를 bearing 회전과 offset 계산 양쪽에
+  /// 동일하게 전달해야 두 값이 어긋나지 않는다 (RECON §6).
+  double? _resolveHeading(double speedKmh, double? headingDeg) {
+    if (speedKmh >= 3 && headingDeg != null) _lastHeadingDeg = headingDeg;
+    return (speedKmh >= 3 ? headingDeg : null) ?? _lastHeadingDeg;
+  }
+
+  // headingDeg는 호출부가 _resolveHeading()으로 이미 확정한 값이어야 한다.
   Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg}) async {
     if (!_styleLoaded) return;
     final target = _zoomForSpeed(speedKmh);
@@ -493,15 +511,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
 
-    // 3km/h 미만(정차/저속)에서는 GPS heading 잡음을 무시하고 마지막으로
-    // 이동 중 관측된 heading을 그대로 유지 — 정지 시 offset이 매 틱 잡음을
-    // 따라 흔들리는 것을 막는다 (RECON §4/§5). 한 번도 움직인 적 없으면
-    // (_lastHeadingDeg == null) effectiveHeadingDeg도 null → metersAhead=0.
-    if (speedKmh >= 3 && headingDeg != null) _lastHeadingDeg = headingDeg;
-    final effectiveHeadingDeg = (speedKmh >= 3 ? headingDeg : null) ?? _lastHeadingDeg;
-
     var camTarget = loc;
-    if (effectiveHeadingDeg != null) {
+    if (headingDeg != null) {
       // getMetersPerPixelAtLatitude returns meters-per-NATIVE(physical)-pixel,
       // but MediaQuery's size.height is logical px. Dividing by devicePixelRatio
       // brings the two onto the same (physical) footing so the 0.25 fraction
@@ -513,7 +524,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         const frac = 0.25;
         final metersAhead = metersPerPixel * screenHeightPx * frac / dpr;
         debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel frac=$frac mAhead=$metersAhead');
-        final off = offsetOrigin(loc.latitude, loc.longitude, effectiveHeadingDeg, metersAhead);
+        final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
       }
     }
@@ -599,10 +610,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
       setState(() => _isManualMode = false);
-      final pos = ref.read(navStateProvider)?.pos;
+      final ns = ref.read(navStateProvider);
+      final pos = ns?.pos;
       if (pos != null) {
-        final ns = ref.read(navStateProvider);
-        _recenter(pos, animate: true, speedKmh: ns?.speedKmh ?? 0, headingDeg: ns?.headingDeg);
+        final speedKmh = ns?.speedKmh ?? 0;
+        _recenter(pos,
+            animate: true,
+            speedKmh: speedKmh,
+            headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
       }
     });
   }
@@ -939,12 +954,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 _NavIconBtn(
                   icon: _isManualMode ? Icons.gps_fixed : Icons.my_location,
                   onTap: () {
-                    final pos = ref.read(navStateProvider)?.pos;
+                    final ns = ref.read(navStateProvider);
+                    final pos = ns?.pos;
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    final ns = ref.read(navStateProvider);
-                    _recenter(pos, animate: true, speedKmh: ns?.speedKmh ?? 0, headingDeg: ns?.headingDeg);
+                    final speedKmh = ns?.speedKmh ?? 0;
+                    _recenter(pos,
+                        animate: true,
+                        speedKmh: speedKmh,
+                        headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
                   },
                 ),
                 const SizedBox(height: 10),
