@@ -515,17 +515,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     var camTarget = loc;
     if (headingDeg != null) {
-      // getMetersPerPixelAtLatitude returns meters-per-NATIVE(physical)-pixel,
-      // but MediaQuery's size.height is logical px. Dividing by devicePixelRatio
-      // brings the two onto the same (physical) footing so the 0.25 fraction
-      // means "quarter of the actual screen", not a dpr-scaled multiple of it.
       final metersPerPixel = await _mlCtrl?.getMetersPerPixelAtLatitude(loc.latitude);
       if (metersPerPixel != null && mounted) {
         final screenHeightPx = MediaQuery.of(context).size.height;
         final dpr = MediaQuery.of(context).devicePixelRatio;
         const frac = 0.25;
-        final metersAhead = metersPerPixel * screenHeightPx * frac / dpr;
-        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel frac=$frac mAhead=$metersAhead');
+        // getMetersPerPixelAtLatitude is meters per PHYSICAL pixel; size.height
+        // is logical px, so convert logical->physical by multiplying by dpr
+        // (dividing was the bug: it shrank mAhead by dpr^2 instead of scaling
+        // it up). Worked example: dpr=2.8125, mpp=0.238, physH=832*2.8125=2340
+        // -> mAhead = 0.238 * 2340 * 0.25 = 139.3m.
+        final physH = screenHeightPx * dpr;
+        final metersAhead = metersPerPixel * physH * frac;
+        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel physH=$physH mAhead=$metersAhead');
         final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
       }
