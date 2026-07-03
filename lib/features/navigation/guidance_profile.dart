@@ -19,6 +19,7 @@ class GuidanceProfile {
   final Set<String> enabledEvents;
   final Map<String, List<GuidanceTier>> eventTiers;
   final Map<String, double> eventImminentM;
+  final double arrivalVoiceM;
 
   const GuidanceProfile({
     required this.imminentM,
@@ -26,6 +27,7 @@ class GuidanceProfile {
     required this.enabledEvents,
     this.eventTiers = const <String, List<GuidanceTier>>{},
     this.eventImminentM = const <String, double>{},
+    this.arrivalVoiceM = 8,
   });
 
   static GuidanceProfile get _fallback => GuidanceProfile(
@@ -47,6 +49,7 @@ class GuidanceProfile {
       final raw = await rootBundle.loadString(assetPath);
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final imminentM = (json['imminent_m'] as num).toDouble();
+      final arrivalVoiceM = (json['arrival_voice_m'] as num?)?.toDouble() ?? 8;
       final rawTiers = (json['tiers'] as List)
           .map((e) => GuidanceTier.fromJson(e as Map<String, dynamic>))
           .toList()
@@ -75,7 +78,8 @@ class GuidanceProfile {
           tiers: rawTiers,
           enabledEvents: enabledEvents,
           eventTiers: eventTiersMap,
-          eventImminentM: eventImminentMap);
+          eventImminentM: eventImminentMap,
+          arrivalVoiceM: arrivalVoiceM);
     } catch (_) {
       return _fallback;
     }

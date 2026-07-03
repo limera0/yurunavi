@@ -85,6 +85,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
+  bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
   bool _arrivalBannerVisible = false;
   List<({String name, String type})> _arrivalPois = const [];
 
@@ -249,11 +250,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _handleVoice(prog);
         if (prog.arrived && !_arrived) {
           _arrived = true;
-          _vps?.speak('arrival');
           setState(() => _arrivalBannerVisible = true);
           _fetchNearbyPois(widget.destination!).then((pois) {
             if (mounted) setState(() => _arrivalPois = pois);
           });
+        }
+        if (!_saidArrival &&
+            prog.distToDestM <= (_profile?.arrivalVoiceM ?? 8)) {
+          _saidArrival = true;
+          _vps?.speak('arrival');
         }
         if (_rerouteFallback) {
           // 목적지 150m 밖으로 벗어나거나 다시 경로 위로 복귀하면 폴백 해제
