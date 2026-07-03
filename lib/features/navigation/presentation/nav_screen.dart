@@ -308,7 +308,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
   }
 
-  Future<void> _reroute(LatLng origin) async {
+  Future<void> _reroute(LatLng origin, {bool silent = false}) async {
     if (_isRerouting || !mounted) return;
     if (_arrivalBannerVisible) {
       setState(() {
@@ -342,7 +342,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         });
         debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
         // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
-        _vps?.speak('reroute');
+        if (!silent) _vps?.speak('reroute');
         _lastAnnouncedIdx = 0; // 출발 step 중복 방지
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
@@ -368,6 +368,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
       }
     }
+  }
+
+  void _manualReroute() {
+    final pos = ref.read(navStateProvider)?.pos;
+    if (pos == null) return;
+    _reroute(pos, silent: true);
   }
 
   Future<void> _initTts() async {
