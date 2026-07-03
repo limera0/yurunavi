@@ -39,6 +39,7 @@ class VoiceEngine {
     final event = eventForType(steps[turnIdx].type);
     if (event == null) return const [];
 
+    final imminentM = profile.imminentForEvent(_profileEventKey(event));
     if (step != _voiceStepIdx) {
       _voiceStepIdx = step;
       final entryD = d;
@@ -47,7 +48,7 @@ class VoiceEngine {
         (t) => entryD >= t.minEntryM,
         orElse: () => eventTierList.last,
       );
-      final pts = [...tier.pointsM, profile.imminentM];
+      final pts = [...tier.pointsM, imminentM];
       _pendingPoints = pts.where((p) => p < entryD).toList()
         ..sort((a, b) => b.compareTo(a));
     }
@@ -55,7 +56,7 @@ class VoiceEngine {
     final out = <SpeakIntent>[];
     while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
       final point = _pendingPoints.removeAt(0);
-      final isImminent = point == profile.imminentM;
+      final isImminent = point == imminentM;
       if (profile.isEnabled(_profileEventKey(event))) {
         final phase = isImminent ? 'imminent' : 'approach';
         final suffix = isImminent &&

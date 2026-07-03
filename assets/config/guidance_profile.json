@@ -41,6 +41,6 @@
       ]
     },
     "continue":    { "enabled": false },
-    "destination": { "enabled": true }
+    "destination": { "enabled": true, "imminent_m": 50 }
   }
 }
