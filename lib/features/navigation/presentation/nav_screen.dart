@@ -493,8 +493,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
 
-    if (headingDeg != null) _lastHeadingDeg = headingDeg;
-    final effectiveHeadingDeg = headingDeg ?? _lastHeadingDeg;
+    // 3km/h 미만(정차/저속)에서는 GPS heading 잡음을 무시하고 마지막으로
+    // 이동 중 관측된 heading을 그대로 유지 — 정지 시 offset이 매 틱 잡음을
+    // 따라 흔들리는 것을 막는다 (RECON §4/§5). 한 번도 움직인 적 없으면
+    // (_lastHeadingDeg == null) effectiveHeadingDeg도 null → metersAhead=0.
+    if (speedKmh >= 3 && headingDeg != null) _lastHeadingDeg = headingDeg;
+    final effectiveHeadingDeg = (speedKmh >= 3 ? headingDeg : null) ?? _lastHeadingDeg;
 
     var camTarget = loc;
     if (effectiveHeadingDeg != null) {
