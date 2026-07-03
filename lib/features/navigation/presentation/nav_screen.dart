@@ -916,6 +916,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
                   },
                 ),
+                const SizedBox(height: 10),
+                _NavIconBtn(
+                  icon: Icons.refresh_rounded,
+                  loading: _isRerouting,
+                  enabled: navState?.pos != null,
+                  onTap: _manualReroute,
+                ),
               ],
             ),
           ),
@@ -1079,13 +1086,21 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
 class _NavIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _NavIconBtn({required this.icon, required this.onTap});
+  final bool loading;
+  final bool enabled;
+  const _NavIconBtn({
+    required this.icon,
+    required this.onTap,
+    this.loading = false,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final active = enabled && !loading;
     return GestureDetector(
-      onTap: onTap,
+      onTap: active ? onTap : null,
       child: Container(
         width: 44,
         height: 44,
@@ -1095,7 +1110,12 @@ class _NavIconBtn extends StatelessWidget {
           border: Border.all(color: cs.outline, width: 1),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: Icon(icon, color: cs.tertiary, size: 20),
+        child: loading
+            ? Padding(
+                padding: const EdgeInsets.all(12),
+                child: CircularProgressIndicator(strokeWidth: 2, color: cs.tertiary),
+              )
+            : Icon(icon, color: active ? cs.tertiary : cs.outline, size: 20),
       ),
     );
   }
