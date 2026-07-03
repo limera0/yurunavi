@@ -63,12 +63,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
   String? _styleJson;
 
   bool _locLayerReady = false;
+  bool _destLayerReady = false;
   static const String _kLocColor = '#2D7DF6';
+  static const String _kDestColor = '#FF5252';
+  static const String _kWaypointColor = '#FFB300';
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
+  static const _navDestSourceId = 'nav-dest-source';
+  static const _navDestLayerId  = 'nav-dest-layer';
+  static const _navWaypointSourceId = 'nav-waypoint-source';
+  static const _navWaypointLayerId  = 'nav-waypoint-layer';
 
   bool _isManualMode = false;
   Timer? _recenterTimer;
@@ -584,6 +591,22 @@ class _NavScreenState extends ConsumerState<NavScreen>
         ],
       };
 
+  /// 여러 점을 하나의 FeatureCollection으로 — waypoint 여러 개도 소스 1개로 처리.
+  Map<String, dynamic> _buildPointsGeoJson(List<LatLng> points) => {
+        'type': 'FeatureCollection',
+        'features': points
+            .map((p) => {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'Point',
+                    // GeoJSON은 [longitude, latitude] 순서
+                    'coordinates': [p.longitude, p.latitude],
+                  },
+                  'properties': <String, dynamic>{},
+                })
+            .toList(),
+      };
+
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
@@ -632,6 +655,43 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
   }
 
+  /// 목적지/경유지는 widget 생명주기 동안 불변(ctor의 final 필드, 재할당 없음)
+  /// 이므로 puck과 달리 틱마다 갱신할 필요 없이 스타일 로드 후 1회만 설정한다.
+  /// route 레이어 위, puck 레이어 아래에 오도록 puck보다 먼저 생성한다.
+  Future<void> _initDestLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _destLayerReady) return;
+    _destLayerReady = true;
+    if (widget.waypoints.isNotEmpty) {
+      await ctrl.addGeoJsonSource(
+          _navWaypointSourceId, _buildPointsGeoJson(widget.waypoints));
+      await ctrl.addCircleLayer(
+        _navWaypointSourceId,
+        _navWaypointLayerId,
+        const ml.CircleLayerProperties(
+          circleRadius: 10,
+          circleColor: _kWaypointColor,
+          circleStrokeWidth: 3,
+          circleStrokeColor: '#FFFFFF',
+        ),
+      );
+    }
+    final dest = widget.destination;
+    if (dest != null) {
+      await ctrl.addGeoJsonSource(_navDestSourceId, _buildPointsGeoJson([dest]));
+      await ctrl.addCircleLayer(
+        _navDestSourceId,
+        _navDestLayerId,
+        const ml.CircleLayerProperties(
+          circleRadius: 15,
+          circleColor: _kDestColor,
+          circleStrokeWidth: 4,
+          circleStrokeColor: '#FFFFFF',
+        ),
+      );
+    }
+  }
+
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
@@ -640,7 +700,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
-      _initLocationLayer().whenComplete(_ensureLocationMarker); // unawaited — ③
+      _initDestLayer().whenComplete(() {
+        _initLocationLayer().whenComplete(_ensureLocationMarker); // unawaited — ③
+      });
     });
   }
 
