@@ -92,6 +92,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
+  double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
@@ -492,13 +493,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final diff = target - _navZoom;
     _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
 
+    if (headingDeg != null) _lastHeadingDeg = headingDeg;
+    final effectiveHeadingDeg = headingDeg ?? _lastHeadingDeg;
+
     var camTarget = loc;
-    if (headingDeg != null && speedKmh > 2) {
+    if (effectiveHeadingDeg != null) {
       final metersPerPixel = await _mlCtrl?.getMetersPerPixelAtLatitude(loc.latitude);
       if (metersPerPixel != null && mounted) {
         final screenHeightPx = MediaQuery.of(context).size.height;
         final metersAhead = metersPerPixel * screenHeightPx * 0.35;
-        final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
+        debugPrint('YNAV_CAM anchor hdg=$effectiveHeadingDeg mpp=$metersPerPixel mAhead=$metersAhead');
+        final off = offsetOrigin(loc.latitude, loc.longitude, effectiveHeadingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
       }
     }
