@@ -63,11 +63,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   bool _locLayerReady = false;
   bool _destLayerReady = false;
-  static const String _kLocColor = '#2D7DF6';
   static const String _kDestIcon = 'pointer_red';
   static const double _kDestIconSize = 1.5;
   static const String _kWpIcon = 'pointer_yellow';
   static const double _kWpIconSize = 1.5;
+  static const String _kArrowIcon = 'nav_arrow';
+  // 온폰 실측 보정 필요할 수 있는 튜닝값 — 초기 추정치.
+  static const double _kArrowIconSize = 0.6;
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
@@ -231,7 +233,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (effectiveHeadingDeg != null && next.speedKmh > 2 && _styleLoaded) {
           _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(effectiveHeadingDeg));
         }
-        _ensureLocationMarker();
+        _ensureLocationMarker(effectiveHeadingDeg);
       },
       fireImmediately: true,
     );
@@ -579,7 +581,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ],
       };
 
-  Map<String, dynamic> _buildLocGeoJson(LatLng p) => {
+  Map<String, dynamic> _buildLocGeoJson(LatLng p, [double? bearing]) => {
         'type': 'FeatureCollection',
         'features': [
           {
@@ -589,7 +591,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
               // GeoJSON은 [longitude, latitude] 순서
               'coordinates': [p.longitude, p.latitude],
             },
-            'properties': <String, dynamic>{},
+            'properties': <String, dynamic>{
+              // ['get','bearing']이 null을 만나 회전 못하는 것을 막기 위해
+              // heading 미확정 시 0으로 기본값 처리.
+              'bearing': bearing ?? 0,
+            },
           }
         ],
       };
@@ -619,27 +625,32 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (ctrl == null || _locLayerReady) return;
     final p = ref.read(navStateProvider)?.pos ?? _kInitialMapView;
     await ctrl.addGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
-    await ctrl.addCircleLayer(
+    // addSymbol/SymbolManager로는 icon-rotation-alignment:map을 설정할 수
+    // 없어(스타일 기본값 auto로 고정) 헤딩 회전이 카메라 bearing과 어긋난다.
+    // raw GeoJSON 기반 addSymbolLayer만 iconRotationAlignment을 노출한다.
+    await ctrl.addSymbolLayer(
       _navLocSourceId,
       _navLocLayerId,
-      const ml.CircleLayerProperties(
-        circleRadius: 12,
-        circleColor: _kLocColor,
-        circleStrokeWidth: 4,
-        circleStrokeColor: '#FFFFFF',
+      ml.SymbolLayerProperties(
+        iconImage: _kArrowIcon,
+        iconRotate: [ml.Expressions.get, 'bearing'],
+        iconRotationAlignment: 'map',
+        iconAnchor: 'center',
+        iconSize: _kArrowIconSize,
+        iconAllowOverlap: true,
       ),
     );
     _locLayerReady = true;
   }
 
-  Future<void> _ensureLocationMarker() async {
+  Future<void> _ensureLocationMarker([double? heading]) async {
     final c = _mlCtrl;
     // _locLayerReady 이전엔 no-op — _initLocationLayer가 route 레이어
     // 추가 이후에만 puck 레이어를 만들도록 해 z-order 레이스를 막는다.
     if (c == null || !_styleLoaded || !_locLayerReady) return;
     final p = ref.read(navStateProvider)?.pos;
     if (p == null) return;
-    await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
+    await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p, heading));
   }
 
   /// 목적지/경유지는 widget 생명주기 동안 불변(ctor의 final 필드, 재할당 없음)
@@ -683,8 +694,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       await _mlCtrl?.addImage(_kDestIcon, pinBytes.buffer.asUint8List());
       final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
       await _mlCtrl?.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+      final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
+      await _mlCtrl?.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
       _initDestLayer().whenComplete(() {
-        _initLocationLayer().whenComplete(_ensureLocationMarker); // unawaited — ③
+        _initLocationLayer().whenComplete(() => _ensureLocationMarker()); // unawaited — ③
       });
     });
   }
