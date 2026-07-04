@@ -71,9 +71,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // pointer_yellow도 pointer_red와 동일 96px 에셋 — 동일 0.7 배율 적용.
   static const double _kWpIconSize = 1.05;
   static const String _kArrowIcon = 'nav_arrow';
-  // arrow_puck 에셋은 144px(핀은 96px)이라 배율이 다름. 화면상 핀 높이
-  // (96 × 1.05 ≈ 100.8px)에 맞추려면: 1.5 × 0.7 × (96/144) = 0.7.
-  static const double _kArrowIconSize = 0.7;
+  // 화살표는 핀보다 눈에 띄게 크게 — 핀 배율(0.7) 대비 약 1.43배.
+  static const double _kArrowIconSize = 1.0;
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';

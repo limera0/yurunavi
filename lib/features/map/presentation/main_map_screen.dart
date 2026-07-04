@@ -109,7 +109,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const String _kWpIcon = 'pointer_yellow';
   static const double _kWpIconSize = 1.05; // nav_screen과 동일 배율
   static const String _kArrowIcon = 'nav_arrow';
-  static const double _kArrowIconSize = 0.7; // nav_screen과 동일(144px 에셋)
+  static const double _kArrowIconSize = 1.0; // nav_screen과 동일
 
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용
 
