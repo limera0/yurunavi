@@ -15,6 +15,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
@@ -607,11 +608,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
     await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
+    final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
     await ctrl.addLineLayer(
       _navRouteSourceId,
       _navRouteLayerId,
-      const ml.LineLayerProperties(
-        lineColor: '#F28C28', // nav 오렌지색 유지
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
         lineWidth: 6.0,
         lineCap: 'round',
         lineJoin: 'round',

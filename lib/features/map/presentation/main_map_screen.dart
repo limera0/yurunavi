@@ -292,11 +292,28 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     );
     // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
+    final initialIdx = ref.read(mapInteractionProvider).selectedRouteIdx;
     await ctrl.addLineLayer(
       _routeSourceId,
       _routeLayerId,
-      const ml.LineLayerProperties(
-        lineColor: '#1E5AFF',
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[initialIdx] ?? courseLineColor[2]!),
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+    );
+  }
+
+  Future<void> _recolorRouteLayer(int idx) async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded) return;
+    await ctrl.removeLayer(_routeLayerId);
+    await ctrl.addLineLayer(
+      _routeSourceId,
+      _routeLayerId,
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
         lineWidth: 6.0,
         lineCap: 'round',
         lineJoin: 'round',
@@ -880,6 +897,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       }
       if (prev?.waypoints != next.waypoints) {
         _syncWaypointMarkers(next.waypoints); // unawaited
+      }
+      if (prev?.selectedRouteIdx != next.selectedRouteIdx) {
+        _recolorRouteLayer(next.selectedRouteIdx); // unawaited
       }
     });
     final isOnline = ref.watch(isOnlineProvider);
@@ -1546,10 +1566,10 @@ class _CourseSheet extends StatelessWidget {
     required this.onClose,
   });
 
-  static const _routes = [
-    _RouteInfo('시골길로\n느긋하게', AppColors.mapCourse),
-    _RouteInfo('지방도로\n여유롭게', AppColors.tertiary),
-    _RouteInfo('국도로\n빠르게', AppColors.primary),
+  static final _routes = [
+    _RouteInfo('시골길로\n느긋하게', courseLineColor[0]!),
+    _RouteInfo('지방도로\n여유롭게', courseLineColor[1]!),
+    _RouteInfo('국도로\n빠르게', courseLineColor[2]!),
   ];
 
   @override
