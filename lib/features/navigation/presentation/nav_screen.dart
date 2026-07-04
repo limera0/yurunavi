@@ -64,12 +64,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _locLayerReady = false;
   bool _destLayerReady = false;
   static const String _kDestIcon = 'pointer_red';
-  static const double _kDestIconSize = 1.5;
+  // 기존 1.5 × 0.7 = 1.05 (핀 이미지 96px 기준, 화면상 96×1.05 ≈ 100.8px).
+  static const double _kDestIconSize = 1.05;
   static const String _kWpIcon = 'pointer_yellow';
-  static const double _kWpIconSize = 1.5;
+  // pointer_yellow도 pointer_red와 동일 96px 에셋 — 동일 0.7 배율 적용.
+  static const double _kWpIconSize = 1.05;
   static const String _kArrowIcon = 'nav_arrow';
-  // 온폰 실측 보정 필요할 수 있는 튜닝값 — 초기 추정치.
-  static const double _kArrowIconSize = 0.6;
+  // arrow_puck 에셋은 144px(핀은 96px)이라 배율이 다름. 화면상 핀 높이
+  // (96 × 1.05 ≈ 100.8px)에 맞추려면: 1.5 × 0.7 × (96/144) = 0.7.
+  static const double _kArrowIconSize = 0.7;
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
