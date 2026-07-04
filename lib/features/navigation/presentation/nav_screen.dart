@@ -64,17 +64,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _locLayerReady = false;
   bool _destLayerReady = false;
   static const String _kLocColor = '#2D7DF6';
-  static const String _kDestColor = '#FF5252';
-  static const String _kWaypointColor = '#FFB300';
+  static const String _kDestIcon = 'pointer_red';
+  static const double _kDestIconSize = 1.5;
+  static const String _kWpIcon = 'pointer_yellow';
+  static const double _kWpIconSize = 1.5;
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
-  static const _navDestSourceId = 'nav-dest-source';
-  static const _navDestLayerId  = 'nav-dest-layer';
-  static const _navWaypointSourceId = 'nav-waypoint-source';
-  static const _navWaypointLayerId  = 'nav-waypoint-layer';
 
   bool _isManualMode = false;
   Timer? _recenterTimer;
@@ -596,22 +594,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         ],
       };
 
-  /// 여러 점을 하나의 FeatureCollection으로 — waypoint 여러 개도 소스 1개로 처리.
-  Map<String, dynamic> _buildPointsGeoJson(List<LatLng> points) => {
-        'type': 'FeatureCollection',
-        'features': points
-            .map((p) => {
-                  'type': 'Feature',
-                  'geometry': {
-                    'type': 'Point',
-                    // GeoJSON은 [longitude, latitude] 순서
-                    'coordinates': [p.longitude, p.latitude],
-                  },
-                  'properties': <String, dynamic>{},
-                })
-            .toList(),
-      };
-
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
@@ -667,44 +649,40 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null || _destLayerReady) return;
     _destLayerReady = true;
-    if (widget.waypoints.isNotEmpty) {
-      await ctrl.addGeoJsonSource(
-          _navWaypointSourceId, _buildPointsGeoJson(widget.waypoints));
-      await ctrl.addCircleLayer(
-        _navWaypointSourceId,
-        _navWaypointLayerId,
-        const ml.CircleLayerProperties(
-          circleRadius: 10,
-          circleColor: _kWaypointColor,
-          circleStrokeWidth: 3,
-          circleStrokeColor: '#FFFFFF',
-        ),
-      );
+    for (final wp in widget.waypoints) {
+      await ctrl.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(wp),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 5,
+      ));
     }
     final dest = widget.destination;
     if (dest != null) {
-      await ctrl.addGeoJsonSource(_navDestSourceId, _buildPointsGeoJson([dest]));
-      await ctrl.addCircleLayer(
-        _navDestSourceId,
-        _navDestLayerId,
-        const ml.CircleLayerProperties(
-          circleRadius: 15,
-          circleColor: _kDestColor,
-          circleStrokeWidth: 4,
-          circleStrokeColor: '#FFFFFF',
-        ),
-      );
+      await ctrl.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(dest),
+        iconImage: _kDestIcon,
+        iconSize: _kDestIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 10,
+      ));
     }
   }
 
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
-    _initRouteLayer().whenComplete(() {
+    _initRouteLayer().whenComplete(() async {
       if (_routePoints.length >= 2 && mounted) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
+      // dest/waypoint 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
+      final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
+      await _mlCtrl?.addImage(_kDestIcon, pinBytes.buffer.asUint8List());
+      final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
+      await _mlCtrl?.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
       _initDestLayer().whenComplete(() {
         _initLocationLayer().whenComplete(_ensureLocationMarker); // unawaited — ③
       });
