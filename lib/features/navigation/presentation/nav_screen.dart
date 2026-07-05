@@ -540,16 +540,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
         final screenHeightPx = MediaQuery.of(context).size.height;
         final dpr = MediaQuery.of(context).devicePixelRatio;
         const frac = 0.25;
-        // getMetersPerPixelAtLatitude is meters per PHYSICAL pixel; size.height
-        // is logical px, so convert logical->physical by multiplying by dpr
-        // (dividing was the bug: it shrank mAhead by dpr^2 instead of scaling
-        // it up). Worked example: dpr=2.8125, mpp=0.238, physH=832*2.8125=2340
-        // -> mAhead = 0.238 * 2340 * 0.25 = 139.3m.
-        final physH = screenHeightPx * dpr;
-        final metersAhead = metersPerPixel * physH * frac;
+        // getMetersPerPixelAtLatitude is meters per LOGICAL pixel (matches
+        // size.height's unit), so no dpr conversion is needed here. Multiplying
+        // by dpr (physH = logicalH * dpr) overshot mAhead by a factor of dpr,
+        // pushing the puck target past the bottom of the screen.
+        final logicalH = screenHeightPx;
+        final metersAhead = metersPerPixel * logicalH * frac;
         final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
-        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel physH=$physH mAhead=$metersAhead '
+        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel logicalH=$logicalH mAhead=$metersAhead '
             'puck=(${loc.latitude.toStringAsFixed(5)},${loc.longitude.toStringAsFixed(5)}) '
             'tgt=(${off.lat.toStringAsFixed(5)},${off.lng.toStringAsFixed(5)}) '
             'brg=${headingDeg.toStringAsFixed(1)} hdg=${headingDeg.toStringAsFixed(1)}');
