@@ -2,6 +2,7 @@
   "schema_version": 1,
   "profile_id": "default",
   "imminent_m": 10,
+  "arrival_voice_m": 8,
   "tiers": [
     { "min_entry_m": 500, "points_m": [500, 300, 50] },
     { "min_entry_m": 150, "points_m": [300, 50] },
@@ -41,6 +42,6 @@
       ]
     },
     "continue":    { "enabled": false },
-    "destination": { "enabled": true }
+    "destination": { "enabled": true, "imminent_m": 50 }
   }
 }

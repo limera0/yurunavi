@@ -18,12 +18,16 @@ class GuidanceProfile {
   final List<GuidanceTier> tiers;
   final Set<String> enabledEvents;
   final Map<String, List<GuidanceTier>> eventTiers;
+  final Map<String, double> eventImminentM;
+  final double arrivalVoiceM;
 
   const GuidanceProfile({
     required this.imminentM,
     required this.tiers,
     required this.enabledEvents,
     this.eventTiers = const <String, List<GuidanceTier>>{},
+    this.eventImminentM = const <String, double>{},
+    this.arrivalVoiceM = 8,
   });
 
   static GuidanceProfile get _fallback => GuidanceProfile(
@@ -45,6 +49,7 @@ class GuidanceProfile {
       final raw = await rootBundle.loadString(assetPath);
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final imminentM = (json['imminent_m'] as num).toDouble();
+      final arrivalVoiceM = (json['arrival_voice_m'] as num?)?.toDouble() ?? 8;
       final rawTiers = (json['tiers'] as List)
           .map((e) => GuidanceTier.fromJson(e as Map<String, dynamic>))
           .toList()
@@ -55,6 +60,7 @@ class GuidanceProfile {
           .map((e) => e.key)
           .toSet();
       final eventTiersMap = <String, List<GuidanceTier>>{};
+      final eventImminentMap = <String, double>{};
       for (final entry in rawEvents.entries) {
         final eventData = entry.value as Map<String, dynamic>;
         if (eventData['tiers'] is List) {
@@ -63,12 +69,17 @@ class GuidanceProfile {
               .toList()
             ..sort((a, b) => b.minEntryM.compareTo(a.minEntryM));
         }
+        if (eventData['imminent_m'] is num) {
+          eventImminentMap[entry.key] = (eventData['imminent_m'] as num).toDouble();
+        }
       }
       return GuidanceProfile(
           imminentM: imminentM,
           tiers: rawTiers,
           enabledEvents: enabledEvents,
-          eventTiers: eventTiersMap);
+          eventTiers: eventTiersMap,
+          eventImminentM: eventImminentMap,
+          arrivalVoiceM: arrivalVoiceM);
     } catch (_) {
       return _fallback;
     }
@@ -79,6 +90,8 @@ class GuidanceProfile {
           orElse: () => tiers.last);
 
   List<GuidanceTier> tiersForEvent(String event) => eventTiers[event] ?? tiers;
+
+  double imminentForEvent(String event) => eventImminentM[event] ?? imminentM;
 
   bool isEnabled(String event) => enabledEvents.contains(event);
 }

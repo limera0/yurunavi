@@ -98,15 +98,20 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _routeLayerId = 'route-layer';
   static const _routeBgSourceId = 'route-bg-source';
   static const _routeBgLayerId = 'route-bg-layer';
+  static const _locSourceId = 'loc-source';
+  static const _locLayerId = 'loc-layer';
 
-  ml.Circle? _locMarker;
+  bool _locLayerReady = false;
   ml.Symbol? _destMarker;
   List<ml.Symbol> _waypointMarkers = [];
-  static const String _kLocColor = '#00C853';
   static const String _kDestIcon = 'pointer_red';
-  static const double _kDestIconSize = 1.5; // 폰 실측: 3x 적용
+  static const double _kDestIconSize = 1.05; // nav_screen과 동일 배율(96px 핀 기준)
   static const String _kWpIcon = 'pointer_yellow';
-  static const double _kWpIconSize = 1.5; // 96px PNG, 폰 실측으로 조정
+  static const double _kWpIconSize = 1.05; // nav_screen과 동일 배율
+  static const String _kArrowIcon = 'nav_arrow';
+  static const double _kArrowIconSize = 1.0; // nav_screen과 동일
+
+  double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용
 
   // latlong2.LatLng → maplibre_gl.LatLng 변환 (지도에 넘길 때만 사용)
   ml.LatLng _toMl(LatLng p) => ml.LatLng(p.latitude, p.longitude);
@@ -212,10 +217,17 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
           );
         }
-        _ensureLocationMarker(); // unawaited — B1
+        final heading = _resolveHeading(next.speedKmh, next.headingDeg);
+        _ensureLocationMarker(heading); // unawaited — B1
       },
       fireImmediately: true,
     );
+  }
+
+  /// 정차/저속(3km/h 미만) 시 마지막 방향을 유지 — nav_screen._resolveHeading과 동일 로직.
+  double? _resolveHeading(double speedKmh, double? headingDeg) {
+    if (speedKmh >= 3 && headingDeg != null) _lastHeadingDeg = headingDeg;
+    return (speedKmh >= 3 ? headingDeg : null) ?? _lastHeadingDeg;
   }
 
   void _recenterMap() {
@@ -266,11 +278,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
-    // 경로선을 circle 마커 레이어 아래에 삽입하기 위해 circle layer id 산출
-    final circleLyr = ctrl.circleManager?.layerIds.isNotEmpty == true
-        ? ctrl.circleManager!.layerIds.first
-        : null;
-    debugPrint('[zorder] circleLyr=$circleLyr');
     // bg layer (below selected route)
     await ctrl.addGeoJsonSource(_routeBgSourceId, _buildBgGeoJson([]));
     await ctrl.addLineLayer(
@@ -282,42 +289,86 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
-      belowLayerId: circleLyr,
     );
     // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
+    final initialIdx = ref.read(mapInteractionProvider).selectedRouteIdx;
     await ctrl.addLineLayer(
       _routeSourceId,
       _routeLayerId,
-      const ml.LineLayerProperties(
-        lineColor: '#1E5AFF',
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[initialIdx] ?? courseLineColor[2]!),
         lineWidth: 6.0,
         lineCap: 'round',
         lineJoin: 'round',
       ),
-      belowLayerId: circleLyr,
+    );
+  }
+
+  Future<void> _recolorRouteLayer(int idx) async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded) return;
+    await ctrl.removeLayer(_routeLayerId);
+    await ctrl.addLineLayer(
+      _routeSourceId,
+      _routeLayerId,
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
     );
   }
 
   // ── Marker helpers (B1/B2) ────────────────────────────────────────────────
 
-  Future<void> _ensureLocationMarker() async {
+  Map<String, dynamic> _buildLocGeoJson(LatLng p, [double? bearing]) => {
+        'type': 'FeatureCollection',
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              // GeoJSON은 [longitude, latitude] 순서
+              'coordinates': [p.longitude, p.latitude],
+            },
+            'properties': <String, dynamic>{
+              'bearing': bearing ?? 0,
+            },
+          }
+        ],
+      };
+
+  /// nav_screen과 동일하게 raw GeoJSON + addSymbolLayer로 회전 가능한 화살표
+  /// puck을 그린다 (addSymbol/SymbolManager는 iconRotationAlignment을 노출하지
+  /// 않아 헤딩 회전이 카메라 bearing과 어긋난다).
+  Future<void> _initLocationLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _locLayerReady) return;
+    final p = _origin ?? _lastKnown ?? kInitialMapView;
+    await ctrl.addGeoJsonSource(_locSourceId, _buildLocGeoJson(p));
+    await ctrl.addSymbolLayer(
+      _locSourceId,
+      _locLayerId,
+      ml.SymbolLayerProperties(
+        iconImage: _kArrowIcon,
+        iconRotate: [ml.Expressions.get, 'bearing'],
+        iconRotationAlignment: 'map',
+        iconAnchor: 'center',
+        iconSize: _kArrowIconSize,
+        iconAllowOverlap: true,
+      ),
+    );
+    _locLayerReady = true;
+  }
+
+  Future<void> _ensureLocationMarker([double? heading]) async {
     final c = _mlCtrl;
-    if (c == null || !_styleLoaded) return;
+    if (c == null || !_styleLoaded || !_locLayerReady) return;
     final p = _origin ?? _lastKnown;
     if (p == null) return;
-    final geo = _toMl(p);
-    if (_locMarker == null) {
-      _locMarker = await c.addCircle(ml.CircleOptions(
-        geometry: geo,
-        circleRadius: 8,
-        circleColor: _kLocColor,
-        circleStrokeWidth: 3,
-        circleStrokeColor: '#FFFFFF',
-      ));
-    } else {
-      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
-    }
+    await c.setGeoJsonSource(_locSourceId, _buildLocGeoJson(p, heading));
   }
 
   Future<void> _ensureDestMarker(LatLng dest) async {
@@ -847,6 +898,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       if (prev?.waypoints != next.waypoints) {
         _syncWaypointMarkers(next.waypoints); // unawaited
       }
+      if (prev?.selectedRouteIdx != next.selectedRouteIdx) {
+        _recolorRouteLayer(next.selectedRouteIdx); // unawaited
+      }
     });
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
@@ -914,9 +968,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               _styleLoaded = true;
               // 스타일 재주입 시 네이티브 어노테이션 매니저가 파괴·재생성되므로
               // Dart 레퍼런스를 초기화해 재생성 경로를 타도록 한다.
-              _locMarker = null;
               _destMarker = null;
               _waypointMarkers = <ml.Symbol>[];
+              _locLayerReady = false;
               await _initRouteLayer();
               // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
               final poly =
@@ -927,8 +981,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               await _mlCtrl!.addImage('pointer_red', pinBytes.buffer.asUint8List());
               final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
               await _mlCtrl!.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+              final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
+              await _mlCtrl!.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
               await _mlCtrl!.setSymbolIconAllowOverlap(true);
-              // B1: 현위치 마커 — 경로 레이어 위에 그려지도록 마지막에 추가
+              // B1: 현위치 화살표 puck — 경로 레이어 위에 그려지도록 마지막에 추가
+              await _initLocationLayer();
               await _ensureLocationMarker();
             },
             onMapClick: (point, latLng) {
@@ -1509,10 +1566,10 @@ class _CourseSheet extends StatelessWidget {
     required this.onClose,
   });
 
-  static const _routes = [
-    _RouteInfo('시골길로\n느긋하게', AppColors.mapCourse),
-    _RouteInfo('지방도로\n여유롭게', AppColors.tertiary),
-    _RouteInfo('국도로\n빠르게', AppColors.primary),
+  static final _routes = [
+    _RouteInfo('시골길로\n느긋하게', courseLineColor[0]!),
+    _RouteInfo('지방도로\n여유롭게', courseLineColor[1]!),
+    _RouteInfo('국도로\n빠르게', courseLineColor[2]!),
   ];
 
   @override

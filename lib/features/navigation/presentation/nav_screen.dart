@@ -9,13 +9,13 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart'; // 임시 오버레이용 — ②③에서 제거
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
@@ -62,11 +62,22 @@ class _NavScreenState extends ConsumerState<NavScreen>
   String? _rawStyle;
   String? _styleJson;
 
-  ml.Circle? _locMarker;
-  static const String _kLocColor = '#00C853';
+  bool _locLayerReady = false;
+  bool _destLayerReady = false;
+  static const String _kDestIcon = 'pointer_red';
+  // 기존 1.5 × 0.7 = 1.05 (핀 이미지 96px 기준, 화면상 96×1.05 ≈ 100.8px).
+  static const double _kDestIconSize = 1.05;
+  static const String _kWpIcon = 'pointer_yellow';
+  // pointer_yellow도 pointer_red와 동일 96px 에셋 — 동일 0.7 배율 적용.
+  static const double _kWpIconSize = 1.05;
+  static const String _kArrowIcon = 'nav_arrow';
+  // 화살표는 핀보다 눈에 띄게 크게 — 핀 배율(0.7) 대비 약 1.43배.
+  static const double _kArrowIconSize = 1.0;
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
+  static const _navLocSourceId = 'nav-loc-source';
+  static const _navLocLayerId  = 'nav-loc-layer';
 
   bool _isManualMode = false;
   Timer? _recenterTimer;
@@ -77,7 +88,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 도착 감지
   bool _arrived = false;
-  bool _arrivalDialogShown = false;
+  bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
+  bool _arrivalBannerVisible = false;
+  List<({String name, String type})> _arrivalPois = const [];
 
   // 음성 안내
   FlutterTts? _tts;
@@ -91,6 +104,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 속도 연동 줌
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
+  double? _lastMovingZoom; // 3km/h 미만에서 줌 진동 방지용 마지막 주행 중 줌
+  double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
@@ -210,11 +225,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
       (_, next) {
         if (next == null || !mounted) return;
         final loc = next.pos;
-        if (!_isManualMode) _recenter(loc, speedKmh: next.speedKmh);
-        if (next.headingDeg != null && next.speedKmh > 2 && _styleLoaded) {
-          _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(next.headingDeg!));
+        // 이 틱의 heading을 한 번만 확정해 bearing 회전과 offset 계산에
+        // 동일하게 전달 — 서로 다른 heading 세대를 쓰는 순서 역전 방지
+        // (RECON §6, _recenter가 await를 포함한 비동기라 호출부가 다음 틱을
+        // 기다리지 않고 흘려보내는 구조에서 발생).
+        final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
+        if (!_isManualMode) {
+          _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
         }
-        _ensureLocationMarker();
+        _ensureLocationMarker(effectiveHeadingDeg);
       },
       fireImmediately: true,
     );
@@ -231,10 +250,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _handleVoice(prog);
         if (prog.arrived && !_arrived) {
           _arrived = true;
-          _vps?.speak('arrival');
+          setState(() => _arrivalBannerVisible = true);
           _fetchNearbyPois(widget.destination!).then((pois) {
-            if (mounted) _showArrivalDialog(pois);
+            if (mounted) setState(() => _arrivalPois = pois);
           });
+        }
+        if (!_saidArrival &&
+            prog.distToDestM <= (_profile?.arrivalVoiceM ?? 8)) {
+          _saidArrival = true;
+          _vps?.speak('arrival');
         }
         if (_rerouteFallback) {
           // 목적지 150m 밖으로 벗어나거나 다시 경로 위로 복귀하면 폴백 해제
@@ -306,11 +330,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
   }
 
-  Future<void> _reroute(LatLng origin) async {
+  Future<void> _reroute(LatLng origin, {bool silent = false}) async {
     if (_isRerouting || !mounted) return;
-    if (_arrivalDialogShown && mounted) {
-      Navigator.of(context).pop();
-      _arrived = false;
+    if (_arrivalBannerVisible) {
+      setState(() {
+        _arrivalBannerVisible = false;
+        _arrivalPois = const [];
+        _arrived = false;
+        _saidArrival = false;
+      });
     }
     final dest = widget.destination;
     if (dest == null) return;
@@ -337,7 +365,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         });
         debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
         // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
-        _vps?.speak('reroute');
+        if (!silent) _vps?.speak('reroute');
         _lastAnnouncedIdx = 0; // 출발 step 중복 방지
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
@@ -363,6 +391,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
       }
     }
+  }
+
+  void _manualReroute() {
+    final pos = ref.read(navStateProvider)?.pos;
+    if (pos == null) return;
+    _reroute(pos, silent: true);
   }
 
   Future<void> _initTts() async {
@@ -426,55 +460,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  void _showArrivalDialog(List<({String name, String type})> pois) {
-    if (!mounted) return;
-    _arrivalDialogShown = true;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(children: [
-          Icon(Icons.flag_rounded, color: Color(0xFF008080)),
-          SizedBox(width: 8),
-          Text('도착했습니다!'),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('목적지에 도착했습니다.\n내비게이션을 종료합니다.'),
-            if (pois.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text('근처 장소',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-              const SizedBox(height: 4),
-              ...pois.map((p) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(children: [
-                      const Icon(Icons.place, size: 14, color: Color(0xFF008080)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                          child: Text('${p.type}: ${p.name}',
-                              style: const TextStyle(fontSize: 12))),
-                    ]),
-                  )),
-            ],
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              if (mounted) Navigator.of(context).pop();
-            },
-            child: const Text('확인'),
-          ),
-        ],
-      ),
-    ).whenComplete(() => _arrivalDialogShown = false);
-  }
-
   static String _etaText(int durationMin) {
     final eta = DateTime.now().add(Duration(minutes: durationMin));
     final h = eta.hour.toString().padLeft(2, '0');
@@ -523,13 +508,56 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return 14.0;
   }
 
-  void _recenter(LatLng loc, {bool animate = false, double speedKmh = 0}) {
+  /// 3km/h 미만(정차/저속)에서는 GPS heading 잡음을 무시하고 마지막으로
+  /// 이동 중 관측된 heading을 그대로 유지한다 — 정지 시 offset이 매 틱
+  /// 잡음을 따라 흔들리는 것을 막는다 (RECON §4/§5). 호출부(GPS 틱 핸들러)가
+  /// 틱당 한 번만 호출해 그 결과를 bearing 회전과 offset 계산 양쪽에
+  /// 동일하게 전달해야 두 값이 어긋나지 않는다 (RECON §6).
+  double? _resolveHeading(double speedKmh, double? headingDeg) {
+    if (speedKmh >= 3 && headingDeg != null) _lastHeadingDeg = headingDeg;
+    return (speedKmh >= 3 ? headingDeg : null) ?? _lastHeadingDeg;
+  }
+
+  // headingDeg는 호출부가 _resolveHeading()으로 이미 확정한 값이어야 한다.
+  Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg}) async {
     if (!_styleLoaded) return;
-    final target = _zoomForSpeed(speedKmh);
-    // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
-    final diff = target - _navZoom;
-    _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
-    final update = ml.CameraUpdate.newLatLngZoom(_toMl(loc), _navZoom);
+    // 3km/h 미만은 정차/저속으로 보고 줌을 갱신하지 않는다 — 정지 시 GPS
+    // 속도 잡음(mpp가 0.238↔1.18처럼 튐)으로 줌이 진동하는 것을 방지.
+    if (speedKmh >= 3) {
+      final target = _zoomForSpeed(speedKmh);
+      // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
+      final diff = target - _navZoom;
+      _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
+      _lastMovingZoom = _navZoom;
+    } else if (_lastMovingZoom != null) {
+      _navZoom = _lastMovingZoom!;
+    }
+
+    var camTarget = loc;
+    if (headingDeg != null) {
+      final metersPerPixel = await _mlCtrl?.getMetersPerPixelAtLatitude(loc.latitude);
+      if (metersPerPixel != null && mounted) {
+        final screenHeightPx = MediaQuery.of(context).size.height;
+        final dpr = MediaQuery.of(context).devicePixelRatio;
+        const frac = 0.25;
+        // getMetersPerPixelAtLatitude is meters per LOGICAL pixel (matches
+        // size.height's unit), so no dpr conversion is needed here. Multiplying
+        // by dpr (physH = logicalH * dpr) overshot mAhead by a factor of dpr,
+        // pushing the puck target past the bottom of the screen.
+        final logicalH = screenHeightPx;
+        final metersAhead = metersPerPixel * logicalH * frac;
+        final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
+        camTarget = LatLng(off.lat, off.lng);
+        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel logicalH=$logicalH mAhead=$metersAhead '
+            'puck=(${loc.latitude.toStringAsFixed(5)},${loc.longitude.toStringAsFixed(5)}) '
+            'tgt=(${off.lat.toStringAsFixed(5)},${off.lng.toStringAsFixed(5)}) '
+            'brg=${headingDeg.toStringAsFixed(1)} hdg=${headingDeg.toStringAsFixed(1)}');
+      }
+    }
+
+    final brg = headingDeg ?? _lastHeadingDeg ?? 0.0;
+    final update = ml.CameraUpdate.newCameraPosition(
+        ml.CameraPosition(target: _toMl(camTarget), zoom: _navZoom, bearing: brg));
     if (animate) {
       _mlCtrl?.animateCamera(update);
     } else {
@@ -557,51 +585,125 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ],
       };
 
+  Map<String, dynamic> _buildLocGeoJson(LatLng p, [double? bearing]) => {
+        'type': 'FeatureCollection',
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'Point',
+              // GeoJSON은 [longitude, latitude] 순서
+              'coordinates': [p.longitude, p.latitude],
+            },
+            'properties': <String, dynamic>{
+              // ['get','bearing']이 null을 만나 회전 못하는 것을 막기 위해
+              // heading 미확정 시 0으로 기본값 처리.
+              'bearing': bearing ?? 0,
+            },
+          }
+        ],
+      };
+
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
     await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
+    final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
     await ctrl.addLineLayer(
       _navRouteSourceId,
       _navRouteLayerId,
-      const ml.LineLayerProperties(
-        lineColor: '#F28C28', // nav 오렌지색 유지
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
         lineWidth: 6.0,
         lineCap: 'round',
         lineJoin: 'round',
       ),
-      // belowLayerId: ③에서 Circle 레이어 추가 후 z-order 삽입
     );
   }
 
-  Future<void> _ensureLocationMarker() async {
+  /// route 레이어가 이미 추가된 뒤(호출 순서 보장) 위치점 레이어를 1회 추가.
+  /// 나중에 추가된 레이어가 위(전면)에 그려지므로 route 위에 puck이 온다
+  /// (RECON_camera_redesign.md §1-2, RECON_ZORDER.md). belowLayerId 없이
+  /// call order만으로 z-order를 확정하기 위해 _locLayerReady로 1회만 실행 보장.
+  Future<void> _initLocationLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _locLayerReady) return;
+    final p = ref.read(navStateProvider)?.pos ?? _kInitialMapView;
+    await ctrl.addGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p));
+    // addSymbol/SymbolManager로는 icon-rotation-alignment:map을 설정할 수
+    // 없어(스타일 기본값 auto로 고정) 헤딩 회전이 카메라 bearing과 어긋난다.
+    // raw GeoJSON 기반 addSymbolLayer만 iconRotationAlignment을 노출한다.
+    await ctrl.addSymbolLayer(
+      _navLocSourceId,
+      _navLocLayerId,
+      ml.SymbolLayerProperties(
+        iconImage: _kArrowIcon,
+        iconRotate: [ml.Expressions.get, 'bearing'],
+        iconRotationAlignment: 'map',
+        iconAnchor: 'center',
+        iconSize: _kArrowIconSize,
+        iconAllowOverlap: true,
+      ),
+    );
+    _locLayerReady = true;
+  }
+
+  Future<void> _ensureLocationMarker([double? heading]) async {
     final c = _mlCtrl;
-    if (c == null || !_styleLoaded) return;
+    // _locLayerReady 이전엔 no-op — _initLocationLayer가 route 레이어
+    // 추가 이후에만 puck 레이어를 만들도록 해 z-order 레이스를 막는다.
+    if (c == null || !_styleLoaded || !_locLayerReady) return;
     final p = ref.read(navStateProvider)?.pos;
     if (p == null) return;
-    final geo = _toMl(p);
-    if (_locMarker == null) {
-      _locMarker = await c.addCircle(ml.CircleOptions(
-        geometry: geo,
-        circleRadius: 8,
-        circleColor: _kLocColor,
-        circleStrokeWidth: 3,
-        circleStrokeColor: '#FFFFFF',
+    await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p, heading));
+  }
+
+  /// 목적지/경유지는 widget 생명주기 동안 불변(ctor의 final 필드, 재할당 없음)
+  /// 이므로 puck과 달리 틱마다 갱신할 필요 없이 스타일 로드 후 1회만 설정한다.
+  /// route 레이어 위, puck 레이어 아래에 오도록 puck보다 먼저 생성한다.
+  Future<void> _initDestLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _destLayerReady) return;
+    _destLayerReady = true;
+    for (final wp in widget.waypoints) {
+      await ctrl.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(wp),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 5,
       ));
-    } else {
-      await c.updateCircle(_locMarker!, ml.CircleOptions(geometry: geo));
+    }
+    final dest = widget.destination;
+    if (dest != null) {
+      await ctrl.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(dest),
+        iconImage: _kDestIcon,
+        iconSize: _kDestIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 10,
+      ));
     }
   }
 
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
-    _initRouteLayer().whenComplete(() {
+    _initRouteLayer().whenComplete(() async {
       if (_routePoints.length >= 2 && mounted) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
-      _ensureLocationMarker(); // unawaited — ③
+      // dest/waypoint 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
+      final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
+      await _mlCtrl?.addImage(_kDestIcon, pinBytes.buffer.asUint8List());
+      final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
+      await _mlCtrl?.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+      final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
+      await _mlCtrl?.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
+      _initDestLayer().whenComplete(() {
+        _initLocationLayer().whenComplete(() => _ensureLocationMarker()); // unawaited — ③
+      });
     });
   }
 
@@ -610,8 +712,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
       setState(() => _isManualMode = false);
-      final pos = ref.read(navStateProvider)?.pos;
-      if (pos != null) _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
+      final ns = ref.read(navStateProvider);
+      final pos = ns?.pos;
+      if (pos != null) {
+        final speedKmh = ns?.speedKmh ?? 0;
+        _recenter(pos,
+            animate: true,
+            speedKmh: speedKmh,
+            headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+      }
     });
   }
 
@@ -666,47 +775,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 임시 오버레이: flutter_map 폴리라인/마커 ────────────────────────
-          // ② GeoJSON LineLayer로, ③ Circle/Symbol로 교체 후 이 블록 제거
-          IgnorePointer(
-            child: FlutterMap(
-              options: MapOptions(
-                backgroundColor: Colors.transparent, // MapLibreMap이 보이도록
-                initialCenter: ref.read(navStateProvider)?.pos ?? _kInitialMapView,
-                initialZoom: _navZoom,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.none,
-                ),
-              ),
-              children: [
-                // PolylineLayer 제거 — GeoJSON LineLayer로 교체됨 (커밋 ②)
-                MarkerLayer(markers: [
-                  ...widget.waypoints.map(
-                    (wp) => Marker(
-                      point: wp,
-                      width: 34,
-                      height: 34,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(
-                        Icons.location_pin,
-                        color: Color(0xFFFFB300),
-                        size: 34,
-                      ),
-                    ),
-                  ),
-                  if (widget.destination != null)
-                    Marker(
-                      point: widget.destination!,
-                      width: 38,
-                      height: 38,
-                      alignment: Alignment.topCenter,
-                      child: const Icon(Icons.location_pin, color: Colors.redAccent, size: 38),
-                    ),
-                ]),
-              ],
-            ),
-          ),
-
           // ── 수동모드 복귀 알림 ──────────────────────────────────────────────
           if (_isManualMode)
             Positioned(
@@ -726,6 +794,80 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     const SizedBox(width: 6),
                     Text('10초 후 현위치 복귀',
                         style: TextStyle(color: cs.onSurface, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── 도착 배너 (비침습, dim 없음) ──────────────────────────────────────
+          if (_arrivalBannerVisible)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.flag_rounded, color: cs.tertiary),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text('목적지에 도착했습니다',
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                        ),
+                        GestureDetector(
+                          onTap: () => setState(() => _arrivalBannerVisible = false),
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.close_rounded, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_arrivalPois.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      ..._arrivalPois.map((p) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(children: [
+                              Icon(Icons.place, size: 14, color: cs.tertiary),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                  child: Text('${p.type}: ${p.name}',
+                                      style: const TextStyle(fontSize: 12))),
+                            ]),
+                          )),
+                    ],
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: GestureDetector(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: cs.tertiary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Text('종료',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -873,12 +1015,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 _NavIconBtn(
                   icon: _isManualMode ? Icons.gps_fixed : Icons.my_location,
                   onTap: () {
-                    final pos = ref.read(navStateProvider)?.pos;
+                    final ns = ref.read(navStateProvider);
+                    final pos = ns?.pos;
                     if (pos == null) return;
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
-                    _recenter(pos, animate: true, speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
+                    final speedKmh = ns?.speedKmh ?? 0;
+                    _recenter(pos,
+                        animate: true,
+                        speedKmh: speedKmh,
+                        headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
                   },
+                ),
+                const SizedBox(height: 10),
+                _NavIconBtn(
+                  icon: Icons.refresh_rounded,
+                  loading: _isRerouting,
+                  enabled: navState?.pos != null,
+                  onTap: _manualReroute,
                 ),
               ],
             ),
@@ -1043,13 +1197,21 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
 class _NavIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _NavIconBtn({required this.icon, required this.onTap});
+  final bool loading;
+  final bool enabled;
+  const _NavIconBtn({
+    required this.icon,
+    required this.onTap,
+    this.loading = false,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final active = enabled && !loading;
     return GestureDetector(
-      onTap: onTap,
+      onTap: active ? onTap : null,
       child: Container(
         width: 44,
         height: 44,
@@ -1059,7 +1221,12 @@ class _NavIconBtn extends StatelessWidget {
           border: Border.all(color: cs.outline, width: 1),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: Icon(icon, color: cs.tertiary, size: 20),
+        child: loading
+            ? Padding(
+                padding: const EdgeInsets.all(12),
+                child: CircularProgressIndicator(strokeWidth: 2, color: cs.tertiary),
+              )
+            : Icon(icon, color: active ? cs.tertiary : cs.outline, size: 20),
       ),
     );
   }

@@ -40,6 +40,22 @@ class AppColors {
   static const sunset = Color(0xFF5C6BC0);
 }
 
+// ── Course line color (index = MapInteractionState.selectedRouteIdx) ────────
+/// 0: 시골길(rural/scenic) — dark yellow, 1: 지방도(regional) — green,
+/// 2: 국도(national/fast) — blue. Shared between home (main_map_screen) and
+/// nav (nav_screen) route-line paint + the home course-selector card badges.
+const Map<int, Color> courseLineColor = {
+  0: Color(0xFFC79A00), // 시골길 — dark yellow
+  1: Color(0xFF2E9E4F), // 지방도 — green
+  2: Color(0xFF1E5AFF), // 국도 — blue
+};
+
+/// Converts a [Color] to a MapLibre-style `#RRGGBB` hex string (paint
+/// properties need string hex, not a Color object). Uses toARGB32() rather
+/// than the deprecated .value/.red/.green/.blue getters.
+String colorToHex(Color c) =>
+    '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
 // ── Typography ────────────────────────────────────────────────────────────────
 
 class AppTextStyles {
