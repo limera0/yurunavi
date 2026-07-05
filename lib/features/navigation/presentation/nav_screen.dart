@@ -233,9 +233,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (!_isManualMode) {
           _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
         }
-        if (effectiveHeadingDeg != null && next.speedKmh > 2 && _styleLoaded) {
-          _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(effectiveHeadingDeg));
-        }
         _ensureLocationMarker(effectiveHeadingDeg);
       },
       fireImmediately: true,
@@ -559,7 +556,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
       }
     }
 
-    final update = ml.CameraUpdate.newLatLngZoom(_toMl(camTarget), _navZoom);
+    final brg = headingDeg ?? _lastHeadingDeg ?? 0.0;
+    final update = ml.CameraUpdate.newCameraPosition(
+        ml.CameraPosition(target: _toMl(camTarget), zoom: _navZoom, bearing: brg));
     if (animate) {
       _mlCtrl?.animateCamera(update);
     } else {
