@@ -550,9 +550,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // -> mAhead = 0.238 * 2340 * 0.25 = 139.3m.
         final physH = screenHeightPx * dpr;
         final metersAhead = metersPerPixel * physH * frac;
-        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel physH=$physH mAhead=$metersAhead');
         final off = offsetOrigin(loc.latitude, loc.longitude, headingDeg, metersAhead);
         camTarget = LatLng(off.lat, off.lng);
+        debugPrint('YNAV_CAM dpr=$dpr mpp=$metersPerPixel physH=$physH mAhead=$metersAhead '
+            'puck=(${loc.latitude.toStringAsFixed(5)},${loc.longitude.toStringAsFixed(5)}) '
+            'tgt=(${off.lat.toStringAsFixed(5)},${off.lng.toStringAsFixed(5)}) '
+            'brg=${headingDeg.toStringAsFixed(1)} hdg=${headingDeg.toStringAsFixed(1)}');
       }
     }
 
