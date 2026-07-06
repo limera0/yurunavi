@@ -157,6 +157,18 @@ type=25/37/38 → `eventForType`에서 `'merge'` 반환, `guidance_profile.json`
 
 ## 구현 슬라이스 제안
 
+**⚠️ 상태 갱신 (2026-07-06, 3번째 세션):** A/B/C 모두 구현 완료. 아래 3항목은 원안 그대로
+구현되지 않았고 실제로는 이렇게 됐음 — 다음 세션은 이 문서의 "미구현" 서술을 믿지 말 것.
+
+- **A+B (2026-07-02 머지·라이딩검증 완료, `1afb164`):** 별도 `'ic'` event key를 만드는 대신,
+  기존 `ramp`/`exit` 이벤트에 `guidance_profile.json`의 `eventTiers`(per-event tier override)
+  메커니즘으로 1000/400/120m 조기 티어를 직접 부여. `GuidanceProfile.tiersForEvent()`
+  (`lib/features/navigation/guidance_profile.dart`) 참고. 원안 B의 목표(IC 조기 안내)는
+  달성했지만 구현 방식은 다름.
+- **C (이번 세션, `feat/exit-name-voice`, main 미머지·라이딩 전):** 아래 원안대로 구현.
+  `exit_name_elements`는 다중 요소일 수 있어 공백으로 join(Valhalla 기본 구분자는 `/`이나
+  TTS가 "슬래시"로 읽어버려 공백 채택). `_named` 키 분기 + 보이스팩 폴백 포함.
+
 ### 슬라이스 A — IC 조기 1000m 티어 (설정 변경만)
 - `guidance_profile.json` tiers 배열 앞에 1000m 항목 추가 (JSON 수정, Dart 코드 변경 없음)
 - 테스트 경계: `GuidanceProfile.tierFor(1100)` 단위 테스트 → `pointsM: [1000, ...]` 반환 확인
