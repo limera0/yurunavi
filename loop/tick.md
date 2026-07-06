@@ -1,25 +1,42 @@
-EXECUTION — edit and commit. Branch feat/nav-ui-redesign, HEAD c8bfd14. Two marker changes per RECON_markers.md. PREREQUISITE: assets/images/arrow_puck.png must exist (md5 e2b7967ae09efc409a858bed7c526487) and pointer_red.png/pointer_yellow.png already exist. One logical change per commit. flutter analyze zero new, flutter test green. Only nav_screen.dart + pubspec (if needed).
+EXECUTION — rebase validated #5 TTS-audibility fix (originally on stale `feat/tts-audibility`,
+44 commits behind main, unrebaseable cleanly) onto current main. Branch `feat/tts-audibility-v2`.
+Only 2 functional one-line changes, both already verified against flutter_tts 4.2.5 source by
+prior RECON (`loop/RECON_tts_volume.md`, cherry-picked from `33aa6d4`). No new design decisions —
+this is a clean re-apply, not new RECON.
 
-=== g1: destination/waypoint pins → teardrop PIN IMAGES ===
-RECON: main_map_screen.dart already does addImage+addSymbol with iconAnchor:'bottom' for pointer_red/yellow. Replicate that EXACT pattern into nav_screen.dart, replacing the CircleLayer approach in _initDestLayer (nav_screen.dart:666-698).
-- Register images: addImage('dest_pin', pointer_red bytes), addImage('wp_pin', pointer_yellow bytes) via rootBundle load (mirror main_map_screen's loader).
-- Destination: addSymbol(SymbolOptions(geometry: widget.destination, iconImage:'dest_pin', iconAnchor:'bottom', iconSize: appropriate)). Tip sits on coord via iconAnchor bottom.
-- Waypoints: same with 'wp_pin' for each widget.waypoints entry.
-- Remove the old dest/waypoint CircleLayer/source created in _initDestLayer. Keep puck separate (handled in g2).
-- Confirm pubspec assets already include assets/images/ (RECON said yes); if pointer_*.png not declared, add. arrow_puck.png must be declared too.
-commit g1: "feat(nav): destination/waypoint teardrop pin images (match planning screen)"
+=== s1: bring forward RECON_tts_volume.md (docs only) ===
+cherry-pick 33aa6d4 as-is.
+commit s1: (keep original message) "docs: TTS 볼륨 가청성 recon (usage/focus 미설정 확인)"
 
-=== g2: user puck → rotating arrow (heading cone) ===
-RECON: must use raw addSymbolLayer (GeoJSON SymbolLayer) with iconRotationAlignment:'map' + icon-rotate bound to heading. NOT addSymbol (SymbolManager can't set rotation-alignment). Need arrow_puck.png (now added).
-- addImage('nav_arrow', arrow_puck bytes).
-- Replace the puck CircleLayer (_navLocSourceId/_navLocLayerId from commits 9ef4f74/697971c) with a GeoJSON SymbolLayer: source holds a Point feature with a 'bearing' property; layer uses iconImage:'nav_arrow', iconRotate:['get','bearing'], iconRotationAlignment:'map', iconSize tuned so arrow ~ Naver scale, iconAnchor:'center'.
-- Thread heading: _ensureLocationMarker currently takes no heading param (RECON wiring gap). Add heading param; call it with the SAME effectiveHeadingDeg snapshot already resolved per tick (commit 9f3e1fb _resolveHeading). Update the feature's bearing property each tick via setGeoJsonSource.
-- When heading frozen (stopped, <3km/h from earlier C work), arrow holds last heading (effectiveHeadingDeg already does this).
-- Z-order: pins below, arrow on top, both above route line. Preserve ordering.
-- Double-rotation: RECON confirms safe — map bearing is single-source (rotateGesturesEnabled:false), icon-rotate with 'map' alignment cancels correctly. Do not add extra compensation.
-commit g2: "feat(nav): rotating arrow location puck (original heading-cone)"
+=== s2: route speech to navigation audio usage ===
+`lib/features/navigation/presentation/nav_screen.dart` `_initTts()` — after `setVolume(1.0)`,
+add `await _tts!.setAudioAttributesForNavigation();` (flutter_tts 4.2.5 API, confirmed at
+flutter_tts.dart:665-666 in RECON). Routes TTS to `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` stream,
+separate from media volume.
+cherry-pick 07feb5b, resolve any context-line drift manually (44 commits of divergence since
+original commit — same file, same function, expect trivial offset only).
+commit s2: (keep original message) "feat(tts): route speech to navigation audio usage (#5)"
+
+=== s3: request audio focus + ducking on speak ===
+`lib/services/voice_pack_service.dart` — `await _tts.speak(text);` → `await _tts.speak(text,
+focus: true);`. Requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so background media (music etc.)
+ducks when TTS speaks.
+cherry-pick 98b71b0.
+commit s3: (keep original message) "feat(tts): request audio focus + ducking on speak (#5)"
+
+=== s4: refreshed report ===
+New `loop/REPORT_tts_audibility.md` (old one at `6793b08` referenced the stale branch/commit
+hashes — rewrite with current hashes, same riding checklist, note this is a rebase not new work).
+commit s4: "docs(tts): refresh audibility fix report on rebased branch (#5)"
 
 === AFTER ===
-git log --oneline -3 (paste).
-flutter analyze (report), flutter test (report). Do NOT merge/build.
-Note desk limits: pin images + arrow presence are desk/screenshot-verifiable at rest; arrow ROTATION accuracy needs a drive.
+git log --oneline -5 (paste). flutter analyze (expect 0 — main already clean after `d9d78d5`
+cherry-pick this session). flutter test (expect all green, no new tests — RECON already
+established audio focus/usage is platform-channel-only, not unit-testable; existing voice tests
+must stay green since VoicePackService.speak signature is unchanged, only call-site arg added).
+Do NOT merge into main yet (T3, pre-ride). After PASS here, merge into `verify/ride-0706` as the
+6th branch per user instruction (2026-07-06): "TTS까지 진행하자. 내일 퇴근 때 한 번에 싹
+검토하지 뭐" — one consolidated APK, one ride, tomorrow (2026-07-07) early-morning commute.
+Old `feat/tts-audibility` branch left untouched (superseded, not deleted) — it also carries 3
+unrelated docs-only commits (private-land route avoidance / gate-tagging POC / overlay pipeline
+recon) that are out of scope for this task; flag separately, do not pull into this branch.
