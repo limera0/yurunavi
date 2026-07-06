@@ -118,6 +118,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 원래 선택 인덱스.
   List<RouteResult> _fetchedRoutes = [];
   int? _originalSelectedIdx;
+  List<List<LatLng>>? _originalAllRoutes;
+  List<({double km, int mins, double windingScore})>? _originalAllRouteMeta;
+  int _courseSheetReqId = 0;
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
@@ -343,6 +346,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   Future<void> _reroute(LatLng origin, {bool silent = false}) async {
+    if (_showCourseSheet) return;
     if (_isRerouting || !mounted) return;
     if (_arrivalBannerVisible) {
       setState(() {
@@ -717,6 +721,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isManualMode = true);
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
+      if (_showCourseSheet) return;
       setState(() => _isManualMode = false);
       final ns = ref.read(navStateProvider);
       final pos = ns?.pos;
@@ -736,10 +741,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Future<void> _openCourseSheet() async {
     if (_showCourseSheet) return;
     if (_routePoints.length < 2) return;
+    final reqId = ++_courseSheetReqId;
     // 오버뷰 유지 중엔 _isManualMode의 10초 자동복귀가 개입하지 않도록
     // 별도 타이머는 걸지 않되, 기존에 예약된 팬 제스처 타이머는 취소한다.
     _recenterTimer?.cancel();
-    setState(() => _showCourseSheet = true);
+    setState(() {
+      _showCourseSheet = true;
+      _fetchedRoutes = [];
+    });
     final minLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
     final maxLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
     final minLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
@@ -757,7 +766,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       ),
     );
 
-    _originalSelectedIdx = ref.read(mapInteractionProvider).selectedRouteIdx;
+    final currentMapState = ref.read(mapInteractionProvider);
+    _originalSelectedIdx = currentMapState.selectedRouteIdx;
+    _originalAllRoutes = currentMapState.allRoutes;
+    _originalAllRouteMeta = currentMapState.allRouteMeta;
     final origin = ref.read(navStateProvider)?.pos;
     final dest = widget.destination;
     if (origin == null || dest == null) return;
@@ -767,11 +779,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
         destination: dest,
         waypoints: widget.waypoints,
       );
-      if (!mounted) return;
+      if (!mounted || reqId != _courseSheetReqId) return;
       final scores = await Future.wait(
         routes.map((r) => NativeEngine.scoreFunV2(r.points)),
       );
-      if (!mounted) return;
+      if (!mounted || reqId != _courseSheetReqId) return;
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
       notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
@@ -791,8 +803,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _onCourseCardTap(int idx) {
     ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
     if (idx < _fetchedRoutes.length) {
-      _mlCtrl?.setGeoJsonSource(
-          _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
+      if (_styleLoaded) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
+      }
       _recolorNavRouteLayer(idx);
     }
   }
@@ -834,7 +848,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 프리뷰 중 변형된 적이 없으므로 지도 소스/색상과 provider 인덱스만 복원.
   void _onCourseSheetClose() {
     final restoreIdx = _originalSelectedIdx!;
-    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(restoreIdx);
+    final notifier = ref.read(mapInteractionProvider.notifier);
+    if (_originalAllRoutes != null) notifier.setAllRoutes(_originalAllRoutes!);
+    if (_originalAllRouteMeta != null) {
+      notifier.setAllRouteMeta(_originalAllRouteMeta!);
+    }
+    notifier.setSelectedRouteIdx(restoreIdx);
     if (_styleLoaded) {
       _mlCtrl?.setGeoJsonSource(
           _navRouteSourceId, _buildRouteGeoJson(_routePoints));
