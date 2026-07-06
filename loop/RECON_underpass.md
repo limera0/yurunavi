@@ -143,3 +143,40 @@ grep '"lanes"' loop/recon_route.json → (결과 없음)
 - 테스트 경로 2: 서울(126.9780,37.5665) → 수원(127.0127,37.2636) — 경수대로 ramp 포함
 - 테스트 경로 3: 이태원(126.9920,37.5345) → 명동(126.9855,37.5640) — 남산터널 경유
 - 전체 응답: `loop/recon_route.json` (경로 1 기준)
+
+---
+
+## D. R5 후속실측(2026-07-06) — exit/ramp maneuver와 tunnel/bridge edge 상관관계
+
+**배경:** `RECON_voice_v2.md` R5절이 "지하차도/고가 진입 시 Valhalla type 20/21(exit)·17-19(ramp)
+maneuver가 나오면 '진출/진입' 문구가 지형과 안 맞을 수 있다"는 가설로 보류해둔 항목. R4가
+curl 실측으로 가설을 검증한 방식을 그대로 적용.
+
+**방법:** 8개 실경로(강남-군자/서울-수원/이태원-명동/여의도-상암/종로-강남/부산 서면-해운대/
+대전역-유성/인천역-송도, 도심 교차로 다수 + 고속도로 ramp 다수 포함)에서 `/route` 응답의
+`shape`를 그대로 `/trace_attributes`(`shape_match: edge_walk`)에 넣어 edge별 `use`/
+`road_class`/`bridge`/`tunnel`/`begin_shape_index`/`end_shape_index`를 수신. 각 exit/ramp
+maneuver(type 17-21)의 `begin_shape_index`와 정확히 맞닿는 **전/후 edge 딱 1개씩만**
+(맨션어 전체 구간이 아니라 분기점 그 자체) tunnel/bridge 여부 확인.
+
+**결과 (98 maneuver, exit/ramp 11건):**
+
+| 항목 | 값 |
+|------|-----|
+| exit/ramp maneuver 분기점이 tunnel edge와 접함 | 0/11 |
+| exit/ramp maneuver 분기점이 bridge edge와 접함 | 1/11 (강남-군자 "46번 출구" — 한강교량 위 실제 고속도로 출구) |
+| exit/ramp maneuver 진입 edge의 `use` | 11/11 모두 `ramp` (또는 로터리 1건 `road`) |
+| exit/ramp maneuver 진입 edge의 `road_class` | 전부 `motorway`/`trunk`/`primary`/`secondary` — `residential`/`tertiary` 없음 |
+
+**결론:** 이 타일셋/costing(motorcycle) 기준, Valhalla가 type 20/21·17-19를 내는 지점은
+**항상 OSM상 실제 `ramp`로 태깅된 edge**이고 도로등급도 항상 간선급 이상이다. 지하차도
+(터널) 진입점이 exit/ramp로 오분류되는 사례는 8경로/98maneuver 표본에서 0건. 유일한
+bridge 접함 사례(강남-군자 46번 출구)도 "다리 위에 있는 진짜 고속도로 출구"이지 지하차도
+오안내가 아님. → **R4와 동일 패턴: RECON 단계의 우려가 실측에서 근거 없음으로 판명.**
+tunnel/bridge 판별 레이어(`ManeuverStep.isTunnel/isBridge` 신설, trace_attributes 추가 호출)를
+새로 구현할 근거가 현재로선 없음 — **R5는 "조치 불필요"로 종결, 실주행에서 반례(진출/진입
+문구가 실제 지하차도에서 오발화)가 보고되면 그때 재조사.**
+
+표본 편중 주의: 8경로 모두 서울/수도권·부산·대전·인천의 **도심~고속도로 접속부** 위주라
+순수 국도 지하차도(고속도로 미인접)는 덜 대표됨. 완전한 반증은 아니고, 지금까지의 표본
+범위 내 결론.

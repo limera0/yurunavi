@@ -121,10 +121,15 @@ Valhalla `/route` 응답의 maneuver에는 `verbal_pre_transition_instruction`�
 - **tunnel/bridge 판별**: Valhalla `/route` 응답에 `edge.use=tunnel/bridge` 없음. `trace_attributes` API만 제공 → 현 슬라이스에서 판별 불가.  
 - `ManeuverStep`에 `tunnel`/`bridge` 필드 없음 (`routing_service.dart:31–46` 전체 필드 확인).
 
-### 분류 → **라우팅/엣지 데이터 필요·보류 (trace 레이어 선행)**
+### 분류 → **실증 완료(2026-07-06) — 조치 불필요로 종결**
 
-type 매핑(`voice_engine.dart:20`)이나 템플릿(`default_ko.json:19–20`) 변경만으로는 근본 해결 불가.  
-해결 경로: ① trace_attributes 별도 조회 레이어 구현 → ② ManeuverStep에 `isTunnel`/`isBridge` 주입 → ③ eventForType 또는 템플릿 key 분기.
+`RECON_underpass.md` D절: 8경로/98maneuver curl 실측(exit/ramp 11건) 결과, type 20/21·17-19
+분기점이 tunnel edge와 접한 사례 0건, bridge 접함은 1건뿐이고 그 1건도 실제 고속도로 출구
+(지하차도 오안내 아님). 진입 edge는 11/11 모두 `use=ramp`, 도로등급도 전부 간선급 이상 —
+이 타일셋 기준 Valhalla가 exit/ramp를 잘못 붙이는 사례가 없어 trace_attributes 레이어를
+새로 만들 근거가 현재 없음. **R4와 같은 패턴(RECON 우려 → curl 실측으로 기각).**
+실주행에서 "진출/진입인데 실제로는 그냥 지하차도였다" 류 반례가 보고되면 그때 재조사.
+(표본이 도심~고속도로 접속부 위주라 순수 국도 지하차도는 덜 대표됨 — 완전한 반증은 아님.)
 
 ---
 
@@ -135,8 +140,8 @@ type 매핑(`voice_engine.dart:20`)이나 템플릿(`default_ko.json:19–20`) �
 | R1 속도연동 imminent | 순수로직·책상검사 가능 | speed 값 이미 NavState에 있음. onProgress 시그니처 확장 + JSON 키 추가만 |
 | R2 도착 문구 | 순수로직·책상검사 가능 | default_ko.json:28 문구 편집만 |
 | R3 근접 큐 임계 | 순수로직·책상검사 가능 | guidance_profile.json + fallback 상수 + JSON 문구 변경만 |
-| R4 사거리 직진 | 라우팅/엣지 데이터 필요·보류 | type 8 과다발화 위험 — 실 경로 curl/폰 검증 필요 |
-| R5 지하차도 진출 | 라우팅/엣지 데이터 필요·보류 | tunnel/bridge 판별 불가 — trace_attributes 레이어 선행 필수 |
+| R4 사거리 직진 | 실증 완료·구현됨 | curl 계측(285km/118maneuver, type8 0건) → 우려 근거 없음, `feat/continue-straight-voice`로 구현 |
+| R5 지하차도 진출 | 실증 완료·조치 불필요 | curl 계측(98maneuver, exit/ramp 11건) → tunnel 접함 0건·bridge 접함 1건(실제 출구) → 우려 근거 없음, 구현 안 함 |
 
 ---
 
@@ -147,9 +152,8 @@ type 매핑(`voice_engine.dart:20`)이나 템플릿(`default_ko.json:19–20`) �
 - **A-2** R1 VoiceEngine 확장 (1 커밋): `onProgress` speedKmh 파라미터, 'fast' suffix 분기, JSON 키 추가.
   - 단위 테스트 파일: `test/voice_engine_speed_test.dart` — 순수함수 검증.
 
-### 슬라이스 B — R4 사거리 직진 (보류, 조사 선행)
-- curl `https://<valhalla>/route` 로 국도 직선 구간 포함 경로 조회 → type 8 발생 비율 계측.
-- 허용 가능하면 `eventForType`에 `case 8: return 'continue';` + JSON 키 추가 + profile enable.
+### 슬라이스 B — R4 사거리 직진 (완료)
+- curl 실측 후 우려 근거 없음 확인, `feat/continue-straight-voice`로 구현 완료(`verify/ride-0706`에 통합, 라이딩 대기).
 
-### 슬라이스 C — R5 지하차도 (보류, trace 선행)
-- trace_attributes 레이어(별도 M 슬롯) 완료 후 ManeuverStep 확장 → 이후 진행.
+### 슬라이스 C — R5 지하차도 (종결, 조치 불필요)
+- curl 실측 후 우려 근거 없음 확인. trace_attributes 레이어 신설 보류 — 실주행 반례 나오면 재조사.
