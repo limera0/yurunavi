@@ -442,7 +442,7 @@ class RoutingService {
           roundaboutExitCount: (m['roundabout_exit_count'] as num?)?.toInt(),
           exitName: (m['sign']?['exit_name_elements'] as List?)
               ?.map((e) => (e as Map)['text'] as String? ?? '')
-              .join(''),
+              .join(' '),
         ));
       }
       final legPts = _decodePolyline6(leg['shape'] as String? ?? '');
