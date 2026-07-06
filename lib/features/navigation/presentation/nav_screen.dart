@@ -393,12 +393,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  void _manualReroute() {
-    final pos = ref.read(navStateProvider)?.pos;
-    if (pos == null) return;
-    _reroute(pos, silent: true);
-  }
-
   Future<void> _initTts() async {
     _tts = FlutterTts();
     await _tts!.setLanguage('ko-KR');
@@ -1027,13 +1021,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
                   },
                 ),
-                const SizedBox(height: 10),
-                _NavIconBtn(
-                  icon: Icons.refresh_rounded,
-                  loading: _isRerouting,
-                  enabled: navState?.pos != null,
-                  onTap: _manualReroute,
-                ),
               ],
             ),
           ),
@@ -1197,21 +1184,16 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
 class _NavIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final bool loading;
-  final bool enabled;
   const _NavIconBtn({
     required this.icon,
     required this.onTap,
-    this.loading = false,
-    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final active = enabled && !loading;
     return GestureDetector(
-      onTap: active ? onTap : null,
+      onTap: onTap,
       child: Container(
         width: 44,
         height: 44,
@@ -1221,12 +1203,7 @@ class _NavIconBtn extends StatelessWidget {
           border: Border.all(color: cs.outline, width: 1),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: loading
-            ? Padding(
-                padding: const EdgeInsets.all(12),
-                child: CircularProgressIndicator(strokeWidth: 2, color: cs.tertiary),
-              )
-            : Icon(icon, color: active ? cs.tertiary : cs.outline, size: 20),
+        child: Icon(icon, color: cs.tertiary, size: 20),
       ),
     );
   }
