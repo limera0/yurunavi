@@ -40,6 +40,9 @@ class ManeuverStep {
   /// Valhalla가 로터리 진입(type 26) maneuver에서 반환하는 출구 번호 (nth exit).
   /// 로터리 진입이 아닌 maneuver에서는 null.
   final int? roundaboutExitCount;
+  /// Valhalla sign.exit_name_elements를 이어붙인 출구명 (예: "천호대교 북단").
+  /// 없으면 null.
+  final String? exitName;
   const ManeuverStep({
     required this.type,
     required this.instruction,
@@ -47,6 +50,7 @@ class ManeuverStep {
     this.beginShapeIdx = 0,
     this.endShapeIdx = 0,
     this.roundaboutExitCount,
+    this.exitName,
   });
 }
 
@@ -436,6 +440,9 @@ class RoutingService {
           beginShapeIdx: shapeOffset + b,
           endShapeIdx: shapeOffset + e,
           roundaboutExitCount: (m['roundabout_exit_count'] as num?)?.toInt(),
+          exitName: (m['sign']?['exit_name_elements'] as List?)
+              ?.map((e) => (e as Map)['text'] as String? ?? '')
+              .join(''),
         ));
       }
       final legPts = _decodePolyline6(leg['shape'] as String? ?? '');
