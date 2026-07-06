@@ -80,6 +80,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navLocLayerId  = 'nav-loc-layer';
 
   bool _isManualMode = false;
+  // 재탐색 버튼으로 진입하는 "경로 전체 보기" 오버뷰 상태. _isManualMode와
+  // 별개 플래그로 둔다 — 10초 자동복귀 타이머/배너는 이 흐름에 맞지 않음
+  // (RECON_reroute_button.md §3). 코스 시트가 붙기 전까지는 버튼 재탭으로
+  // 임시 토글한다.
+  bool _showCourseSheet = false;
   Timer? _recenterTimer;
   ProviderSubscription<NavigationState?>? _locationSub;
 
@@ -230,7 +235,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // (RECON §6, _recenter가 await를 포함한 비동기라 호출부가 다음 틱을
         // 기다리지 않고 흘려보내는 구조에서 발생).
         final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
-        if (!_isManualMode) {
+        if (!_isManualMode && !_showCourseSheet) {
           _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
         }
         _ensureLocationMarker(effectiveHeadingDeg);
@@ -718,6 +723,46 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
   }
 
+  /// "재탐색" 버튼: 경로 전체가 보이도록 카메라를 오버뷰로 전환/복귀한다.
+  /// 코스 재선택 시트가 붙기 전까지는 재탭으로 팔로우 모드에 복귀하는
+  /// 임시 토글 — 다음 단계에서 시트의 confirm/close 콜백으로 대체 예정.
+  void _toggleOverview() {
+    if (_showCourseSheet) {
+      setState(() => _showCourseSheet = false);
+      final ns = ref.read(navStateProvider);
+      final pos = ns?.pos;
+      if (pos != null) {
+        final speedKmh = ns?.speedKmh ?? 0;
+        _recenter(pos,
+            animate: true,
+            speedKmh: speedKmh,
+            headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+      }
+      return;
+    }
+    if (_routePoints.length < 2) return;
+    // 오버뷰 유지 중엔 _isManualMode의 10초 자동복귀가 개입하지 않도록
+    // 별도 타이머는 걸지 않되, 기존에 예약된 팬 제스처 타이머는 취소한다.
+    _recenterTimer?.cancel();
+    setState(() => _showCourseSheet = true);
+    final minLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: ml.LatLng(minLat, minLng),
+          northeast: ml.LatLng(maxLat, maxLng),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: 360,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final navState = ref.watch(navStateProvider);
@@ -1065,6 +1110,32 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         ),
                       ),
                       Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
+                      Builder(builder: (_) {
+                        final canReroute = navState?.pos != null && !_isRerouting;
+                        final fg = canReroute
+                            ? cs.onSurface
+                            : cs.onSurface.withValues(alpha: 0.3);
+                        return GestureDetector(
+                          onTap: canReroute ? _toggleOverview : null,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.alt_route, color: fg, size: 20),
+                                const SizedBox(height: 2),
+                                Text('재탐색',
+                                    style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(width: 10),
                       GestureDetector(
                         onTap: () => Navigator.of(context).pop(),
                         child: Container(
