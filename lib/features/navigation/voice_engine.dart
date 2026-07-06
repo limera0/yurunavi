@@ -77,6 +77,13 @@ class VoiceEngine {
             key = 'roundabout_$phase$suffix';
           }
         }
+        if (event == 'ramp' || event == 'exit') {
+          final exitName = steps[turnIdx].exitName;
+          if (exitName != null && exitName.isNotEmpty) {
+            vars['exit_name'] = exitName;
+            key = '${event}_${phase}_named$suffix';
+          }
+        }
         out.add(SpeakIntent(key, vars));
       }
     }
