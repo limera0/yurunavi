@@ -31,7 +31,6 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // ── 경로 컨텍스트 (setRoute로 주입) ──
   List<LatLng> _pts = const [];
   List<ManeuverStep> _maneuvers = const [];
-  LatLng? _dest;
 
   // ── 사전계산 ──
   List<double> _segLenM = const [];  // _pts[i]→_pts[i+1] 길이
@@ -45,7 +44,6 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   static const _kSnapWindow = 50;       // 앞쪽 탐색 세그먼트 수
   static const _kOffRouteM = 50.0;      // 코리도 이탈 임계(최근접 세그먼트 거리)
   static const _kArrivalM = 25.0;       // 도착 반경(폴리라인 잔여)
-  static const _kBackToleranceM = 10.0; // 뒤로 약간 허용(GPS 흔들림)
 
   static const _distance = Distance();
 
@@ -68,7 +66,6 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   }) {
     _pts = points;
     _maneuvers = maneuvers;
-    _dest = destination;
     _snapIdx = 0;
 
     // 세그먼트 길이 + 누적 사전계산 (O(n) 1회)
