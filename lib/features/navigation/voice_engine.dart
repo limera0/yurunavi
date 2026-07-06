@@ -19,6 +19,7 @@ String? eventForType(int type) {
     case 26:                   return 'roundabout_enter';
     case 27:                   return 'roundabout_exit';
     case 4:  case 5:  case 6:  return 'destination';
+    case 8:                    return 'continue';
     default:                   return null;
   }
 }
