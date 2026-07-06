@@ -23,6 +23,8 @@
     "exit_imminent":            "진출입니다",
     "keep_approach":            "{dist}미터 앞 차선 유지",
     "keep_imminent":            "차선 유지",
+    "continue_approach":        "{dist}미터 앞 직진",
+    "continue_imminent":        "직진입니다",
     "merge_approach":           "{dist}미터 앞 합류",
     "merge_imminent":           "합류 구간",
     "roundabout_approach":      "{dist}미터 앞 회전교차로",
