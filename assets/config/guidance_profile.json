@@ -12,6 +12,8 @@
   "events": {
     "turn_left":   { "enabled": true },
     "turn_right":  { "enabled": true },
+    "sharp_turn_left":  { "enabled": true },
+    "sharp_turn_right": { "enabled": true },
     "uturn":       { "enabled": true },
     "ramp": {
       "enabled": true,
