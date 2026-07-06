@@ -16,7 +16,9 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/native_engine.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
@@ -80,10 +82,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navLocLayerId  = 'nav-loc-layer';
 
   bool _isManualMode = false;
-  // 재탐색 버튼으로 진입하는 "경로 전체 보기" 오버뷰 상태. _isManualMode와
-  // 별개 플래그로 둔다 — 10초 자동복귀 타이머/배너는 이 흐름에 맞지 않음
-  // (RECON_reroute_button.md §3). 코스 시트가 붙기 전까지는 버튼 재탭으로
-  // 임시 토글한다.
+  // 재탐색 버튼으로 진입하는 "경로 전체 보기" 오버뷰 + 코스 재선택 시트 상태.
+  // _isManualMode와 별개 플래그로 둔다 — 10초 자동복귀 타이머/배너는 이 흐름에
+  // 맞지 않음 (RECON_reroute_button.md §3). 진입/종료는 시트 자신의
+  // onStart/onClose 콜백이 담당한다 (버튼 재탭 토글 아님).
   bool _showCourseSheet = false;
   Timer? _recenterTimer;
   ProviderSubscription<NavigationState?>? _locationSub;
@@ -111,6 +113,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
   double? _lastMovingZoom; // 3km/h 미만에서 줌 진동 방지용 마지막 주행 중 줌
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
+
+  // 코스 재선택 시트 (재탐색 버튼) — 프리뷰 전용 페치 결과와, 취소 시 복원할
+  // 원래 선택 인덱스.
+  List<RouteResult> _fetchedRoutes = [];
+  int? _originalSelectedIdx;
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
@@ -723,23 +730,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
   }
 
-  /// "재탐색" 버튼: 경로 전체가 보이도록 카메라를 오버뷰로 전환/복귀한다.
-  /// 코스 재선택 시트가 붙기 전까지는 재탭으로 팔로우 모드에 복귀하는
-  /// 임시 토글 — 다음 단계에서 시트의 confirm/close 콜백으로 대체 예정.
-  void _toggleOverview() {
-    if (_showCourseSheet) {
-      setState(() => _showCourseSheet = false);
-      final ns = ref.read(navStateProvider);
-      final pos = ns?.pos;
-      if (pos != null) {
-        final speedKmh = ns?.speedKmh ?? 0;
-        _recenter(pos,
-            animate: true,
-            speedKmh: speedKmh,
-            headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
-      }
-      return;
-    }
+  /// "재탐색" 버튼: 경로 전체가 보이는 오버뷰로 전환하고, 3개 코스를 프리뷰용
+  /// 으로 페치해 코스 재선택 시트를 띄운다. 시트가 이미 열려 있으면 no-op —
+  /// 종료/확정은 시트 자신의 onClose/onStart 콜백이 담당한다.
+  Future<void> _openCourseSheet() async {
+    if (_showCourseSheet) return;
     if (_routePoints.length < 2) return;
     // 오버뷰 유지 중엔 _isManualMode의 10초 자동복귀가 개입하지 않도록
     // 별도 타이머는 걸지 않되, 기존에 예약된 팬 제스처 타이머는 취소한다.
@@ -759,6 +754,116 @@ class _NavScreenState extends ConsumerState<NavScreen>
         top: 110,
         right: 80,
         bottom: 360,
+      ),
+    );
+
+    _originalSelectedIdx = ref.read(mapInteractionProvider).selectedRouteIdx;
+    final origin = ref.read(navStateProvider)?.pos;
+    final dest = widget.destination;
+    if (origin == null || dest == null) return;
+    try {
+      final routes = await RoutingService.fetchRoutes(
+        origin: origin,
+        destination: dest,
+        waypoints: widget.waypoints,
+      );
+      if (!mounted) return;
+      final scores = await Future.wait(
+        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
+      );
+      if (!mounted) return;
+      final notifier = ref.read(mapInteractionProvider.notifier);
+      notifier.setAllRoutes(routes.map((r) => r.points).toList());
+      notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
+        km: routes[i].distanceKm,
+        mins: routes[i].durationMin,
+        windingScore: scores[i].funScoreV2,
+      )));
+      setState(() => _fetchedRoutes = routes);
+    } on RoutingException {
+      // 프리뷰 페치 실패 — _fetchedRoutes 비워둔 채로 두고 기존
+      // allRouteMeta(있다면)로 시트를 표시한다. nav_screen엔 home 같은
+      // 스낵바 에러 패턴이 없어 새로 만들지 않는다 (범위 밖).
+    }
+  }
+
+  /// 코스 카드 탭 — 프리뷰만 갱신 (_routePoints/_durationMin은 건드리지 않음).
+  void _onCourseCardTap(int idx) {
+    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
+    if (idx < _fetchedRoutes.length) {
+      _mlCtrl?.setGeoJsonSource(
+          _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
+      _recolorNavRouteLayer(idx);
+    }
+  }
+
+  /// 슬라이더 확정 — 현재 선택된 프리뷰를 실제 활성 경로로 커밋한다.
+  void _onCourseSheetStart() {
+    if (_fetchedRoutes.isNotEmpty) {
+      final idx = ref
+          .read(mapInteractionProvider)
+          .selectedRouteIdx
+          .clamp(0, _fetchedRoutes.length - 1);
+      final route = _fetchedRoutes[idx];
+      setState(() {
+        _routePoints = route.points;
+        _durationMin = route.durationMin;
+        _applyRouteGuidance(route.maneuvers);
+      });
+      _lastAnnouncedIdx = 0;
+      if (_styleLoaded) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(route.points));
+      }
+      _recolorNavRouteLayer(idx); // 마지막 프리뷰 탭과 이미 일치할 수 있으나 방어적으로 재설정
+      _vps?.speak('reroute');
+    }
+    setState(() => _showCourseSheet = false);
+    final ns = ref.read(navStateProvider);
+    final pos = ns?.pos;
+    if (pos != null) {
+      final speedKmh = ns?.speedKmh ?? 0;
+      _recenter(pos,
+          animate: true,
+          speedKmh: speedKmh,
+          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+    }
+  }
+
+  /// 시트 닫기(확정 없이) — 프리뷰를 원래 선택으로 되돌린다. _routePoints는
+  /// 프리뷰 중 변형된 적이 없으므로 지도 소스/색상과 provider 인덱스만 복원.
+  void _onCourseSheetClose() {
+    final restoreIdx = _originalSelectedIdx!;
+    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(restoreIdx);
+    if (_styleLoaded) {
+      _mlCtrl?.setGeoJsonSource(
+          _navRouteSourceId, _buildRouteGeoJson(_routePoints));
+    }
+    _recolorNavRouteLayer(restoreIdx);
+    setState(() => _showCourseSheet = false);
+    final ns = ref.read(navStateProvider);
+    final pos = ns?.pos;
+    if (pos != null) {
+      final speedKmh = ns?.speedKmh ?? 0;
+      _recenter(pos,
+          animate: true,
+          speedKmh: speedKmh,
+          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+    }
+  }
+
+  Future<void> _recolorNavRouteLayer(int idx) async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded) return;
+    await ctrl.removeLayer(_navRouteLayerId);
+    await ctrl.addLineLayer(
+      _navRouteSourceId,
+      _navRouteLayerId,
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
       ),
     );
   }
@@ -1116,7 +1221,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             ? cs.onSurface
                             : cs.onSurface.withValues(alpha: 0.3);
                         return GestureDetector(
-                          onTap: canReroute ? _toggleOverview : null,
+                          onTap: canReroute ? _openCourseSheet : null,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                             decoration: BoxDecoration(
@@ -1160,6 +1265,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
           ),
+
+          // ── 코스 재선택 시트 (재탐색 버튼) ─────────────────────────────────────
+          if (_showCourseSheet)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: CourseSheet(
+                  routeMeta: ref.watch(mapInteractionProvider).allRouteMeta,
+                  selectedIdx: ref.watch(mapInteractionProvider).selectedRouteIdx,
+                  onSelect: _onCourseCardTap,
+                  onStart: _onCourseSheetStart,
+                  onClose: _onCourseSheetClose,
+                ),
+              ),
+            ),
 
           // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
