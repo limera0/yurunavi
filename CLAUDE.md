@@ -39,17 +39,18 @@ You MUST follow this atomic iteration loop for every feature or fix. Do not bund
 
 1. JDK21 is required on build.
 
-## 지도 타일 인프라 (M1.5, 2026-06-04)
-- 타일서버: tileserver-gl v5.6.0 Docker (컨테이너 `yurunavi-tiles`, 포트 8080)
+## 지도 타일 인프라 (M1.5, 2026-06-04 구축 → 2026-06-05 공개호스팅 전환, 2026-07-06 문서 갱신)
+- 타일서버: tileserver-gl v5.6.0 Docker (컨테이너 `yurunavi-tiles`, 포트 8080, 내부망만)
 - config: /data/tiles/data/config.json (data ID=`v3`, serveAllFonts:true, fonts:/fonts)
 - 데이터: /data/tiles/data/korea.mbtiles (planetiler, OpenMapTiles 3.16 스키마)
 - 폰트: /data/tiles/fonts/ (Noto Sans Regular + Noto Sans CJK TC Regular, fontnik으로 .otf→.pbf 빌드)
-- 스타일: assets/images/osm_liberty_yurunavi.json
-  - source url → http://192.168.0.57:8080/data/v3.json
-  - glyphs → http://192.168.0.57:8080/fonts/{fontstack}/{range}.pbf
+- 스타일: assets/images/osm_liberty_yurunavi.json — **HTTPS 공개 호스트로 전환 완료**(커밋 `9b31cf8`)
+  - source url → https://tiles.westinx.com/data/v3.json
+  - sprite → https://tiles.westinx.com/styles/osm-bright/sprite
+  - glyphs → https://tiles.westinx.com/fonts/{fontstack}/{range}.pbf
   - text-font → ["Noto Sans Regular","Noto Sans CJK TC Regular"]
-- ⚠️ 192.168.0.57은 검증용 LAN IP. 출시 전 Tailscale/공개호스팅으로 교체 필수
-- ⚠️ Android cleartext: network_security_config.xml에 192.168.0.57 평문 허용 (임시)
+- 같은 방식으로 `lib/services/routing_service.dart`(`https://valhalla.westinx.com`), `lib/services/native_engine.dart`(`https://navi.westinx.com`)도 공개 호스트 사용 (로컬 개발/curl 계측 시엔 `localhost:8002` 등으로 직접 호출).
+- 192.168.0.57 LAN IP·cleartext 예외는 제거됨 — `network_security_config.xml`엔 현재 `ts.net`(Tailscale) 예외만 남아있음(다른 용도, 지도 타일과 무관).
 - TODO: 일본 mbtiles 추가(config에 data 항목), CJK 번체→jp 폰트 교체
 - 빌드: headless 서버라 flutter run 불가 → flutter build apk --debug → 노트북 adb install
 
