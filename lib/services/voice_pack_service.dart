@@ -23,6 +23,9 @@ class VoicePackService {
     if (key.endsWith('_fast')) {
       return templates[key.substring(0, key.length - 5)];
     }
+    if (key.endsWith('_named')) {
+      return templates[key.substring(0, key.length - 6)];
+    }
     return null;
   }
 
