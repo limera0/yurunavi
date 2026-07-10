@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -6,6 +7,7 @@ class FileLogger {
   /// true면 YNAV_CAM도 파일 기록(카메라 디버깅용). 기본 false.
   static const bool logCam = false;
   static IOSink? _sink;
+  static Timer? _flushTimer;
 
   static Future<void> init() async {
     final orig = debugPrint;
@@ -20,6 +22,11 @@ class FileLogger {
       final f = File('${dir.path}/ynav_$ts.log');
       _sink = f.openWrite(mode: FileMode.writeOnlyAppend);
       _rotate(dir);
+      _flushTimer?.cancel();
+      _flushTimer = Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => _sink?.flush(),
+      );
       debugPrint = (String? msg, {int? wrapWidth}) {
         orig(msg, wrapWidth: wrapWidth);
         if (msg == null || !msg.startsWith('YNAV_')) return;
