@@ -8,9 +8,10 @@ class FileLogger {
   static IOSink? _sink;
 
   static Future<void> init() async {
+    final orig = debugPrint;
     try {
-      final dir = await getExternalStorageDirectory();
-      if (dir == null) return;
+      Directory? dir = await getExternalStorageDirectory();
+      dir ??= await getApplicationDocumentsDirectory();
       final ts = DateTime.now()
           .toIso8601String()
           .replaceAll(':', '-')
@@ -19,15 +20,16 @@ class FileLogger {
       final f = File('${dir.path}/ynav_$ts.log');
       _sink = f.openWrite(mode: FileMode.writeOnlyAppend);
       _rotate(dir);
-      final orig = debugPrint;
       debugPrint = (String? msg, {int? wrapWidth}) {
         orig(msg, wrapWidth: wrapWidth);
         if (msg == null || !msg.startsWith('YNAV_')) return;
         if (!logCam && msg.startsWith('YNAV_CAM')) return;
         _sink?.writeln('${DateTime.now().toIso8601String()} $msg');
       };
-    } catch (_) {
-      // 로깅 실패는 앱 동작에 영향 없게 무시
+      orig('YNAV_LOGINIT ok path=${f.path}', wrapWidth: null);
+    } catch (e, st) {
+      orig('YNAV_LOGINIT FAIL $e', wrapWidth: null);
+      orig('$st', wrapWidth: null);
     }
   }
 
