@@ -11,6 +11,21 @@
 
 원본 트리아지 근거: 이 대화 세션 앞부분의 특급/1급/2급/3급/4급 분류 참조.
 
+## 현재 상태 (다음 세션 시작점)
+
+- **브랜치**: `verify/ride-0711` — 아직 origin에 **push 안 됨** (로컬 커밋만 존재).
+- **1~7번 전부 완료·커밋됨**:
+  - `469aced` — applicationId/서명/ProGuard/OSM attribution/디자인 토큰 뼈대 (1,2,3,4,7)
+  - `8f44f62` — 개인정보처리방침 위치정보법 보강
+  - `5697ff6` — 로드맵 문서 갱신
+  - `67d90f4` — Firebase Crashlytics 최종 활성화 (5번 완료)
+- **6번만 PARTIAL** — 문서 자체는 완료, 사용자의 위치기반서비스사업 신고 여부 확인만 남음
+  (아래 6번 상세 참조). 나머지는 순수 사용자 액션 대기라 코드로 막힌 건 없음.
+- **다음 순서**: 8번(브랜드 방향성) — 사용자가 검토 시간 가진 뒤 새 세션에서 시작.
+  8~10 끝나면 11 → 12 → 13.
+- 새 세션 시작 시 `git log --oneline -10`으로 이 순서와 일치하는지 먼저 확인할 것
+  (사용자가 세션 사이에 직접 커밋/변경했을 수 있음).
+
 ## 진행 순서 (사용자 확정, 2026-07-11)
 
 ```
@@ -83,25 +98,31 @@
 - **검증**: `flutter build apk --release` 성공(87.4MB, 기존 debug APK 224MB 대비 R8
   shrinking 효과 확인), analyze 0 issues.
 
-### 5. Crash reporting 연동 — PARTIAL
+### 5. Crash reporting 연동 — DONE
 - 사용자 결정: **Firebase Crashlytics** (Sentry 대신 선택됨, 2026-07-11).
-- 완료: `pubspec.yaml`에 `firebase_core: ^4.11.0`, `firebase_crashlytics: ^5.2.4` 추가.
-  `lib/core/crash_reporting.dart` 신규 — `initCrashReporting(FirebaseOptions options)`
-  함수 준비(호출부는 아직 연결 안 함, dormant). `lib/main.dart`의 `main()`에 정확한
-  연결 지점을 가리키는 TODO 주석만 추가 — **실제 호출은 걸지 않음**(Firebase 프로젝트
-  없이 호출하면 앱이 즉시 크래시하므로 의도적으로 비활성 상태 유지).
-  Android Gradle 쪽(Google Services 플러그인)은 아직 손대지 않음 —
-  `google-services.json` 없이 적용하면 빌드가 깨짐.
-- **검증**: `flutter analyze`(0 issues) / `flutter build apk --debug`+`--release`(둘 다 성공)
-  / `flutter test`(96/96) — 전부 이 상태로 그린 확인됨.
-- **⚠️ 남은 사용자 액션 (3단계)**:
-  1. Firebase 콘솔에서 프로젝트 생성 → Android 앱 등록(패키지명 `com.westinx.yurunavi`)
-     → `google-services.json` 다운로드 → `android/app/google-services.json`에 배치
-  2. `flutterfire configure` 실행(Firebase CLI 로그인 필요) 또는 수동으로
-     `lib/firebase_options.dart` 작성
-  3. (다음 세션에서) `android/build.gradle.kts` + `android/app/build.gradle.kts`에
-     Google Services Gradle 플러그인 추가, `main.dart`의 TODO 지점에
-     `await initCrashReporting(DefaultFirebaseOptions.currentPlatform);` 연결
+- 처음엔 dormant 스캐폴딩(코드는 준비하되 미호출)으로 시작 → 사용자가 Google Cloud
+  프로젝트 한도에 걸려 안 쓰는 프로젝트(Dify/Openclaw) 정리 후 기존 **WESTINX**
+  Firebase 프로젝트(project_id: `westinx-official`)에 Android 앱
+  (`com.westinx.yurunavi`) 등록, `google-services.json` 발급받아 전달 → 최종 활성화 완료.
+- `lib/firebase_options.dart`는 Firebase CLI 로그인 없이 `google-services.json` 값으로
+  수동 작성(`DefaultFirebaseOptions.currentPlatform`, Android만 실값, 나머지 플랫폼은
+  `UnsupportedError` — 이 앱은 Android 전용이므로 의도된 설계).
+  `lib/main.dart`에서 `WidgetsFlutterBinding.ensureInitialized()` 직후
+  `initCrashReporting()` 실제 호출 중.
+- Android Gradle: `android/settings.gradle.kts`에 Google Services 플러그인 버전 선언,
+  `android/app/build.gradle.kts`에 무조건 적용(더 이상 파일 존재 여부 조건부 아님 —
+  아래 gitignore 결정과 짝을 이룸).
+- **⚠️ 판단 기록**: `google-services.json`/`lib/firebase_options.dart`를 처음엔
+  gitignore했으나, 감사 중 "Gradle 쪽은 파일 없어도 정상 빌드되는데 `main.dart`의
+  import는 그렇지 않아 신규 체크아웃에서 analyze/build가 아예 깨진다"는 모순 발견.
+  구글 공식 입장(이 값들은 APK에 그대로 포함되므로 git에서 숨겨도 실질 보호 없음, 진짜
+  보안 경계는 Firebase Security Rules·API 키 제한)에 따라 **두 파일 다 git에 커밋**하는
+  쪽으로 전환 — Flutter+Firebase 프로젝트의 표준 관행과도 일치. 아직 `git push` 전이라
+  origin(공개 GitHub)엔 안 올라간 상태.
+  - **권장(선택사항)**: Google Cloud Console에서 이 API 키를 Android 앱
+    (패키지명+서명 지문)으로 제한해두면 심층 방어가 됨 — 필수는 아니지만 좋은 습관.
+- **검증**: `flutter clean` 후 재빌드 기준 analyze 0 issues, test 96/96, release 빌드
+  성공(87.6MB, apksigner로 실제 release 키 서명 재확인).
 
 ### 6. 개인정보처리방침 초안 + 호스팅 — PARTIAL
 - `docs/privacy_policy.md` 작성 완료 — 수집 항목(위치정보 포그라운드 전용, 로컬 저장
