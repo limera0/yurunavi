@@ -68,7 +68,7 @@
 | 9 | 앱 아이콘 확정 | 신규 | DEFERRED — 8번 이후 |
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
-| 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **IN_PROGRESS** — 2026-07-11 착수, 실서버 조사 완료 |
+| 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **IN_PROGRESS** — tiles/backup/docs 완료, navi 컷오버만 사용자 sudo 액션 대기 (`docker/INFRA.md` §1) |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | BLOCKED — 12번 이후 |
 
 ## 항목별 상세
@@ -234,6 +234,35 @@
   여유 1.7TB — 로컬 백업엔 문제없음. 현재 자동 백업 전혀 없음.
 - `docker/docker-compose.yml.bak`이 git에 추적되어 있음(구버전 valhalla 이미지 참조,
   죽은 파일) — 정리 대상.
+
+**2026-07-11 실행 결과 (커밋 `4f8edba`)**:
+- `docker/docker-compose.yml`에 `tiles`/`navi` 서비스 추가, `valhalla`와 함께 3개 전부
+  compose 관리로 편입(`tiles`는 원래 `docker run`으로 떠 있던 컨테이너라 `docker rm -f` 후
+  compose로 재생성 — 무상태라 데이터 손실 없음).
+- `native/Dockerfile` 신규(rust-coder 서브에이전트 작성): 멀티스테이지 빌드, non-root 유저,
+  `/health` 헬스체크. 사용자가 "지금 Docker로 완전 전환" 선택 → 이미지 빌드/임시포트(18003)
+  스모크테스트까지 완료. **다만 마지막 라이브 컷오버(systemd 중지 → 8003 기동)는 sudo 권한이
+  없어 Claude가 실행 못함 — 사용자가 `docker/INFRA.md` §1의 명령 4줄을 직접 실행해야
+  완료됨.** 그 전까지 navi는 여전히 systemd로 운영 중(무중단, 문제 없음).
+- `docker/backup.sh` 신규: tiles/valhalla 데이터 + valhalla-src를 매일 03:00 하드링크
+  스냅샷(최근 3세대)으로 백업, crontab 등록 완료(기존 hm-tracker cron 항목은 보존).
+- `docker/INFRA.md` 신규: 서비스 구성표, Cloudflare Tunnel 외부 의존성, 백업/복구 절차,
+  navi 컷오버 미완료 상태를 문서화.
+- **⚠️ 스코프 밖에서 발견한 더 심각한 문제, 로컬 커밋으로 긴급 보호함**: valhalla 포크
+  이미지(`valhalla-fork:patch3-uturn`)를 빌드하는 소스(`/data/projects/valhalla-src` —
+  공식 `valhalla/valhalla` git checkout)가 detached HEAD 위에 **uncommitted 상태로만**
+  존재했음. `motorcyclecost.cc`(이 앱의 핵심 차별화 로직인 곡률/신호/U턴 커스텀 코스팅)와
+  `docker/Dockerfile.fork`(빌드 파일 자체)가 git 이력이 전혀 없어 이 디렉토리가 사라지면
+  영구 소실될 뻔한 상태. 새 로컬 브랜치 `yurunavi-fork`를 만들어 커밋(`cbf9a425b`, origin
+  push는 안 함 — CLAUDE.md 리포 범위 원칙상 사용자 승인 없이 외부 리포지토리에 push하지
+  않음). 상세는 `docker/INFRA.md` §3. **남은 리스크**: 여전히 이 서버에만 있는 로컬 커밋 —
+  진짜 오프사이트 백업(예: private GitHub push)은 다음 세션 판단.
+- code-auditor 검토에서 실질 버그 2건 발견 후 수정: (1) 최초 체크포인트 커밋이 실제로는
+  `git add` 누락으로 compose 파일 변경분을 안 담고 있었던 것, (2) INFRA.md가 컷오버를
+  "완료"라고 잘못 서술한 것 — 둘 다 이번 커밋에서 바로잡음.
+- **다음 세션 시작 시 확인할 것**: 사용자가 navi 컷오버를 완료했는지 `docker ps`로
+  `yurunavi-navi` 컨테이너 존재 여부 확인, 안 됐으면 `docker/INFRA.md` §1 명령 안내부터.
+  완료되면 12번 상태를 DONE으로 갱신하고 13번 착수.
 
 ### 13. 기능 갭 해소
 - 로그인/회원가입, 투어 요약(주행 이력), POI 탐색 UI, 백그라운드/오버레이 내비게이션,
