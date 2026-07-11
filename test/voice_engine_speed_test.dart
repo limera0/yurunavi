@@ -80,4 +80,22 @@ void main() {
       );
     });
   });
+
+  group('C — pack fallback (_named key absent)', () {
+    test('resolveTemplate falls back to base approach when _named key absent', () {
+      final templates = {
+        'exit_approach': '{dist}미터 앞 진출',
+        'ramp_imminent': '진입입니다',
+        // no _named variants — simulates older voice pack
+      };
+      expect(
+        VoicePackService.resolveTemplate(templates, 'exit_approach_named'),
+        '{dist}미터 앞 진출',
+      );
+      expect(
+        VoicePackService.resolveTemplate(templates, 'ramp_imminent_named'),
+        '진입입니다',
+      );
+    });
+  });
 }

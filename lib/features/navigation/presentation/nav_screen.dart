@@ -18,6 +18,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/exit_landmark_service.dart';
 import '../../../services/native_engine.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
@@ -105,6 +106,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   int _lastAnnouncedIdx = -1;  // 중복 발화 방지 (_announceStep용)
   GuidanceProfile? _profile;
   VoiceEngine? _voiceEngine;
+  ExitLandmarkService? _landmarkService;
 
   // progress 구독
   ProviderSubscription<RouteProgress?>? _progressSub;
@@ -297,7 +299,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (_profile == null) return;
     final intents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
-        speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0);
+        speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0,
+        shapePoints: _routePoints);
     for (final it in intents) {
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
@@ -417,7 +420,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setAudioAttributesForNavigation();
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
-    _voiceEngine = VoiceEngine(_profile!);
+    _landmarkService = await ExitLandmarkService.load('assets/data/kr_places.json');
+    _voiceEngine = VoiceEngine(_profile!, landmarkService: _landmarkService);
     _announceStep(0);
   }
 

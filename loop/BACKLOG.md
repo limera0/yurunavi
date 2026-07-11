@@ -5,22 +5,6 @@ tick은 READY 맨 위부터 선행조건 충족된 작업 1개를 집는다.
 작업 전 관련 SPEC_*.md를 읽고 RECON과 대조. 충돌 시 SPEC 우선.
 
 ## READY
-- [ ] **EXIT-LANDMARK** (T3) 출구 이름 랜드마크 폴백 발화
-  - 배경: 2026-07-11 라이딩 피드백 — 출구 안내가 이름 없이 그냥 "진출"이라고만 함.
-    요청사항: OSM에 출구/램프 이름(`sign.exit_name_elements`)이 없으면 "(해당 코스 3km 이내
-    주요 도시/랜드마크 이름) 방면 {좌/우}측 출구입니다"로 대체 발화.
-  - 기존 `feat/exit-name-voice` 브랜치(미병합)는 OSM에 이름이 **있을 때만** 말하는 수준이라
-    이 요청의 핵심(이름 없을 때 폴백)은 아예 구현돼 있지 않음 — 병합만으로는 해결 안 됨, 신규 기능.
-  - 방향(1차 조사, 2026-07-11 세션):
-    - 랜드마크 이름 소스: 새 외부 API 불필요. 앱이 이미 로드한 오프라인 벡터타일
-      (OpenMapTiles `place` 레이어: city/town/village + name + rank)을 재사용 가능해 보임.
-      `lib/features/map/poi_feature_picker.dart` / `poi_name_resolver.dart`가 이미 같은
-      "지도 레이어에서 최근접 후보 뽑기" 패턴을 씀 — 그 패턴을 exit 지점 중심 3km 검색에 재적용.
-    - 좌/우측 출구 판별: exit maneuver의 turn 방향(Valhalla maneuver type)에서 가져오면 될 걸로
-      보이나 미검증 — RECON 단계에서 실제 필드 확인 필요.
-  - 다음 세션 시작점: RECON부터 (file:line 확정, place 레이어 스키마 실측, 방향 필드 확정) →
-    SPEC → 구현. T3이므로 라이딩 검증 전 main 머지 금지.
-  - 선행조건: 없음 (독립 작업)
 - [ ] **LOC-UNIFY** (T3) 위치 파이프라인 통합 + 시작 워밍업
   - SPEC: loop/SPEC_location.md (필독, 우선) / 계획: RECON_locunify_plan.md (단, §A·§C 워밍업 결정은 SPEC이 우선)
   - 커밋 분할 (각 단일파일·1논리·analyze 게이트):
@@ -104,6 +88,13 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
 - [ ] Seoul 카메라 flicker (initState 162-167) — 진입 시 떨림 없는지
 - [ ] _lastAnnouncedIdx=0 회귀 점검 (903715f) — 재탐색 후 카드·TTS 리빌드 정상? (06-15 증상4 회귀 여부)
 - [ ] T3 2단 안내 카드 재설계 — 미착수, 라이딩 가능 세션에서
+- [ ] **EXIT-LANDMARK** (T3) 출구 이름 랜드마크 폴백 발화 — `feat/exit-landmark-voice` 구현 완료
+  (2026-07-11 밤, `feat/exit-name-voice` 기반). RECON: loop/RECON_exit_landmark.md.
+  offline kr_places.json(city/town/village 5,412건, scripts/build_place_index.py로 z10
+  mbtiles place 레이어 추출) 3km 반경 검색, class 우선(city>town>village)·동급 최근접.
+  exitName(OSM) 있으면 그대로, 없고 3km 내 후보 있으면 "{지명} 방면 {좌/우}측 출구입니다",
+  둘 다 없으면 기존 "진출" 유지. analyze/test(83/83) 통과. 라이딩 검증 필요: 실제 국도 출구
+  근처에서 지명이 지나치게 자주/드물게 뜨는지, city 우선 규칙이 체감상 부자연스럽지 않은지.
 
 ## DONE (main 반영 완료)
 - **RECON-locunify-plan** (RECON) ✓ 2026-06-17 — loop/RECON_locunify_plan.md
