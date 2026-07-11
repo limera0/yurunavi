@@ -539,6 +539,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       // GPS 이벤트당 최대 0.5레벨씩 부드럽게 수렴
       final diff = target - _navZoom;
       _navZoom += diff.clamp(-0.3, 0.3); // 수렴 속도 낮춤 (0~20km/h 구간 과도한 줌 방지)
+      _navZoom = _navZoom.clamp(6.0, 17.0); // 앱 줌 상한(17)과 일치시켜 카메라-표시 어긋남 방지
       _lastMovingZoom = _navZoom;
     } else if (_lastMovingZoom != null) {
       _navZoom = _lastMovingZoom!;
@@ -927,6 +928,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             onPointerDown: (_) => _onMapGesture(),
             child: ml.MapLibreMap(
               styleString: _styleJson!,
+              minMaxZoomPreference: const ml.MinMaxZoomPreference(6.0, 17.0),
               initialCameraPosition: ml.CameraPosition(
                 target: _toMl(ref.read(navStateProvider)?.pos ?? _kInitialMapView),
                 zoom: 15,
