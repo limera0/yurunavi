@@ -40,7 +40,7 @@ void main() {
         'turn_right_approach',
         'turn_right_approach',
         'turn_right_approach',
-        'turn_right_imminent',
+        'turn_right_imminent_fast',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50', '5']);
     });
@@ -54,7 +54,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent',
+        'turn_left_imminent_fast',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['300', '50', '5']);
     });
@@ -67,7 +67,7 @@ void main() {
       final intents = drive(engine, 0, [200, 50, 5], steps);
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
-        'turn_left_imminent',
+        'turn_left_imminent_fast',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
     });
@@ -81,7 +81,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent',
+        'turn_left_imminent_fast',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['100', '50', '5']);
     });
@@ -94,7 +94,7 @@ void main() {
       final intents = drive(engine, 0, [80, 50, 5], steps);
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
-        'turn_left_imminent',
+        'turn_left_imminent_fast',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
     });
@@ -106,7 +106,7 @@ void main() {
       final steps = [step0(), step0(type: 10), step0(type: 4)];
       final intents = drive(engine, 0, [25, 5], steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_right_imminent');
+      expect(intents[0].key, 'turn_right_imminent_fast');
       expect(intents[0].vars['dist'], '5');
     });
   });
@@ -138,6 +138,152 @@ void main() {
       final steps = [step0(type: 4)];
       expect(() => engine.onProgress(0, 100, steps), returnsNormally);
       expect(engine.onProgress(0, 100, steps), isEmpty);
+    });
+  });
+
+  group('J — 실서비스 프로필 shape (eventImminentM/eventTiers, turn_left/turn_right imminent_m=50)', () {
+    // Mirrors the production assets/config/guidance_profile.json shape after
+    // the 50m-only-fast-cue change: turn_left/turn_right get their own
+    // imminent_m=50 and tiers without a trailing 50 (imminent point is
+    // supplied automatically), while the old 10m imminent point is gone.
+    final prodShapeProfile = GuidanceProfile(
+      imminentM: 10,
+      tiers: const [
+        GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
+        GuidanceTier(minEntryM: 150, pointsM: [300, 50]),
+        GuidanceTier(minEntryM: 30, pointsM: [100, 50]),
+        GuidanceTier(minEntryM: 0, pointsM: []),
+      ],
+      enabledEvents: {
+        'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
+        'keep', 'merge', 'roundabout', 'destination',
+      },
+      eventTiers: {
+        'turn_left': const [
+          GuidanceTier(minEntryM: 500, pointsM: [500, 300]),
+          GuidanceTier(minEntryM: 150, pointsM: [300]),
+          GuidanceTier(minEntryM: 30, pointsM: [100]),
+          GuidanceTier(minEntryM: 0, pointsM: []),
+        ],
+        'turn_right': const [
+          GuidanceTier(minEntryM: 500, pointsM: [500, 300]),
+          GuidanceTier(minEntryM: 150, pointsM: [300]),
+          GuidanceTier(minEntryM: 30, pointsM: [100]),
+          GuidanceTier(minEntryM: 0, pointsM: []),
+        ],
+      },
+      eventImminentM: {'turn_left': 50, 'turn_right': 50},
+    );
+
+    test('turn_left 600→500→300→50 emits approach, approach, then unconditional _fast at 50 (speedKmh=0)', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = drive(engine, 0, [600, 500, 300, 50], steps);
+      expect(intents.map((i) => i.key).toList(), [
+        'turn_left_approach',
+        'turn_left_approach',
+        'turn_left_imminent_fast',
+      ]);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
+    });
+
+    test('turn_left continuing past 50 down to 10m emits nothing further (old 10m imminent point is gone)', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = drive(engine, 0, [600, 500, 300, 50, 10], steps);
+      expect(intents.map((i) => i.key).toList(), [
+        'turn_left_approach',
+        'turn_left_approach',
+        'turn_left_imminent_fast',
+      ]);
+    });
+  });
+
+  group('K — dead-zone safety net (imminent_m=50 turn first seen already inside 50m)', () {
+    // Same production-shaped profile as group J: turn_left/turn_right have
+    // their own imminent_m=50 and tiers without a trailing 50.
+    final prodShapeProfile = GuidanceProfile(
+      imminentM: 10,
+      tiers: const [
+        GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
+        GuidanceTier(minEntryM: 150, pointsM: [300, 50]),
+        GuidanceTier(minEntryM: 30, pointsM: [100, 50]),
+        GuidanceTier(minEntryM: 0, pointsM: []),
+      ],
+      enabledEvents: {
+        'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
+        'keep', 'merge', 'roundabout', 'destination',
+      },
+      eventTiers: {
+        'turn_left': const [
+          GuidanceTier(minEntryM: 500, pointsM: [500, 300]),
+          GuidanceTier(minEntryM: 150, pointsM: [300]),
+          GuidanceTier(minEntryM: 30, pointsM: [100]),
+          GuidanceTier(minEntryM: 0, pointsM: []),
+        ],
+        'turn_right': const [
+          GuidanceTier(minEntryM: 500, pointsM: [500, 300]),
+          GuidanceTier(minEntryM: 150, pointsM: [300]),
+          GuidanceTier(minEntryM: 30, pointsM: [100]),
+          GuidanceTier(minEntryM: 0, pointsM: []),
+        ],
+      },
+      eventImminentM: {'turn_left': 50, 'turn_right': 50},
+    );
+
+    test('turn_left first detected at 40m (inside 30-150 tier, points [100] all filtered) fires immediately', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = engine.onProgress(0, 40, steps);
+      expect(intents.length, 1);
+      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].vars['dist'], '40');
+    });
+
+    test('turn_left first detected at entryD=0 (maneuver already reached) fires immediately', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = engine.onProgress(0, 0, steps);
+      expect(intents.length, 1);
+      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].vars['dist'], '0');
+    });
+
+    test('turn_right first detected at 45m fires immediately once; no double-fire on later calls at 30 then 5', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = drive(engine, 0, [45, 30, 5], steps);
+      expect(intents.length, 1);
+      expect(intents[0].key, 'turn_right_imminent_fast');
+      expect(intents[0].vars['dist'], '45');
+    });
+
+    test('normal (non-dead-zone) turn_left case at entryD=600 is unchanged', () {
+      final engine = VoiceEngine(prodShapeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = drive(engine, 0, [600, 500, 300, 50], steps);
+      expect(intents.map((i) => i.key).toList(), [
+        'turn_left_approach',
+        'turn_left_approach',
+        'turn_left_imminent_fast',
+      ]);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
+    });
+
+    test('dedupe: tier point coinciding with imminentM fires only ONE intent, not two', () {
+      final dedupeProfile = GuidanceProfile(
+        imminentM: 50,
+        tiers: const [
+          GuidanceTier(minEntryM: 0, pointsM: [50]),
+        ],
+        enabledEvents: {'turn_left'},
+      );
+      final engine = VoiceEngine(dedupeProfile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      final intents = drive(engine, 0, [60, 50], steps);
+      expect(intents.length, 1);
+      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].vars['dist'], '50');
     });
   });
 }

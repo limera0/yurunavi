@@ -104,14 +104,19 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
   (`exitGateOpen`)만 별도 top-level 함수로 분리해 유닛 테스트(exit_gate_test.dart, NavScreen
   자체는 이 repo에 위젯테스트 하네스 없음). 라이딩 검증 필요: 저속 접근 시 버튼 즉시 노출,
   고속 통과 시 버튼 안 뜸, 30m 밖 오버슈트 후 유턴 복귀 시 재도착 정상.
-- [ ] **CORNER-VOICE-50M** (스펙 불명확, 보류) 코너 음성 문구 — "50m 즉시 '곧 좌/우회전' + 0m
-  삭제" (HANDOFF_0711_night2.md §2 인용, 원본 스펙 문서 loop/에 없음). 현재 turn_left/right
-  기본 tier는 [500,300,50]+imminent(10m)이고 "곧 ~"(`_fast` 접미사)는 imminent 시점에서
-  speed≥20km/h일 때만 붙음(voice_engine.dart) — "50m에서 즉시"가 (a) 50m 지점의 approach
-  문구 자체를 "곧 ~"로 바꾸란 건지 (b) `_fast` 트리거를 imminent(10m)에서 50m로 앞당기란
-  건지 불명확. "0m 삭제"도 현재 0m 발화 지점이 코드상 없어(imminent=10m) 무엇을 가리키는지
-  불명확(카드 UI의 "0m" 표시일 가능성도 있음 — 그렇다면 음성이 아니라 별개 작업). 안전 관련
-  음성 문구를 추측으로 구현하는 리스크가 커서 보류 — 다음 세션에 원본 스펙 확인 후 착수.
+- [ ] **CORNER-VOICE-50M** (T3) 코너 음성 문구 50m 고정 발화 — 구현 완료(2026-07-11, VS Code
+  세션). 사용자가 보류 사유였던 (a)/(b) 해석 모호성·"0m 삭제" 의미를 직접 확인: (b) 해석 확정
+  — turn_left/turn_right의 `_fast`(곧 ~) 트리거를 imminent(10m)에서 50m로 이전, 기존 10m
+  발화 지점은 완전 삭제. 구현: `assets/config/guidance_profile.json`에 turn_left/turn_right
+  이벤트별 `imminent_m:50` + 말미 50 제거한 tiers override 추가, `voice_engine.dart`의 `_fast`
+  접미사에서 `speedKmh>=20` 게이트 제거(50m 시점엔 속도 무관 항상 "곧 ~"). 회귀 발견·수정:
+  imminent_m을 50으로 올리며 진입거리 0~50m 사이(코너가 근접해서 처음 감지되는 경우, 연속
+  헤어핀 등)에 음성이 아예 안 나가는 데드존이 생겨 `_immediatePoint` 폴백 추가(모든 체크포인트가
+  이미 지나간 상태로 처음 감지되면 그 즉시 "곧 ~" 발화) — entryD==0 경계값 버그(엄격 `>0` 가드)도
+  발견·수정(`>=0`). 겸사겸사 destination 이벤트의 기존 잠재 버그(imminent_m=50이 상속받는 전역
+  tier의 말미 50과 겹쳐 동일 발화 중복 방지)도 Set dedupe로 free-fix. analyze/test(96/96) 통과.
+  라이딩 검증 필요: 좌/우회전 50m 지점 "곧 좌/우회전입니다" 체감 타이밍이 실제 반응거리로
+  적절한지, 연속 코너 데드존 폴백이 부자연스럽게 튀지 않는지.
 
 ## DONE (main 반영 완료)
 - **RECON-locunify-plan** (RECON) ✓ 2026-06-17 — loop/RECON_locunify_plan.md

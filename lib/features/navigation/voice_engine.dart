@@ -40,6 +40,7 @@ class VoiceEngine {
   int _voiceStepIdx = -1;
   List<double> _pendingPoints = [];
   String? _landmarkForStep;
+  double? _immediatePoint;
 
   List<SpeakIntent> onProgress(
     int step,
@@ -62,9 +63,21 @@ class VoiceEngine {
         (t) => entryD >= t.minEntryM,
         orElse: () => eventTierList.last,
       );
-      final pts = [...tier.pointsM, imminentM];
-      _pendingPoints = pts.where((p) => p < entryD).toList()
+      final filtered = {...tier.pointsM, imminentM}
+          .where((p) => p < entryD)
+          .toList()
         ..sort((a, b) => b.compareTo(a));
+      if (filtered.isEmpty && entryD >= 0) {
+        // Every configured checkpoint — including the imminent one — is already
+        // behind the vehicle by the time this maneuver is first seen (e.g. two
+        // corners closer together than the imminent distance). Announce
+        // immediately instead of leaving this turn with no voice cue at all.
+        filtered.add(entryD);
+        _immediatePoint = entryD;
+      } else {
+        _immediatePoint = null;
+      }
+      _pendingPoints = filtered;
 
       // 출구명(exitName)이 없을 때만 오프라인 랜드마크 폴백 조회 — 스텝당 1회.
       _landmarkForStep = null;
@@ -82,12 +95,10 @@ class VoiceEngine {
     final out = <SpeakIntent>[];
     while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
       final point = _pendingPoints.removeAt(0);
-      final isImminent = point == imminentM;
+      final isImminent = point == imminentM || point == _immediatePoint;
       if (profile.isEnabled(_profileEventKey(event))) {
         final phase = isImminent ? 'imminent' : 'approach';
-        final suffix = isImminent &&
-                speedKmh >= 20 &&
-                (event == 'turn_left' || event == 'turn_right')
+        final suffix = isImminent && (event == 'turn_left' || event == 'turn_right')
             ? '_fast'
             : '';
         final vars = {'dist': point.toStringAsFixed(0)};
@@ -121,5 +132,6 @@ class VoiceEngine {
     _voiceStepIdx = -1;
     _pendingPoints = [];
     _landmarkForStep = null;
+    _immediatePoint = null;
   }
 }

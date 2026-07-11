@@ -37,7 +37,7 @@ void main() {
     return out;
   }
 
-  group('R1 — speed-aware imminent turn key', () {
+  group('R1 — turn imminent key is unconditionally _fast (speed no longer matters)', () {
     test('turn_left speed 25 → turn_left_imminent_fast', () {
       final engine = VoiceEngine(profile);
       final steps = [step(), step(type: 15), step(type: 4)]; // 15=turn_left
@@ -46,12 +46,12 @@ void main() {
       expect(intents[0].key, 'turn_left_imminent_fast');
     });
 
-    test('turn_left speed 10 → turn_left_imminent (slow, no fast suffix)', () {
+    test('turn_left speed 10 → turn_left_imminent_fast (unconditional now)', () {
       final engine = VoiceEngine(profile);
       final steps = [step(), step(type: 15), step(type: 4)];
       final intents = driveToImminent(engine, steps, speedKmh: 10);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_left_imminent');
+      expect(intents[0].key, 'turn_left_imminent_fast');
     });
 
     test('turn_right speed 30 → turn_right_imminent_fast', () {

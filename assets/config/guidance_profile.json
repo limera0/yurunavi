@@ -10,8 +10,26 @@
     { "min_entry_m": 0,   "points_m": [] }
   ],
   "events": {
-    "turn_left":   { "enabled": true },
-    "turn_right":  { "enabled": true },
+    "turn_left": {
+      "enabled": true,
+      "imminent_m": 50,
+      "tiers": [
+        { "min_entry_m": 500, "points_m": [500, 300] },
+        { "min_entry_m": 150, "points_m": [300] },
+        { "min_entry_m": 30,  "points_m": [100] },
+        { "min_entry_m": 0,   "points_m": [] }
+      ]
+    },
+    "turn_right": {
+      "enabled": true,
+      "imminent_m": 50,
+      "tiers": [
+        { "min_entry_m": 500, "points_m": [500, 300] },
+        { "min_entry_m": 150, "points_m": [300] },
+        { "min_entry_m": 30,  "points_m": [100] },
+        { "min_entry_m": 0,   "points_m": [] }
+      ]
+    },
     "sharp_turn_left":  { "enabled": true },
     "sharp_turn_right": { "enabled": true },
     "uturn":       { "enabled": true },

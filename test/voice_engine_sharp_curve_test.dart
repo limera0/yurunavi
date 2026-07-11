@@ -64,46 +64,46 @@ void main() {
   });
 
   group('C — 회귀 가드: 완만한 우회전 (type 9/10)', () {
-    test('type 9 (slight right) still emits plain turn_right_*', () {
+    test('type 9 (slight right) still resolves to turn_right_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 9), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent');
+      expect(intents.last.key, 'turn_right_imminent_fast');
     });
 
-    test('type 10 (right) still emits plain turn_right_*', () {
+    test('type 10 (right) still resolves to turn_right_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 10), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent');
+      expect(intents.last.key, 'turn_right_imminent_fast');
     });
   });
 
   group('D — 회귀 가드: 완만한 좌회전 (type 15/16)', () {
-    test('type 15 (left) still emits plain turn_left_*', () {
+    test('type 15 (left) still resolves to turn_left_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 15), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent');
+      expect(intents.last.key, 'turn_left_imminent_fast');
     });
 
-    test('type 16 (slight left) still emits plain turn_left_*', () {
+    test('type 16 (slight left) still resolves to turn_left_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 16), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent');
+      expect(intents.last.key, 'turn_left_imminent_fast');
     });
   });
 
