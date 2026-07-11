@@ -197,13 +197,17 @@ class RoutingService {
         'long_tunnel_factor': 1.5,
         'span_min_length': 500,
       },
-      // 국도: 최단·주요도로 선호, 생활도로·트랙 회피
+      // 국도: 주요도로 선호, 생활도로·트랙·고속도로·유료도로 회피
+      // 'shortest' 제거: motorcyclecost.cc EdgeCost()가 shortest_일 때
+      // class_factors/use_highways/use_tolls/curvature/bridge/tunnel factor를
+      // 전부 건너뛰고 순수 거리비용만 반환 — 이 코스가 자동차전용도로(trunk)를
+      // 36% 섞어 쓰던 원인이었음 (loop/RECON_costing_national.md 참조).
       {
         'use_highways': 0.0,
         'use_ferry': 0.0,
         'use_living_streets': 0.0,
         'use_tracks': 0.0,
-        'shortest': true,
+        'use_tolls': 0.0,
         'class_factors': {
           '0': 100,   // motorway: 고속도로 회피
           '1': 100,   // trunk: 자동차전용 회피
