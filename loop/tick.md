@@ -1,43 +1,42 @@
-EXECUTION — edit and commit. Branch feat/sharp-curve-voice, HEAD 922375f. Per RECON_sharp_curve.md. One logical change per commit. flutter analyze zero, flutter test green. Only voice_engine.dart + guidance_profile.json + default_ko.json + new test file.
+EXECUTION — rebase validated #5 TTS-audibility fix (originally on stale `feat/tts-audibility`,
+44 commits behind main, unrebaseable cleanly) onto current main. Branch `feat/tts-audibility-v2`.
+Only 2 functional one-line changes, both already verified against flutter_tts 4.2.5 source by
+prior RECON (`loop/RECON_tts_volume.md`, cherry-picked from `33aa6d4`). No new design decisions —
+this is a clean re-apply, not new RECON.
 
-=== s1: split sharp-curve events from normal turn events ===
-RECON: voice_engine.dart:12-13 currently folds type 11(kSharpRight)/14(kSharpLeft) into the
-same 'turn_right'/'turn_left' events as slight/moderate turns (9/10/15/16).
-- `eventForType` (voice_engine.dart:10-24): change
-  `case 14: case 15: case 16: return 'turn_left';` → keep 15/16 as `turn_left`, add
-  `case 14: return 'sharp_turn_left';` (own case, order doesn't matter in a switch).
-  `case 9: case 10: case 11: return 'turn_right';` → keep 9/10 as `turn_right`, add
-  `case 11: return 'sharp_turn_right';`.
-- `_profileEventKey` (voice_engine.dart:26-27): no change needed — sharp_turn_left/right are not
-  prefixed with 'roundabout_' so they pass through unchanged as profile keys.
-- `_fast` suffix condition (voice_engine.dart:62-66) intentionally NOT extended to sharp_turn_*
-  (see RECON risk note) — leave the `event == 'turn_left' || event == 'turn_right'` check as-is.
-commit s1: "feat(voice): split sharp-curve (45+) from normal turn events"
+=== s1: bring forward RECON_tts_volume.md (docs only) ===
+cherry-pick 33aa6d4 as-is.
+commit s1: (keep original message) "docs: TTS 볼륨 가청성 recon (usage/focus 미설정 확인)"
 
-=== s2: guidance_profile.json + default_ko.json additions ===
-- `assets/config/guidance_profile.json` events map: add `sharp_turn_left` and `sharp_turn_right`,
-  each `{ "enabled": true }` (no custom tiers/imminent_m — falls back to top-level common tiers,
-  same as turn_left/turn_right today; see RECON risk note on why timing is untouched).
-- `assets/voice_packs/default_ko.json` templates: add 4 keys exactly as in RECON:
-  `sharp_turn_left_approach`, `sharp_turn_left_imminent`, `sharp_turn_right_approach`,
-  `sharp_turn_right_imminent` (see RECON proposal §3 for exact Korean strings).
-commit s2: "feat(voice): sharp-curve slow-down voice templates (ko)"
+=== s2: route speech to navigation audio usage ===
+`lib/features/navigation/presentation/nav_screen.dart` `_initTts()` — after `setVolume(1.0)`,
+add `await _tts!.setAudioAttributesForNavigation();` (flutter_tts 4.2.5 API, confirmed at
+flutter_tts.dart:665-666 in RECON). Routes TTS to `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` stream,
+separate from media volume.
+cherry-pick 07feb5b, resolve any context-line drift manually (44 commits of divergence since
+original commit — same file, same function, expect trivial offset only).
+commit s2: (keep original message) "feat(tts): route speech to navigation audio usage (#5)"
 
-=== s3: test coverage ===
-New test file `test/voice_engine_sharp_curve_test.dart` (mirror existing
-`test/voice_engine_test.dart` structure/imports):
-- type 11 → event resolves to sharp_turn_right → speak key `sharp_turn_right_imminent` at
-  imminent point (not `turn_right_imminent`).
-- type 14 → event resolves to sharp_turn_left → speak key `sharp_turn_left_imminent`.
-- type 9/10 still produce plain `turn_right_*` (regression guard — slight/moderate turn unchanged).
-- type 15/16 still produce plain `turn_left_*` (regression guard).
-- speedKmh ≥ 20 on a sharp_turn_* event does NOT produce a `_fast` suffixed key (confirms s1's
-  intentional exclusion — construct GuidanceProfile fixture the same way voice_engine_speed_test.dart
-  does, feed speedKmh=30 into onProgress for a type-11 step, assert key has no `_fast`).
-commit s3: "test(voice): sharp-curve event split + fast-suffix exclusion coverage"
+=== s3: request audio focus + ducking on speak ===
+`lib/services/voice_pack_service.dart` — `await _tts.speak(text);` → `await _tts.speak(text,
+focus: true);`. Requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so background media (music etc.)
+ducks when TTS speaks.
+cherry-pick 98b71b0.
+commit s3: (keep original message) "feat(tts): request audio focus + ducking on speak (#5)"
+
+=== s4: refreshed report ===
+New `loop/REPORT_tts_audibility.md` (old one at `6793b08` referenced the stale branch/commit
+hashes — rewrite with current hashes, same riding checklist, note this is a rebase not new work).
+commit s4: "docs(tts): refresh audibility fix report on rebased branch (#5)"
 
 === AFTER ===
-git log --oneline -4 (paste).
-flutter analyze (report), flutter test (report). Do NOT merge/build yet — report back first.
-Desk-verifiable in full: this is pure event-routing + template text, no timing/tier change,
-so no drive-only unknowns remain for THIS slice (unlike RECON's deferred tier-tuning note).
+git log --oneline -5 (paste). flutter analyze (expect 0 — main already clean after `d9d78d5`
+cherry-pick this session). flutter test (expect all green, no new tests — RECON already
+established audio focus/usage is platform-channel-only, not unit-testable; existing voice tests
+must stay green since VoicePackService.speak signature is unchanged, only call-site arg added).
+Do NOT merge into main yet (T3, pre-ride). After PASS here, merge into `verify/ride-0706` as the
+6th branch per user instruction (2026-07-06): "TTS까지 진행하자. 내일 퇴근 때 한 번에 싹
+검토하지 뭐" — one consolidated APK, one ride, tomorrow (2026-07-07) early-morning commute.
+Old `feat/tts-audibility` branch left untouched (superseded, not deleted) — it also carries 3
+unrelated docs-only commits (private-land route avoidance / gate-tagging POC / overlay pipeline
+recon) that are out of scope for this task; flag separately, do not pull into this branch.

@@ -33,6 +33,6 @@ class VoicePackService {
     for (final entry in vars.entries) {
       text = text.replaceAll('{${entry.key}}', entry.value);
     }
-    await _tts.speak(text);
+    await _tts.speak(text, focus: true);
   }
 }
