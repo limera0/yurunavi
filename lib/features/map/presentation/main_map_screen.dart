@@ -954,6 +954,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           if (_styleJson != null)
           ml.MapLibreMap(
             styleString: _styleJson!,
+            minMaxZoomPreference: const ml.MinMaxZoomPreference(6.0, 17.0),
             initialCameraPosition: ml.CameraPosition(
               target: _toMl(_origin ?? _lastKnown ?? kInitialMapView),
               zoom: _currentZoom,
