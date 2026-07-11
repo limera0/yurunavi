@@ -95,6 +95,23 @@ phase1/startup-accuracy / feat/guidance-fix 에 존재. main 미반영(2026-06-1
   exitName(OSM) 있으면 그대로, 없고 3km 내 후보 있으면 "{지명} 방면 {좌/우}측 출구입니다",
   둘 다 없으면 기존 "진출" 유지. analyze/test(83/83) 통과. 라이딩 검증 필요: 실제 국도 출구
   근처에서 지명이 지나치게 자주/드물게 뜨는지, city 우선 규칙이 체감상 부자연스럽지 않은지.
+- [ ] **ARRIVAL-EXIT-GEOFENCE** (T3) 도착배너 종료버튼 지오펜스+속도 게이트 — `feat/arrival-exit-geofence`
+  구현 완료(2026-07-11 밤). `feat/arrival-fix`의 SPEC_arrival_v2(§1d, 미병합) 포팅 — 단, main의
+  도착감지/카드/TTS·POI(C1/C2/C4)는 이미 그 브랜치보다 더 단순·독립적으로 구현되어 있어 손대지
+  않음, 종료버튼 게이팅(C3)만 이식. 목적지 직선거리 ≤30m AND 속도 ≤30km/h일 때만 배너의 "종료"
+  버튼 활성화(그 전엔 "정차 후 종료 가능" 힌트), 자동종료 없음(탭으로만). 오버슈트 시 재탐색은
+  기존 이탈감지(off-route, 50m 코리도) 경로가 이미 커버해 별도 구현 안 함. 순수 게이트 판정
+  (`exitGateOpen`)만 별도 top-level 함수로 분리해 유닛 테스트(exit_gate_test.dart, NavScreen
+  자체는 이 repo에 위젯테스트 하네스 없음). 라이딩 검증 필요: 저속 접근 시 버튼 즉시 노출,
+  고속 통과 시 버튼 안 뜸, 30m 밖 오버슈트 후 유턴 복귀 시 재도착 정상.
+- [ ] **CORNER-VOICE-50M** (스펙 불명확, 보류) 코너 음성 문구 — "50m 즉시 '곧 좌/우회전' + 0m
+  삭제" (HANDOFF_0711_night2.md §2 인용, 원본 스펙 문서 loop/에 없음). 현재 turn_left/right
+  기본 tier는 [500,300,50]+imminent(10m)이고 "곧 ~"(`_fast` 접미사)는 imminent 시점에서
+  speed≥20km/h일 때만 붙음(voice_engine.dart) — "50m에서 즉시"가 (a) 50m 지점의 approach
+  문구 자체를 "곧 ~"로 바꾸란 건지 (b) `_fast` 트리거를 imminent(10m)에서 50m로 앞당기란
+  건지 불명확. "0m 삭제"도 현재 0m 발화 지점이 코드상 없어(imminent=10m) 무엇을 가리키는지
+  불명확(카드 UI의 "0m" 표시일 가능성도 있음 — 그렇다면 음성이 아니라 별개 작업). 안전 관련
+  음성 문구를 추측으로 구현하는 리스크가 커서 보류 — 다음 세션에 원본 스펙 확인 후 착수.
 
 ## DONE (main 반영 완료)
 - **RECON-locunify-plan** (RECON) ✓ 2026-06-17 — loop/RECON_locunify_plan.md
