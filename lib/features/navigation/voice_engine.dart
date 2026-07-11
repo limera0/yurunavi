@@ -1,3 +1,6 @@
+import 'package:latlong2/latlong.dart';
+
+import '../../../services/exit_landmark_service.dart';
 import '../../../services/routing_service.dart';
 import 'guidance_profile.dart';
 
@@ -31,12 +34,20 @@ String _profileEventKey(String event) =>
 
 class VoiceEngine {
   final GuidanceProfile profile;
-  VoiceEngine(this.profile);
+  final ExitLandmarkService? landmarkService;
+  VoiceEngine(this.profile, {this.landmarkService});
 
   int _voiceStepIdx = -1;
   List<double> _pendingPoints = [];
+  String? _landmarkForStep;
 
-  List<SpeakIntent> onProgress(int step, double d, List<ManeuverStep> steps, {double speedKmh = 0}) {
+  List<SpeakIntent> onProgress(
+    int step,
+    double d,
+    List<ManeuverStep> steps, {
+    double speedKmh = 0,
+    List<LatLng> shapePoints = const [],
+  }) {
     final turnIdx = step + 1;
     if (turnIdx >= steps.length) return const [];
     final event = eventForType(steps[turnIdx].type);
@@ -54,6 +65,18 @@ class VoiceEngine {
       final pts = [...tier.pointsM, imminentM];
       _pendingPoints = pts.where((p) => p < entryD).toList()
         ..sort((a, b) => b.compareTo(a));
+
+      // 출구명(exitName)이 없을 때만 오프라인 랜드마크 폴백 조회 — 스텝당 1회.
+      _landmarkForStep = null;
+      final exitName = steps[turnIdx].exitName;
+      final begin = steps[turnIdx].beginShapeIdx;
+      if (event == 'exit' &&
+          (exitName == null || exitName.isEmpty) &&
+          landmarkService != null &&
+          begin >= 0 &&
+          begin < shapePoints.length) {
+        _landmarkForStep = landmarkService!.nearestLandmark(shapePoints[begin]);
+      }
     }
 
     final out = <SpeakIntent>[];
@@ -82,6 +105,10 @@ class VoiceEngine {
           if (exitName != null && exitName.isNotEmpty) {
             vars['exit_name'] = exitName;
             key = '${event}_${phase}_named$suffix';
+          } else if (event == 'exit' && _landmarkForStep != null) {
+            vars['landmark'] = _landmarkForStep!;
+            vars['direction'] = steps[turnIdx].type == 21 ? '좌' : '우';
+            key = 'exit_${phase}_landmark$suffix';
           }
         }
         out.add(SpeakIntent(key, vars));
@@ -93,5 +120,6 @@ class VoiceEngine {
   void reset() {
     _voiceStepIdx = -1;
     _pendingPoints = [];
+    _landmarkForStep = null;
   }
 }
