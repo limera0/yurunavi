@@ -71,7 +71,7 @@
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
-| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래), 13-1부터 진행 |
+| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE, 13-2부터 진행 |
 
 ## 항목별 상세
 
@@ -323,7 +323,7 @@ Phase2" 순서는 최초 트리아지 세션에서의 단순 나열이었지 우
 
 | # | 하위 과제 | 근거 요약 | 상태 |
 |---|-----------|-----------|------|
-| 13-1 | POI 탐색 UI | 백엔드 완성·미사용 상태, UI만 필요 → 최저비용 최고가치 | **IN_PROGRESS** |
+| 13-1 | POI 탐색 UI | 백엔드 완성·미사용 상태, UI만 필요 → 최저비용 최고가치 | **DONE** (`5ab5262`) |
 | 13-2 | 설정: 약관/오픈소스 라이선스 화면 | 완전 독립, 정적 화면, 스토어 컴플라이언스 | TODO |
 | 13-3 | 투어 요약(주행 이력) 로컬 MVP | 로그인 불필요, 데이터모델부터 신규 구축 | TODO |
 | 13-4 | 설정: 도로 선호도 / 내비뷰 설정 | 착수 시 Valhalla costing 옵션 재조사 필요 | TODO |
@@ -333,6 +333,26 @@ Phase2" 순서는 최초 트리아지 세션에서의 단순 나열이었지 우
 | 13-8 | 설정: 지도 다운로드(오프라인 지도) | 타일 저장/용량 관리 — 12번(인프라) 성격에 더 가까움 | DEFERRED → 12번 후속 과제로 재분류 검토 |
 
 착수 시 상태를 IN_PROGRESS로, 완료 시 DONE + 커밋 해시로 갱신할 것 (세션 프로토콜 동일 적용).
+
+**13-1 실행 결과 (커밋 `5ab5262`, 2026-07-11)**:
+- `lib/features/map/presentation/main_map_screen.dart` 한 파일만 변경(+316/-4). 우측 지도
+  컨트롤 패널에 storefront 버튼 추가 → 바텀시트에서 6종 POI 카테고리 필터칩 다중선택 →
+  기존 `PoiService.fetchPois()`(Overpass) 반경 3km 조회 → 거리순 리스트, 탭하면 목적지
+  설정. 동시에 `poiListProvider`에 결과를 넣어 MapLibre GL 네이티브 CircleLayer(신규
+  `poi-explore-source`/`poi-explore-layer`, 카테고리별 색상 match expression)로 지도 위에
+  점 렌더링, 시트 닫히면 자동 정리.
+- 지도 위 점 자체의 탭 인식(hit-test)은 스코프에서 제외 — 목적지 지정은 시트 리스트 탭으로만
+  (기존 `_onMapTap` 흐름은 미변경). `PoiService.snapDestination`(오모테나시 스냅),
+  `poi_feature_picker.dart`, flutter_map 기반 죽은 코드(`_buildPoiMarkers` 등)는 미변경.
+- code-auditor PASS(비동기 생명주기/시트 닫힘 처리/GeoJSON 좌표순서/match expression 문자열
+  일치/스타일 재로드 시 복원/기존 호출부 호환성 전부 확인). 사소한 정리 2건(중복
+  `ref.watch` 제거, `whenComplete` 콜백 `mounted` 가드)은 바로 반영.
+- `flutter analyze` 0 issues, `flutter test` 96/96, `flutter build apk --debug` 빌드 성공.
+- **⚠️ 미확인 상태로 남은 것**: headless 서버라 `flutter run` 불가 — 카테고리별 점 색상이
+  실제 기기에서 의도대로 렌더링되는지, 필터칩 UX가 실사용감 있는지는 코드 검토로만
+  확인했고 육안 확인은 못함. 다음에 노트북에서 `adb install
+  build/app/outputs/flutter-apk/app-debug.apk`로 실제 확인 권장.
+- 다음 세션: 13-2(설정: 약관/오픈소스 라이선스 화면) 착수.
 
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
