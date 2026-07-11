@@ -16,7 +16,9 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/native_engine.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../services/routing_service.dart';
@@ -80,6 +82,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navLocLayerId  = 'nav-loc-layer';
 
   bool _isManualMode = false;
+  // 재탐색 버튼으로 진입하는 "경로 전체 보기" 오버뷰 + 코스 재선택 시트 상태.
+  // _isManualMode와 별개 플래그로 둔다 — 10초 자동복귀 타이머/배너는 이 흐름에
+  // 맞지 않음 (RECON_reroute_button.md §3). 진입/종료는 시트 자신의
+  // onStart/onClose 콜백이 담당한다 (버튼 재탭 토글 아님).
+  bool _showCourseSheet = false;
   Timer? _recenterTimer;
   ProviderSubscription<NavigationState?>? _locationSub;
 
@@ -106,6 +113,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
   double? _lastMovingZoom; // 3km/h 미만에서 줌 진동 방지용 마지막 주행 중 줌
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
+
+  // 코스 재선택 시트 (재탐색 버튼) — 프리뷰 전용 페치 결과와, 취소 시 복원할
+  // 원래 선택 인덱스.
+  List<RouteResult> _fetchedRoutes = [];
+  int? _originalSelectedIdx;
+  List<List<LatLng>>? _originalAllRoutes;
+  List<({double km, int mins, double windingScore})>? _originalAllRouteMeta;
+  int _courseSheetReqId = 0;
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
@@ -230,7 +245,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // (RECON §6, _recenter가 await를 포함한 비동기라 호출부가 다음 틱을
         // 기다리지 않고 흘려보내는 구조에서 발생).
         final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
-        if (!_isManualMode) {
+        if (!_isManualMode && !_showCourseSheet) {
           _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
         }
         _ensureLocationMarker(effectiveHeadingDeg);
@@ -331,6 +346,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   Future<void> _reroute(LatLng origin, {bool silent = false}) async {
+    if (_showCourseSheet) return;
     if (_isRerouting || !mounted) return;
     if (_arrivalBannerVisible) {
       setState(() {
@@ -391,12 +407,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
       }
     }
-  }
-
-  void _manualReroute() {
-    final pos = ref.read(navStateProvider)?.pos;
-    if (pos == null) return;
-    _reroute(pos, silent: true);
   }
 
   Future<void> _initTts() async {
@@ -711,6 +721,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _isManualMode = true);
     _recenterTimer?.cancel();
     _recenterTimer = Timer(const Duration(seconds: 10), () {
+      if (_showCourseSheet) return;
       setState(() => _isManualMode = false);
       final ns = ref.read(navStateProvider);
       final pos = ns?.pos;
@@ -722,6 +733,158 @@ class _NavScreenState extends ConsumerState<NavScreen>
             headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
       }
     });
+  }
+
+  /// "재탐색" 버튼: 경로 전체가 보이는 오버뷰로 전환하고, 3개 코스를 프리뷰용
+  /// 으로 페치해 코스 재선택 시트를 띄운다. 시트가 이미 열려 있으면 no-op —
+  /// 종료/확정은 시트 자신의 onClose/onStart 콜백이 담당한다.
+  Future<void> _openCourseSheet() async {
+    if (_showCourseSheet) return;
+    if (_routePoints.length < 2) return;
+    final reqId = ++_courseSheetReqId;
+    // 오버뷰 유지 중엔 _isManualMode의 10초 자동복귀가 개입하지 않도록
+    // 별도 타이머는 걸지 않되, 기존에 예약된 팬 제스처 타이머는 취소한다.
+    _recenterTimer?.cancel();
+    setState(() {
+      _showCourseSheet = true;
+      _fetchedRoutes = [];
+    });
+    final minLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngBounds(
+        ml.LatLngBounds(
+          southwest: ml.LatLng(minLat, minLng),
+          northeast: ml.LatLng(maxLat, maxLng),
+        ),
+        left: 50,
+        top: 110,
+        right: 80,
+        bottom: 360,
+      ),
+    );
+
+    final currentMapState = ref.read(mapInteractionProvider);
+    _originalSelectedIdx = currentMapState.selectedRouteIdx;
+    _originalAllRoutes = currentMapState.allRoutes;
+    _originalAllRouteMeta = currentMapState.allRouteMeta;
+    final origin = ref.read(navStateProvider)?.pos;
+    final dest = widget.destination;
+    if (origin == null || dest == null) return;
+    try {
+      final routes = await RoutingService.fetchRoutes(
+        origin: origin,
+        destination: dest,
+        waypoints: widget.waypoints,
+      );
+      if (!mounted || reqId != _courseSheetReqId) return;
+      final scores = await Future.wait(
+        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
+      );
+      if (!mounted || reqId != _courseSheetReqId) return;
+      final notifier = ref.read(mapInteractionProvider.notifier);
+      notifier.setAllRoutes(routes.map((r) => r.points).toList());
+      notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
+        km: routes[i].distanceKm,
+        mins: routes[i].durationMin,
+        windingScore: scores[i].funScoreV2,
+      )));
+      setState(() => _fetchedRoutes = routes);
+    } on RoutingException {
+      // 프리뷰 페치 실패 — _fetchedRoutes 비워둔 채로 두고 기존
+      // allRouteMeta(있다면)로 시트를 표시한다. nav_screen엔 home 같은
+      // 스낵바 에러 패턴이 없어 새로 만들지 않는다 (범위 밖).
+    }
+  }
+
+  /// 코스 카드 탭 — 프리뷰만 갱신 (_routePoints/_durationMin은 건드리지 않음).
+  void _onCourseCardTap(int idx) {
+    ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
+    if (idx < _fetchedRoutes.length) {
+      if (_styleLoaded) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
+      }
+      _recolorNavRouteLayer(idx);
+    }
+  }
+
+  /// 슬라이더 확정 — 현재 선택된 프리뷰를 실제 활성 경로로 커밋한다.
+  void _onCourseSheetStart() {
+    if (_fetchedRoutes.isNotEmpty) {
+      final idx = ref
+          .read(mapInteractionProvider)
+          .selectedRouteIdx
+          .clamp(0, _fetchedRoutes.length - 1);
+      final route = _fetchedRoutes[idx];
+      setState(() {
+        _routePoints = route.points;
+        _durationMin = route.durationMin;
+        _applyRouteGuidance(route.maneuvers);
+      });
+      _lastAnnouncedIdx = 0;
+      if (_styleLoaded) {
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteSourceId, _buildRouteGeoJson(route.points));
+      }
+      _recolorNavRouteLayer(idx); // 마지막 프리뷰 탭과 이미 일치할 수 있으나 방어적으로 재설정
+      _vps?.speak('reroute');
+    }
+    setState(() => _showCourseSheet = false);
+    final ns = ref.read(navStateProvider);
+    final pos = ns?.pos;
+    if (pos != null) {
+      final speedKmh = ns?.speedKmh ?? 0;
+      _recenter(pos,
+          animate: true,
+          speedKmh: speedKmh,
+          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+    }
+  }
+
+  /// 시트 닫기(확정 없이) — 프리뷰를 원래 선택으로 되돌린다. _routePoints는
+  /// 프리뷰 중 변형된 적이 없으므로 지도 소스/색상과 provider 인덱스만 복원.
+  void _onCourseSheetClose() {
+    final restoreIdx = _originalSelectedIdx!;
+    final notifier = ref.read(mapInteractionProvider.notifier);
+    if (_originalAllRoutes != null) notifier.setAllRoutes(_originalAllRoutes!);
+    if (_originalAllRouteMeta != null) {
+      notifier.setAllRouteMeta(_originalAllRouteMeta!);
+    }
+    notifier.setSelectedRouteIdx(restoreIdx);
+    if (_styleLoaded) {
+      _mlCtrl?.setGeoJsonSource(
+          _navRouteSourceId, _buildRouteGeoJson(_routePoints));
+    }
+    _recolorNavRouteLayer(restoreIdx);
+    setState(() => _showCourseSheet = false);
+    final ns = ref.read(navStateProvider);
+    final pos = ns?.pos;
+    if (pos != null) {
+      final speedKmh = ns?.speedKmh ?? 0;
+      _recenter(pos,
+          animate: true,
+          speedKmh: speedKmh,
+          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+    }
+  }
+
+  Future<void> _recolorNavRouteLayer(int idx) async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded) return;
+    await ctrl.removeLayer(_navRouteLayerId);
+    await ctrl.addLineLayer(
+      _navRouteSourceId,
+      _navRouteLayerId,
+      ml.LineLayerProperties(
+        lineColor: colorToHex(courseLineColor[idx] ?? courseLineColor[2]!),
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+    );
   }
 
   @override
@@ -1027,13 +1190,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
                   },
                 ),
-                const SizedBox(height: 10),
-                _NavIconBtn(
-                  icon: Icons.refresh_rounded,
-                  loading: _isRerouting,
-                  enabled: navState?.pos != null,
-                  onTap: _manualReroute,
-                ),
               ],
             ),
           ),
@@ -1078,6 +1234,32 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         ),
                       ),
                       Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
+                      Builder(builder: (_) {
+                        final canReroute = navState?.pos != null && !_isRerouting;
+                        final fg = canReroute
+                            ? cs.onSurface
+                            : cs.onSurface.withValues(alpha: 0.3);
+                        return GestureDetector(
+                          onTap: canReroute ? _openCourseSheet : null,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.alt_route, color: fg, size: 20),
+                                const SizedBox(height: 2),
+                                Text('재탐색',
+                                    style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(width: 10),
                       GestureDetector(
                         onTap: () => Navigator.of(context).pop(),
                         child: Container(
@@ -1102,6 +1284,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
           ),
+
+          // ── 코스 재선택 시트 (재탐색 버튼) ─────────────────────────────────────
+          if (_showCourseSheet)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: CourseSheet(
+                  routeMeta: ref.watch(mapInteractionProvider).allRouteMeta,
+                  selectedIdx: ref.watch(mapInteractionProvider).selectedRouteIdx,
+                  onSelect: _onCourseCardTap,
+                  onStart: _onCourseSheetStart,
+                  onClose: _onCourseSheetClose,
+                ),
+              ),
+            ),
 
           // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
@@ -1197,21 +1397,16 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
 class _NavIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  final bool loading;
-  final bool enabled;
   const _NavIconBtn({
     required this.icon,
     required this.onTap,
-    this.loading = false,
-    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final active = enabled && !loading;
     return GestureDetector(
-      onTap: active ? onTap : null,
+      onTap: onTap,
       child: Container(
         width: 44,
         height: 44,
@@ -1221,12 +1416,7 @@ class _NavIconBtn extends StatelessWidget {
           border: Border.all(color: cs.outline, width: 1),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: loading
-            ? Padding(
-                padding: const EdgeInsets.all(12),
-                child: CircularProgressIndicator(strokeWidth: 2, color: cs.tertiary),
-              )
-            : Icon(icon, color: active ? cs.tertiary : cs.outline, size: 20),
+        child: Icon(icon, color: cs.tertiary, size: 20),
       ),
     );
   }
