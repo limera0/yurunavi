@@ -46,3 +46,4 @@ flutter:
     - assets/images/
     - assets/voice_packs/
     - assets/config/guidance_profile.json
+    - assets/data/kr_places.json
