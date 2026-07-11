@@ -12,24 +12,17 @@
 | tileserver-gl (지도 타일) | `yurunavi-tiles` | 8080 | `docker/docker-compose.yml` | `/data/tiles/data`, `/data/tiles/fonts` |
 | navi 백엔드 (fun-road 스코어링 API, Rust) | `yurunavi-navi` | 8003 (host network) | `docker/docker-compose.yml` + `native/Dockerfile` | 없음(stateless) |
 
-`valhalla`/`tiles`는 `docker compose up -d`로 기동(둘 다 2026-07-11 기준 compose 관리 편입
-완료 — `tiles`는 원래 `docker run`으로 떠 있던 컨테이너라 이 세션에서 `docker rm -f` 후
-compose로 재생성함, 무상태 컨테이너라 데이터 손실 없음). `navi`는 소스에 하드코딩된
-`http://localhost:8002`(valhalla 호출)를 그대로 쓰기 위해 `network_mode: host`로 붙어있음 —
-다른 두 서비스와 달리 `docker_default` 브리지 네트워크에 없음.
+세 서비스 모두 `docker compose up -d`로 기동 가능(2026-07-11 기준 compose 관리 편입 완료 —
+`tiles`는 원래 `docker run`으로, `navi`는 원래 systemd로 떠 있던 걸 이 세션에서 전환함,
+둘 다 데이터 손실 없음). `navi`는 소스에 하드코딩된 `http://localhost:8002`(valhalla 호출)를
+그대로 쓰기 위해 `network_mode: host`로 붙어있음 — 다른 두 서비스와 달리 `docker_default`
+브리지 네트워크에 없음.
 
-**`navi`는 2026-07-11 기준 아직 Docker로 전환되지 않았다.** 지금도 systemd
-(`yurunavi-rust.service`, 유닛 파일은 `/etc/systemd/system/` — 리포 밖)가 포트 8003을 붙잡고
-있다. Docker 이미지는 빌드/스모크테스트 완료된 상태(별도 임시 포트 18003에서 `/health`
-확인함)라 전환 준비는 끝났지만, 마지막 전환 명령은 `sudo`가 필요해 Claude가 대신 실행할
-수 없었다 — 아래 명령을 사용자가 직접 실행해야 완료된다:
-```
-cd /data/projects/yurunavi/docker
-sudo systemctl stop yurunavi-rust.service
-docker compose up -d navi
-curl -s http://localhost:8003/health   # {"status":"ok"} 확인
-sudo systemctl disable yurunavi-rust.service   # 확인 후에만 — 유닛 파일은 롤백용으로 남겨둠
-```
+**`navi` Docker 전환 완료(2026-07-11)**: `yurunavi-rust.service`(구 systemd 서비스, 유닛
+파일은 `/etc/systemd/system/`에 여전히 존재 — 롤백용으로 남겨둠, `disabled`+`inactive`
+상태)를 대체해 `yurunavi-navi` 컨테이너가 포트 8003을 서빙 중. `curl https://navi.westinx.com
+/health` → `{"status":"ok"}`로 Cloudflare Tunnel 경로까지 실제 검증함.
+
 문제가 생기면 롤백:
 ```
 docker compose stop navi

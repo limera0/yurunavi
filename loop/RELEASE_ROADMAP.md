@@ -28,9 +28,11 @@
   전혀 문제없음. 13번(기능 갭)도 UI는 7번 토큰 뼈대에 얹혀가면 되므로 디자인 확정을
   기다릴 필요 없이 12번 뒤에 이어서 진행 가능 — 다만 13번 항목 중 로그인/POI 등은
   백엔드가 필요해 12번 인프라가 먼저 있는 게 안전하므로 12→13 순서 자체는 유지.
-- **다음 순서**: 12번(진행 중, 아래 상세 참조) → 13번. 8~10(디자인)은 사용자 검토가
-  끝나는 대로 **별도 세션에서 병렬로** 진행, 끝나면 11번(토큰 리팩터)에서 그 시점까지
-  13번에서 새로 생긴 화면까지 한 번에 정리.
+- **12번 DONE(2026-07-11)** — 상세는 12번 항목 참조. valhalla-src 미커밋 패치 발견/보호
+  같은 스코프 밖 긴급조치도 포함되어 있으니 새 세션에서 12번 상세를 한 번 읽어볼 것.
+- **다음 순서**: 13번 착수. 8~10(디자인)은 사용자 검토가 끝나는 대로 **별도 세션에서
+  병렬로** 진행, 끝나면 11번(토큰 리팩터)에서 그 시점까지 13번에서 새로 생긴 화면까지
+  한 번에 정리.
 - 새 세션 시작 시 `git log --oneline -10`으로 이 순서와 일치하는지 먼저 확인할 것
   (사용자가 세션 사이에 직접 커밋/변경했을 수 있음).
 
@@ -68,7 +70,7 @@
 | 9 | 앱 아이콘 확정 | 신규 | DEFERRED — 8번 이후 |
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
-| 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **IN_PROGRESS** — tiles/backup/docs 완료, navi 컷오버만 사용자 sudo 액션 대기 (`docker/INFRA.md` §1) |
+| 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | BLOCKED — 12번 이후 |
 
 ## 항목별 상세
@@ -201,7 +203,7 @@
   하드코딩된 `Colors.*`/`TextStyle` 리터럴을 7번 토큰 참조로 교체.
 - 규모가 커서 여러 커밋으로 분할 예정 (착수 세션에서 계획 수립).
 
-### 12. 백엔드 인프라 IaC화 — IN_PROGRESS
+### 12. 백엔드 인프라 IaC화 — DONE
 - 목표: 타일서버(tileserver-gl)와 `navi.westinx.com` 백엔드를 `docker/` 안에
   Dockerfile/compose로 재현 가능하게 만들기. 현재 `docker/docker-compose.yml`엔
   valhalla만 있음 — 나머지 두 서비스는 이 리포에 설정이 전혀 없어 서버 소실 시
@@ -259,10 +261,15 @@
   진짜 오프사이트 백업(예: private GitHub push)은 다음 세션 판단.
 - code-auditor 검토에서 실질 버그 2건 발견 후 수정: (1) 최초 체크포인트 커밋이 실제로는
   `git add` 누락으로 compose 파일 변경분을 안 담고 있었던 것, (2) INFRA.md가 컷오버를
-  "완료"라고 잘못 서술한 것 — 둘 다 이번 커밋에서 바로잡음.
-- **다음 세션 시작 시 확인할 것**: 사용자가 navi 컷오버를 완료했는지 `docker ps`로
-  `yurunavi-navi` 컨테이너 존재 여부 확인, 안 됐으면 `docker/INFRA.md` §1 명령 안내부터.
-  완료되면 12번 상태를 DONE으로 갱신하고 13번 착수.
+  "완료"라고 잘못 서술한 것 — 둘 다 바로잡음.
+- **컷오버 완료(사용자 실행, 2026-07-11)**: `sudo systemctl stop yurunavi-rust.service` →
+  `docker compose up -d navi` → `curl localhost:8003/health` 확인 →
+  `sudo systemctl disable yurunavi-rust.service`. `docker ps` 기준 `yurunavi-navi` healthy,
+  `curl https://navi.westinx.com/health`(Cloudflare Tunnel 경로 포함 실제 공개 도메인)도
+  `{"status":"ok"}` 확인. 구 systemd 유닛은 `disabled`+`inactive`로 롤백용으로만 남음.
+  최종 상태: `docker compose ls` 기준 `docker` 프로젝트 3개 서비스(valhalla/tiles/navi)
+  모두 compose 관리 + healthy.
+- 다음 세션: 13번(기능 갭 해소) 착수.
 
 ### 13. 기능 갭 해소
 - 로그인/회원가입, 투어 요약(주행 이력), POI 탐색 UI, 백그라운드/오버레이 내비게이션,
