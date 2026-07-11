@@ -19,6 +19,7 @@ import '../../../models/saved_place.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
+import '../../../services/poi_service.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
 import '../style_language_transform.dart';
@@ -100,6 +101,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _routeBgLayerId = 'route-bg-layer';
   static const _locSourceId = 'loc-source';
   static const _locLayerId = 'loc-layer';
+  static const _poiSourceId = 'poi-explore-source';
+  static const _poiLayerId = 'poi-explore-layer';
 
   bool _locLayerReady = false;
   ml.Symbol? _destMarker;
@@ -133,6 +136,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // Course sheet
   bool _showCourseSheet = false;
+  // POI 탐색 시트 (13-1)
+  bool _poiSheetOpen = false;
 
   String? _rawStyle;   // 원본 JSON 1회 로드
   String? _styleJson;  // 언어 적용 후 주입 문자열
@@ -361,6 +366,55 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       ),
     );
     _locLayerReady = true;
+  }
+
+  // ── POI 탐색 레이어 (13-1) ────────────────────────────────────────────────
+
+  Map<String, dynamic> _buildPoiGeoJson(List<Poi> pois) => {
+        'type': 'FeatureCollection',
+        'features': pois
+            .map((p) => {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'Point',
+                    'coordinates': [p.location.longitude, p.location.latitude],
+                  },
+                  'properties': <String, dynamic>{
+                    'poiType': p.type.name,
+                  },
+                })
+            .toList(),
+      };
+
+  Future<void> _initPoiLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_poiSourceId, _buildPoiGeoJson(const []));
+    await ctrl.addCircleLayer(
+      _poiSourceId,
+      _poiLayerId,
+      const ml.CircleLayerProperties(
+        circleRadius: 7,
+        circleColor: [
+          'match',
+          ['get', 'poiType'],
+          'cafe', '#FF7700',
+          'convenienceStore', '#2196F3',
+          'gasStation', '#E53935',
+          'traditionalMarket', '#43A047',
+          'supermarket', '#8E24AA',
+          'restaurant', '#FFB300',
+          '#9E9E9E',
+        ],
+        circleStrokeWidth: 2,
+        circleStrokeColor: '#FFFFFF',
+      ),
+    );
+  }
+
+  void _updatePoiLayer(List<Poi> pois) {
+    if (!_styleLoaded) return;
+    _mlCtrl?.setGeoJsonSource(_poiSourceId, _buildPoiGeoJson(pois));
   }
 
   Future<void> _ensureLocationMarker([double? heading]) async {
@@ -788,6 +842,28 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     );
   }
 
+  // ── POI 탐색 (13-1) ────────────────────────────────────────────────────
+
+  void _showPoiExploreSheet() {
+    setState(() => _poiSheetOpen = true);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _PoiExploreSheet(
+        origin: _origin ?? _lastKnown,
+        onSelectDest: (dest) {
+          Navigator.pop(ctx);
+          _applyDestination(dest);
+        },
+      ),
+    ).whenComplete(() {
+      if (!mounted) return;
+      ref.read(poiListProvider.notifier).clear();
+      setState(() => _poiSheetOpen = false);
+    });
+  }
+
   void _clearDestination() {
     ref.read(mapInteractionProvider.notifier).reset();
     ref.read(poiListProvider.notifier).clear();
@@ -885,7 +961,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
   @override
   Widget build(BuildContext context) {
     final interaction = ref.watch(mapInteractionProvider);
-    final pois = ref.watch(poiListProvider); // ignore: unused_local_variable
     final dest = interaction.destination;
     final waypoint = interaction.waypoint; // ignore: unused_local_variable
     final allRoutes = interaction.allRoutes; // ignore: unused_local_variable
@@ -901,6 +976,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       if (prev?.selectedRouteIdx != next.selectedRouteIdx) {
         _recolorRouteLayer(next.selectedRouteIdx); // unawaited
       }
+    });
+
+    ref.listen<List<Poi>>(poiListProvider, (prev, next) {
+      _updatePoiLayer(next);
     });
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
@@ -988,6 +1067,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               // B1: 현위치 화살표 puck — 경로 레이어 위에 그려지도록 마지막에 추가
               await _initLocationLayer();
               await _ensureLocationMarker();
+              // 13-1: POI 탐색 결과 원형 레이어
+              await _initPoiLayer();
+              final pois = ref.read(poiListProvider);
+              if (pois.isNotEmpty) _updatePoiLayer(pois);
             },
             onMapClick: (point, latLng) {
               _onMapTap(
@@ -1100,6 +1183,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 onRecenter: _recenterMap,
                 onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
                 onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
+                onPoiExplore: _showPoiExploreSheet,
+                poiExploreActive: _poiSheetOpen,
               ),
             ),
           ),
@@ -1369,12 +1454,16 @@ class _RightPanel extends ConsumerWidget {
   final VoidCallback onRecenter;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
+  final VoidCallback onPoiExplore;
+  final bool poiExploreActive;
 
   const _RightPanel({
     required this.showCourseSheet,
     required this.onRecenter,
     required this.onZoomIn,
     required this.onZoomOut,
+    required this.onPoiExplore,
+    this.poiExploreActive = false,
   });
 
   @override
@@ -1428,6 +1517,15 @@ class _RightPanel extends ConsumerWidget {
 
           // ── 줌 아웃 ───────────────────────────────────────
           _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true),
+
+          const SizedBox(height: 20),
+
+          // ── POI 탐색 (13-1) ─────────────────────────────────
+          _MapCtrlBtn(
+            icon: poiExploreActive ? Icons.storefront : Icons.storefront_outlined,
+            onTap: onPoiExplore,
+            active: poiExploreActive,
+          ),
         ],
       ),
     );
@@ -1453,8 +1551,14 @@ class _MapCtrlBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final bool bold;
+  final bool active;
 
-  const _MapCtrlBtn({required this.icon, required this.onTap, this.bold = false});
+  const _MapCtrlBtn({
+    required this.icon,
+    required this.onTap,
+    this.bold = false,
+    this.active = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1464,7 +1568,9 @@ class _MapCtrlBtn extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: active
+              ? AppColors.primary.withValues(alpha: 0.15)
+              : Colors.white,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
@@ -1477,7 +1583,7 @@ class _MapCtrlBtn extends StatelessWidget {
         child: Icon(
           icon,
           size: bold ? 22 : 20,
-          color: AppColors.secondary,
+          color: active ? AppColors.primary : AppColors.secondary,
           weight: bold ? 700 : 400,
         ),
       ),
@@ -1805,6 +1911,212 @@ class _PlacesSheet extends ConsumerWidget {
     final n = r.destName;
     if (n != null && n.trim().isNotEmpty) return n;
     return '→ ${r.destLat.toStringAsFixed(3)}, ${r.destLng.toStringAsFixed(3)}';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POI 탐색 시트 (13-1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PoiExploreSheet extends ConsumerStatefulWidget {
+  final LatLng? origin;
+  final void Function(LatLng dest) onSelectDest;
+
+  const _PoiExploreSheet({
+    required this.origin,
+    required this.onSelectDest,
+  });
+
+  @override
+  ConsumerState<_PoiExploreSheet> createState() => _PoiExploreSheetState();
+}
+
+class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
+  final Set<PoiType> _selectedTypes = {};
+  bool _loading = false;
+  List<Poi> _results = const [];
+
+  Future<void> _fetch() async {
+    final origin = widget.origin;
+    if (origin == null || _selectedTypes.isEmpty) {
+      setState(() => _results = const []);
+      ref.read(poiListProvider.notifier).clear();
+      return;
+    }
+    setState(() => _loading = true);
+    final pois = await ref.read(poiServiceProvider).fetchPois(
+          center: origin,
+          radiusMeters: 3000,
+          types: _selectedTypes.toList(),
+        );
+    if (!mounted) return;
+    pois.sort((a, b) => PoiService.haversineMeters(origin, a.location)
+        .compareTo(PoiService.haversineMeters(origin, b.location)));
+    ref.read(poiListProvider.notifier).set(pois);
+    setState(() {
+      _results = pois;
+      _loading = false;
+    });
+  }
+
+  void _toggleType(PoiType type) {
+    setState(() {
+      if (!_selectedTypes.add(type)) _selectedTypes.remove(type);
+    });
+    _fetch();
+  }
+
+  String _formatDistance(double meters) {
+    if (meters < 1000) return '${meters.round()}m';
+    return '${(meters / 1000).toStringAsFixed(1)}km';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('주변 탐색',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // ── 카테고리 필터 칩 ────────────────────────────────────────────
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final type in PoiType.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(type.label),
+                          selected: _selectedTypes.contains(type),
+                          onSelected: (_) => _toggleType(type),
+                          selectedColor:
+                              Color(type.colorValue).withValues(alpha: 0.18),
+                          checkmarkColor: Color(type.colorValue),
+                          backgroundColor: Colors.white,
+                          side: BorderSide(
+                            color: _selectedTypes.contains(type)
+                                ? Color(type.colorValue)
+                                : Colors.grey.shade300,
+                          ),
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _selectedTypes.contains(type)
+                                ? Color(type.colorValue)
+                                : AppColors.secondary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Divider(),
+
+              _buildBody(),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    final origin = widget.origin;
+    if (origin == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('GPS 위치를 확인하는 중입니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    if (_selectedTypes.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('카테고리를 선택하세요',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_results.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('주변에 결과가 없습니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    return Column(
+      children: _results.map((poi) {
+        final dist = PoiService.haversineMeters(origin, poi.location);
+        return ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: Color(poi.type.colorValue),
+              shape: BoxShape.circle,
+            ),
+          ),
+          title: Text(poi.name, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(_formatDistance(dist),
+              style: const TextStyle(fontSize: 11)),
+          onTap: () => widget.onSelectDest(poi.location),
+        );
+      }).toList(),
+    );
   }
 }
 
