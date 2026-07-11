@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   valhalla:
     image: valhalla-fork:patch3-uturn
@@ -10,3 +8,27 @@ services:
     volumes:
       - /data/valhalla/custom_files:/custom_files
     command: valhalla_service /custom_files/valhalla.json 1
+
+  tiles:
+    image: maptiler/tileserver-gl:latest
+    container_name: yurunavi-tiles
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /data/tiles/data:/data
+      - /data/tiles/fonts:/fonts
+    command: ["--config", "/data/config.json"]
+
+  # navi.westinx.com — fun-road scoring API (native/src/main.rs).
+  # network_mode: host because the binary hardcodes "http://localhost:8002"
+  # to reach the valhalla service above; host networking keeps that call
+  # working unchanged instead of rewriting it to service-name DNS.
+  navi:
+    build:
+      context: ../native
+      dockerfile: Dockerfile
+    image: yurunavi-navi:latest
+    container_name: yurunavi-navi
+    restart: unless-stopped
+    network_mode: host
