@@ -35,6 +35,15 @@ import '../../route/offset_origin.dart';
 /// The real position arrives from the GPS stream below.
 const LatLng _kInitialMapView = LatLng(37.5665, 126.9780);
 
+/// 도착배너 종료버튼 지오펜스+속도 게이트 순수 판정 (테스트용으로 분리).
+bool exitGateOpen({
+  required double distanceM,
+  required double speedKmh,
+  double geofenceM = 30.0,
+  double speedLimitKmh = 30.0,
+}) =>
+    distanceM <= geofenceM && speedKmh <= speedLimitKmh;
+
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
@@ -98,6 +107,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
   bool _arrivalBannerVisible = false;
   List<({String name, String type})> _arrivalPois = const [];
+  // 도착배너 종료버튼 지오펜스+속도 게이트 (feat/arrival-fix SPEC_arrival_v2 포팅 —
+  // 정차(속도<1.0) 게이트는 실 GPS에서 안 걸려 폐기됐던 전례가 있어 채택하지 않음).
+  static const _kExitGeofenceM = 30.0;  // 종료버튼 노출 지오펜스 반경(직선, m)
+  static const _kExitSpeedKmh = 30.0;   // 종료버튼 노출 속도 상한(km/h)
+  bool _canExit = false;
+  static const _distance = Distance();
 
   // 음성 안내
   FlutterTts? _tts;
@@ -270,6 +285,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             if (mounted) setState(() => _arrivalPois = pois);
           });
         }
+        if (_arrivalBannerVisible) _updateExitGate();
         if (!_saidArrival &&
             prog.distToDestM <= (_profile?.arrivalVoiceM ?? 8)) {
           _saidArrival = true;
@@ -291,6 +307,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
       },
     );
+  }
+
+  /// 도착배너 표시 중 지오펜스(30m 이내)+속도(30km/h 이하) 게이트로 종료버튼
+  /// 노출을 토글한다. 자동 종료는 없음 — 탭으로만 종료.
+  void _updateExitGate() {
+    final dest = widget.destination;
+    final navState = ref.read(navStateProvider);
+    if (dest == null || navState == null) return;
+    final can = exitGateOpen(
+      distanceM: _distance(navState.pos, dest),
+      speedKmh: navState.speedKmh,
+      geofenceM: _kExitGeofenceM,
+      speedLimitKmh: _kExitSpeedKmh,
+    );
+    if (can != _canExit) setState(() => _canExit = can);
   }
 
   void _handleVoice(RouteProgress prog) {
@@ -354,6 +385,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _arrivalPois = const [];
         _arrived = false;
         _saidArrival = false;
+        _canExit = false;
       });
     }
     final dest = widget.destination;
@@ -995,7 +1027,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                         ),
                         GestureDetector(
-                          onTap: () => setState(() => _arrivalBannerVisible = false),
+                          onTap: () => setState(() {
+                            _arrivalBannerVisible = false;
+                            _canExit = false;
+                          }),
                           child: const Padding(
                             padding: EdgeInsets.all(4),
                             child: Icon(Icons.close_rounded, size: 20),
@@ -1017,20 +1052,32 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           )),
                     ],
                     const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: GestureDetector(
-                        onTap: () => Navigator.of(context).pop(),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: cs.tertiary,
-                            borderRadius: BorderRadius.circular(14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (!_canExit)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: Text('정차 후 종료 가능',
+                                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
                           ),
-                          child: const Text('종료',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                        GestureDetector(
+                          onTap: _canExit ? () => Navigator.of(context).pop() : null,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _canExit ? cs.tertiary : cs.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text('종료',
+                                style: TextStyle(
+                                  color: _canExit ? Colors.white : cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                )),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
