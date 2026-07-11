@@ -98,10 +98,26 @@
 type 8을 'continue'에 매핑하면 **비교차로 직진(도로 계속) 포함 전부 발화 → 과다 위험**.  
 Valhalla `/route` 응답의 maneuver에는 `verbal_pre_transition_instruction`에 힌트가 있으나 현재 파싱하지 않음.
 
-### 분류 → **라우팅/엣지 데이터 필요·보류**
+### 분류 → ~~라우팅/엣지 데이터 필요·보류~~ → **실증 완료, 구현 가능 (2026-07-06 갱신)**
 
-실제 국도/시내 경로에서 type 8 발생 빈도 확인(curl 또는 폰 주행) 없이는 과다 우려를 해소할 수 없다.  
-`verbal_pre_transition_instruction`에 "교차로" 문자열 포함 여부로 필터링하는 경량 방안도 가능하나, 실증 선행 필요.
+**curl 계측 (2026-07-06, 폰 없이 desk에서 진행):** `localhost:8002`에 8개 실경로 태움 —
+국도44(홍천-인제 54km), 부산시내(서면-해운대 14km), 국도19(구례-하동 37km), 국도42(여주-원주
+32km), 김제 평야 그리드(38km, T자/사거리 밀집 지역), 대전 시내 그리드(7km), 정선 오지도로(59km),
+가평 국도(남양주-가평 43km). **합계 285km, maneuver 118개 중 type 8 발생 0건.**
+
+**원인(Valhalla 소스 확인, `maneuversbuilder.cc:1880-1996`):** `kContinue`(type 8)는 turn_degree가
+`kStraight`일 때의 fallback 분류일 뿐이며, 실제로 최종 trip leg에 "별도 maneuver"로 살아남으려면
+`internal_intersection`이거나 `HasSimilarStraightSignificantRoadClassXEdge`(비슷한 각도의 경쟁
+도로가 교차점에 있어 직진 여부가 애매한 경우) 조건을 통과해야 한다 — 그 외 평범한 직진 구간은
+애초에 별도 maneuver로 분리되지 않고 이전 maneuver에 흡수된다. 즉 **Valhalla 엔진 자체가 이미
+"애매한 분기점"으로 필터링해서 내보내므로, RECON 작성 당시 우려했던 "비교차로 직진 포함 전부
+발화 → 과다 위험"은 이 타일셋/costing(motorcycle) 기준 근거 없음.**
+
+**결론:** 실주행 없이도 진행 가능. `case 8: return 'continue';` 매핑 + `continue_approach`/
+`continue_imminent` 템플릿 추가 + profile enable=true (tier는 공통 폴백, sharp-curve와 동일 원칙
+— 실주행 근거 없이 타이밍까지 새로 만들지 않음). 단, **표본 8개 모두 type 8이 0건이라 "발화가
+드물게라도 정상 동작하는지"는 이번 라이딩에서 직접 들어봐야 확인됨** — 애초에 흔치 않은
+이벤트이므로 이번 세션 구현 후에도 "탑승 중 못 들을 가능성 높음"은 별개로 기록.
 
 ---
 

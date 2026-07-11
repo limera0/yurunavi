@@ -41,7 +41,7 @@
         { "min_entry_m": 0,   "points_m": [20] }
       ]
     },
-    "continue":    { "enabled": false },
+    "continue":    { "enabled": true },
     "destination": { "enabled": true, "imminent_m": 50 }
   }
 }
