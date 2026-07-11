@@ -3,19 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/crash_reporting.dart';
 import 'core/logging/file_logger.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'features/map/providers/map_providers.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // TODO(crashlytics): once android/app/google-services.json + lib/firebase_options.dart
-  // exist (see loop/RELEASE_ROADMAP.md item 5), add:
-  //   WidgetsFlutterBinding.ensureInitialized();
-  //   await initCrashReporting(DefaultFirebaseOptions.currentPlatform);
-  // as the first two lines of main(), before runApp(...), plus the
-  // `import 'firebase_options.dart';` import.
+  await initCrashReporting(DefaultFirebaseOptions.currentPlatform);
   await FileLogger.init();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(

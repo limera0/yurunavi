@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "222071117763",
+    "project_id": "westinx-official",
+    "storage_bucket": "westinx-official.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:222071117763:android:a429ed41352b363ca8cf76",
+        "android_client_info": {
+          "package_name": "com.westinx.yurunavi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCk_ZZ4Kq6oP9Y4HmRhsmkoo5X9xPUwPes"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

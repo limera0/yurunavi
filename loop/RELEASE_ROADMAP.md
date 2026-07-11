@@ -35,7 +35,7 @@
 | 2 | release keystore 생성 + signingConfig 연결 | 특급 | **DONE** |
 | 3 | OSM attribution 표시 추가 | 1급 | **DONE** |
 | 4 | ProGuard/R8 활성화 | 1급 | **DONE** |
-| 5 | Crash reporting 연동 (Firebase Crashlytics 선택됨) | 1급 | **PARTIAL** — 코드 배선 준비 완료, Firebase 콘솔 작업(사용자) 대기 |
+| 5 | Crash reporting 연동 (Firebase Crashlytics 선택됨) | 1급 | **DONE** |
 | 6 | 개인정보처리방침 초안 + 호스팅 | 1급 | **PARTIAL** — 법률 검토 반영 완료, 위치기반서비스사업 신고(사용자 액션) 대기 |
 | 7 | 디자인 토큰 아키텍처 뼈대 | 신규(1급) | **DONE** |
 | 8 | 브랜드 방향성 확정 (컬러/타이포/무드) | 신규 | DEFERRED — 별도 세션(디자인 검토) |
