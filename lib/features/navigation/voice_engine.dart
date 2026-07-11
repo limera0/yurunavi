@@ -9,8 +9,10 @@ class SpeakIntent {
 
 String? eventForType(int type) {
   switch (type) {
-    case 14: case 15: case 16: return 'turn_left';
-    case 9:  case 10: case 11: return 'turn_right';
+    case 15: case 16:          return 'turn_left';
+    case 14:                   return 'sharp_turn_left';
+    case 9:  case 10:          return 'turn_right';
+    case 11:                   return 'sharp_turn_right';
     case 12: case 13:          return 'uturn';
     case 17: case 18: case 19: return 'ramp';
     case 20: case 21:          return 'exit';

@@ -1,47 +1,43 @@
-EXECUTION — edit and commit. Branch feat/continue-straight-voice, HEAD 41c6056. Per RECON_voice_v2.md R4 (실증 완료, 2026-07-06 curl 계측: 285km/118maneuver 중 type8 0건, Valhalla 소스상 애매한 분기점에만 발생). One logical change per commit. flutter analyze zero, flutter test green. Only voice_engine.dart + guidance_profile.json + default_ko.json + new test file.
+EXECUTION — edit and commit. Branch feat/sharp-curve-voice, HEAD 922375f. Per RECON_sharp_curve.md. One logical change per commit. flutter analyze zero, flutter test green. Only voice_engine.dart + guidance_profile.json + default_ko.json + new test file.
 
-=== s1: map type 8 (kContinue) to 'continue' event ===
-RECON: voice_engine.dart:10-25 `eventForType` currently has no case for 8, falls through to
-`default: return null;` (silent).
-- `eventForType` (voice_engine.dart:10-25): add `case 8: return 'continue';` (own line, any
-  position in the switch — order doesn't matter).
-- `_profileEventKey` (voice_engine.dart:28-29): no change needed — 'continue' is not prefixed
-  with 'roundabout_' so it passes through unchanged as the profile key (matches existing
-  `"continue"` entry already present in guidance_profile.json:46).
-commit s1: "feat(voice): map Continue (type 8) to voice event"
+=== s1: split sharp-curve events from normal turn events ===
+RECON: voice_engine.dart:12-13 currently folds type 11(kSharpRight)/14(kSharpLeft) into the
+same 'turn_right'/'turn_left' events as slight/moderate turns (9/10/15/16).
+- `eventForType` (voice_engine.dart:10-24): change
+  `case 14: case 15: case 16: return 'turn_left';` → keep 15/16 as `turn_left`, add
+  `case 14: return 'sharp_turn_left';` (own case, order doesn't matter in a switch).
+  `case 9: case 10: case 11: return 'turn_right';` → keep 9/10 as `turn_right`, add
+  `case 11: return 'sharp_turn_right';`.
+- `_profileEventKey` (voice_engine.dart:26-27): no change needed — sharp_turn_left/right are not
+  prefixed with 'roundabout_' so they pass through unchanged as profile keys.
+- `_fast` suffix condition (voice_engine.dart:62-66) intentionally NOT extended to sharp_turn_*
+  (see RECON risk note) — leave the `event == 'turn_left' || event == 'turn_right'` check as-is.
+commit s1: "feat(voice): split sharp-curve (45+) from normal turn events"
 
-=== s2: enable profile + add ko templates ===
-- `assets/config/guidance_profile.json` (line 46): flip `"continue": { "enabled": false }` →
-  `"continue": { "enabled": true }`. No custom tiers/imminent_m — falls back to top-level
-  common tiers (same principle as sharp_turn_left/right: no real-ride timing evidence yet,
-  don't invent new timing).
-- `assets/voice_packs/default_ko.json` templates: add two keys, positioned near `keep_*` (both
-  are "no-turn, still needs a word" categories):
-  `"continue_approach": "{dist}미터 앞 직진"`,
-  `"continue_imminent": "직진입니다"`.
-  (Valhalla's own ko-KR locale uses terse "계속" — app convention elsewhere is the more explicit
-  "{dist}미터 앞 X" / "X입니다" pattern, matching turn_left/turn_right style, so follow the app
-  convention not Valhalla's.)
-commit s2: "feat(voice): continue-straight voice templates (ko)"
+=== s2: guidance_profile.json + default_ko.json additions ===
+- `assets/config/guidance_profile.json` events map: add `sharp_turn_left` and `sharp_turn_right`,
+  each `{ "enabled": true }` (no custom tiers/imminent_m — falls back to top-level common tiers,
+  same as turn_left/turn_right today; see RECON risk note on why timing is untouched).
+- `assets/voice_packs/default_ko.json` templates: add 4 keys exactly as in RECON:
+  `sharp_turn_left_approach`, `sharp_turn_left_imminent`, `sharp_turn_right_approach`,
+  `sharp_turn_right_imminent` (see RECON proposal §3 for exact Korean strings).
+commit s2: "feat(voice): sharp-curve slow-down voice templates (ko)"
 
 === s3: test coverage ===
-New test file `test/voice_engine_continue_test.dart` (mirror `test/voice_engine_sharp_curve_test.dart`
-structure/imports/fixture setup):
-- type 8 → event resolves to 'continue' → with profile continue.enabled=true, speak key
-  `continue_imminent` fires at the imminent point.
-- type 8 with continue.enabled=false → onProgress returns no SpeakIntent for that key (profile
-  gate regression guard).
-- type 9/10/15/16 unaffected (regression guard — plain turn events still resolve, not swallowed
-  by the new case 8 branch).
-- type 22/23/24 ('keep') unaffected — confirms 'continue' and 'keep' remain distinct events with
-  distinct templates, not merged.
-commit s3: "test(voice): continue-straight event coverage + profile-gate regression"
+New test file `test/voice_engine_sharp_curve_test.dart` (mirror existing
+`test/voice_engine_test.dart` structure/imports):
+- type 11 → event resolves to sharp_turn_right → speak key `sharp_turn_right_imminent` at
+  imminent point (not `turn_right_imminent`).
+- type 14 → event resolves to sharp_turn_left → speak key `sharp_turn_left_imminent`.
+- type 9/10 still produce plain `turn_right_*` (regression guard — slight/moderate turn unchanged).
+- type 15/16 still produce plain `turn_left_*` (regression guard).
+- speedKmh ≥ 20 on a sharp_turn_* event does NOT produce a `_fast` suffixed key (confirms s1's
+  intentional exclusion — construct GuidanceProfile fixture the same way voice_engine_speed_test.dart
+  does, feed speedKmh=30 into onProgress for a type-11 step, assert key has no `_fast`).
+commit s3: "test(voice): sharp-curve event split + fast-suffix exclusion coverage"
 
 === AFTER ===
 git log --oneline -4 (paste).
-flutter analyze (report), flutter test (report). Do NOT merge into verify/ride-0706 yet — report
-back first, then merge as 5th T3 branch into verify/ride-0706 for tomorrow's single consolidated
-ride (per HANDOFF_0706_3.md 0순위/1순위 — user verifies once, tomorrow's early-morning commute).
-Desk-verifiable in full: pure event-routing + template text + profile flag, no timing/tier
-change. Residual unknown (record, don't block): type 8 occurred 0/118 in curl samples, so this
-event may simply not fire during tomorrow's ride at all — that's expected, not a failure signal.
+flutter analyze (report), flutter test (report). Do NOT merge/build yet — report back first.
+Desk-verifiable in full: this is pure event-routing + template text, no timing/tier change,
+so no drive-only unknowns remain for THIS slice (unlike RECON's deferred tier-tuning note).
