@@ -49,7 +49,8 @@
   "sources": {
     "openmaptiles": {
       "type": "vector",
-      "url": "https://tiles.westinx.com/data/v3.json"
+      "url": "https://tiles.westinx.com/data/v3.json",
+      "attribution": "<a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\">&copy; OpenStreetMap contributors</a>"
     }
   },
   "sprite": "https://tiles.westinx.com/styles/yurunavi/sprite",

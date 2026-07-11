@@ -1002,6 +1002,24 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           ),
 
           // ══════════════════════════════════════════════════════
+          // LAYER 1b · OSM attribution (ODbL 라이선스 필수 표기)
+          // 네이티브 attribution 버튼과 별개로 항상 보이는 안전장치.
+          // ══════════════════════════════════════════════════════
+          Positioned(
+            left: 4,
+            bottom: 4,
+            child: IgnorePointer(
+              child: Text(
+                '© OpenStreetMap contributors',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.black.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+          ),
+
+          // ══════════════════════════════════════════════════════
           // LAYER 2 · Loading overlay
           // ══════════════════════════════════════════════════════
           if (interaction.isLoading)
