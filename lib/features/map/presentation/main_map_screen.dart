@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show Point, cos, sqrt, asin;
+import 'dart:math' show Point, cos, sqrt, asin, min;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
@@ -103,6 +103,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _locLayerId = 'loc-layer';
   static const _poiSourceId = 'poi-explore-source';
   static const _poiLayerId = 'poi-explore-layer';
+  // 13-1b: 검색 시트와 무관하게 줌 레벨 기준으로 항상 켜져 있는 POI 레이어.
+  // 위 검색용 소스/레이어와 완전히 다른 식별자 — 서로 독립적으로 갱신된다.
+  static const _ambientPoiSourceId = 'poi-ambient-source';
+  static const _ambientPoiLayerId = 'poi-ambient-layer';
 
   bool _locLayerReady = false;
   ml.Symbol? _destMarker;
@@ -133,6 +137,15 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // 선택된 경로의 턴바이턴 maneuvers — NavScreen 으로 전달
   List<ManeuverStep> _selectedManeuvers = const [];
   double _currentZoom = 16.0; // z16 고정 초기 줌
+
+  // 13-1b: 상시 표시 POI (ambient) — 검색 시트를 열지 않아도 줌 레벨에 따라
+  // 자동으로 표시/갱신되는 별개 레이어의 로컬 상태.
+  List<Poi> _ambientPois = const [];
+  DateTime? _lastAmbientFetchAt;
+  LatLng? _lastAmbientFetchCenter;
+  Set<PoiType> _lastAmbientFetchTypes = const {};
+  // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
+  int _ambientFetchGen = 0;
 
   // Course sheet
   bool _showCourseSheet = false;
@@ -399,7 +412,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           'cafe', '#FF7700',
           'convenienceStore', '#2196F3',
           'gasStation', '#E53935',
-          'traditionalMarket', '#43A047',
           'supermarket', '#8E24AA',
           'restaurant', '#FFB300',
           '#9E9E9E',
@@ -413,6 +425,131 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   void _updatePoiLayer(List<Poi> pois) {
     if (!_styleLoaded) return;
     _mlCtrl?.setGeoJsonSource(_poiSourceId, _buildPoiGeoJson(pois));
+  }
+
+  // ── POI 상시 표시(ambient) 레이어 (13-1b) ──────────────────────────────────
+  // _PoiExploreSheet용 위 레이어와는 완전히 별개 — 검색 시트를 열지 않아도
+  // 줌 레벨 임계값(Poi.minZoomLevel)에 따라 자동으로 표시된다.
+
+  Future<void> _initAmbientPoiLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_ambientPoiSourceId, _buildPoiGeoJson(const []));
+    await ctrl.addCircleLayer(
+      _ambientPoiSourceId,
+      _ambientPoiLayerId,
+      const ml.CircleLayerProperties(
+        circleRadius: 7,
+        circleColor: [
+          'match',
+          ['get', 'poiType'],
+          'cafe', '#FF7700',
+          'convenienceStore', '#2196F3',
+          'gasStation', '#E53935',
+          'supermarket', '#8E24AA',
+          'restaurant', '#FFB300',
+          '#9E9E9E',
+        ],
+        circleStrokeWidth: 2,
+        circleStrokeColor: '#FFFFFF',
+      ),
+    );
+  }
+
+  void _updateAmbientPoiLayer(List<Poi> pois) {
+    if (!_styleLoaded) return;
+    _mlCtrl?.setGeoJsonSource(_ambientPoiSourceId, _buildPoiGeoJson(pois));
+  }
+
+  /// 현재 줌 레벨에서 노출 대상인 카테고리를 계산하고, 필요 시(카테고리 변경 시
+  /// 즉시 / 그 외엔 200m 이동 또는 15초 경과 디바운스) 뷰포트 중심 기준으로
+  /// POI를 재조회해 ambient 레이어를 갱신한다. 화면에 실제 보이는 것만, 가까운
+  /// 순 최대 10개로 제한한다.
+  Future<void> _maybeFetchAmbientPois() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded) return;
+
+    final targetTypes =
+        PoiType.values.where((t) => _currentZoom >= t.minZoomLevel).toSet();
+    if (targetTypes.isEmpty) {
+      _ambientFetchGen++; // 진행 중이던 fetch가 있으면 응답을 무효화
+      if (_ambientPois.isNotEmpty) {
+        _ambientPois = const [];
+        _updateAmbientPoiLayer(const []);
+      }
+      _lastAmbientFetchTypes = const {};
+      return;
+    }
+
+    // 디바운스 판단은 getVisibleRegion()(플랫폼 채널 호출) 없이도 가능한
+    // 저비용 동기 카메라 중심점으로 먼저 끝낸다 — 실제로 재조회할 때만
+    // getVisibleRegion()을 부른다. onCameraIdle 직후라 카메라가 정지해
+    // 있으므로 이 값이 곧 뷰포트 중심과 사실상 같다(회전/기울기 잠금이라
+    // bounds가 target 기준으로 대칭).
+    final camTarget = ctrl.cameraPosition?.target;
+    if (camTarget == null) return;
+    final approxCenter = LatLng(camTarget.latitude, camTarget.longitude);
+
+    final sameTypes = targetTypes.length == _lastAmbientFetchTypes.length &&
+        targetTypes.every(_lastAmbientFetchTypes.contains);
+    if (sameTypes) {
+      final lastAt = _lastAmbientFetchAt;
+      final lastCenter = _lastAmbientFetchCenter;
+      final movedEnough = lastCenter == null ||
+          PoiService.haversineMeters(lastCenter, approxCenter) >= 200;
+      final staleEnough = lastAt == null ||
+          DateTime.now().difference(lastAt) >= const Duration(seconds: 15);
+      if (!movedEnough && !staleEnough) return;
+    }
+
+    // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
+    // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
+    // 이 응답은 stale이니 버린다. getVisibleRegion 앞에서 찍어야
+    // 그 await 도중 끼어든 최신 호출까지 감지된다.
+    final myGen = ++_ambientFetchGen;
+
+    final ml.LatLngBounds bounds;
+    try {
+      bounds = await ctrl.getVisibleRegion();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || myGen != _ambientFetchGen) return;
+    final center = LatLng(
+      (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+      (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+    );
+    final radius = min(
+      2000.0,
+      PoiService.haversineMeters(
+        center,
+        LatLng(bounds.northeast.latitude, bounds.northeast.longitude),
+      ),
+    );
+
+    final pois = await ref.read(poiServiceProvider).fetchPois(
+          center: center,
+          radiusMeters: radius,
+          types: targetTypes.toList(),
+        );
+    if (!mounted || myGen != _ambientFetchGen) return;
+
+    final visible = pois
+        .where((p) =>
+            p.location.latitude >= bounds.southwest.latitude &&
+            p.location.latitude <= bounds.northeast.latitude &&
+            p.location.longitude >= bounds.southwest.longitude &&
+            p.location.longitude <= bounds.northeast.longitude)
+        .toList()
+      ..sort((a, b) => PoiService.haversineMeters(center, a.location)
+          .compareTo(PoiService.haversineMeters(center, b.location)));
+    final limited = visible.take(10).toList();
+
+    _ambientPois = limited;
+    _updateAmbientPoiLayer(limited);
+    _lastAmbientFetchAt = DateTime.now();
+    _lastAmbientFetchCenter = center;
+    _lastAmbientFetchTypes = targetTypes;
   }
 
   Future<void> _ensureLocationMarker([double? heading]) async {
@@ -1067,6 +1204,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               await _initPoiLayer();
               final pois = ref.read(poiListProvider);
               if (pois.isNotEmpty) _updatePoiLayer(pois);
+              // 13-1b: 검색 시트와 무관한 상시 표시 POI 레이어
+              await _initAmbientPoiLayer();
             },
             onMapClick: (point, latLng) {
               _onMapTap(
@@ -1077,6 +1216,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             onCameraIdle: () {
               final z = _mlCtrl?.cameraPosition?.zoom;
               if (z != null) setState(() => _currentZoom = z);
+              unawaited(_maybeFetchAmbientPois());
             },
           ),
 

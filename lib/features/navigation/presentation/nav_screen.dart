@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' show sin, cos, sqrt, asin;
+import 'dart:math' show sin, cos, sqrt, asin, min;
 
 import 'package:http/http.dart' as http;
 
@@ -20,8 +20,10 @@ import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
 import '../../../services/native_engine.dart';
+import '../../../services/poi_service.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
+import '../../../models/poi.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
@@ -90,6 +92,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navRouteLayerId  = 'nav-route-layer';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
+  // 13-1b: 줌 레벨 기준으로 항상 켜져 있는 POI 레이어 (도착배너용 _arrivalPois와
+  // 무관한 완전히 별개 기능).
+  static const _navPoiSourceId = 'nav-poi-source';
+  static const _navPoiLayerId  = 'nav-poi-layer';
 
   bool _isManualMode = false;
   // 재탐색 버튼으로 진입하는 "경로 전체 보기" 오버뷰 + 코스 재선택 시트 상태.
@@ -130,6 +136,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
   double _navZoom = 15.0; // 현재 보간 중인 줌 레벨
   double? _lastMovingZoom; // 3km/h 미만에서 줌 진동 방지용 마지막 주행 중 줌
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용 (bottom-anchor 오프셋)
+
+  // 13-1b: 상시 표시 POI (ambient) — GPS 위치 기준으로 자동 표시/갱신되는
+  // 별개 레이어의 로컬 상태.
+  List<Poi> _ambientPois = const [];
+  DateTime? _lastAmbientFetchAt;
+  LatLng? _lastAmbientFetchCenter;
+  Set<PoiType> _lastAmbientFetchTypes = const {};
+  // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
+  int _ambientFetchGen = 0;
+  // _navZoom은 속도 기반으로 계속 보간되는 값이라 카테고리 임계값(11/13/14)
+  // 근처에서 흔들릴 수 있다 — 진입/이탈에 0.3 히스테리시스를 둬서 경계 근처
+  // 진동이 매번 "카테고리 변경"으로 잡혀 디바운스 없이 fetch가 연발하지
+  // 않게 한다.
+  Set<PoiType> _stickyEligibleTypes = const {};
 
   // 코스 재선택 시트 (재탐색 버튼) — 프리뷰 전용 페치 결과와, 취소 시 복원할
   // 원래 선택 인덱스.
@@ -266,6 +286,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
         }
         _ensureLocationMarker(effectiveHeadingDeg);
+        unawaited(_maybeFetchAmbientPois());
       },
       fireImmediately: true,
     );
@@ -706,6 +727,159 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p, heading));
   }
 
+  // ── POI 상시 표시(ambient) 레이어 (13-1b) ──────────────────────────────────
+  // main_map_screen의 검색 시트 POI(_fetchNearbyPois/_arrivalPois는 도착배너용
+  // 완전히 다른 기능)와 무관 — 줌 레벨 임계값(Poi.minZoomLevel)에 따라 자동
+  // 표시된다.
+
+  Map<String, dynamic> _buildPoiGeoJson(List<Poi> pois) => {
+        'type': 'FeatureCollection',
+        'features': pois
+            .map((p) => {
+                  'type': 'Feature',
+                  'geometry': {
+                    'type': 'Point',
+                    'coordinates': [p.location.longitude, p.location.latitude],
+                  },
+                  'properties': <String, dynamic>{
+                    'poiType': p.type.name,
+                  },
+                })
+            .toList(),
+      };
+
+  Future<void> _initPoiLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_navPoiSourceId, _buildPoiGeoJson(const []));
+    await ctrl.addCircleLayer(
+      _navPoiSourceId,
+      _navPoiLayerId,
+      const ml.CircleLayerProperties(
+        circleRadius: 7,
+        circleColor: [
+          'match',
+          ['get', 'poiType'],
+          'cafe', '#FF7700',
+          'convenienceStore', '#2196F3',
+          'gasStation', '#E53935',
+          'supermarket', '#8E24AA',
+          'restaurant', '#FFB300',
+          '#9E9E9E',
+        ],
+        circleStrokeWidth: 2,
+        circleStrokeColor: '#FFFFFF',
+      ),
+    );
+  }
+
+  void _updatePoiLayer(List<Poi> pois) {
+    if (!_styleLoaded) return;
+    _mlCtrl?.setGeoJsonSource(_navPoiSourceId, _buildPoiGeoJson(pois));
+  }
+
+  /// GPS 위치 기준(내비 중엔 카메라가 항상 라이더를 따라가므로 화면 중심과
+  /// 동일)으로 현재 줌(_navZoom)에서 노출 대상인 카테고리를 계산하고, 필요
+  /// 시(카테고리 변경 시 즉시 / 그 외엔 200m 이동 또는 15초 경과 디바운스)
+  /// POI를 재조회해 ambient 레이어를 갱신한다. 화면에 실제 보이는 것만,
+  /// 가까운 순 최대 10개로 제한한다.
+  /// _navZoom(속도 보간값)이 카테고리 임계값 근처에서 흔들려도 매번
+  /// "카테고리 변경"으로 잡히지 않도록 진입/이탈에 0.3 히스테리시스를 둔다.
+  Set<PoiType> _resolveEligibleTypes(double zoom) {
+    final result = <PoiType>{};
+    for (final t in PoiType.values) {
+      final threshold = t.minZoomLevel.toDouble();
+      if (_stickyEligibleTypes.contains(t)) {
+        if (zoom >= threshold - 0.3) result.add(t);
+      } else {
+        if (zoom >= threshold + 0.3) result.add(t);
+      }
+    }
+    return result;
+  }
+
+  Future<void> _maybeFetchAmbientPois() async {
+    final ctrl = _mlCtrl;
+    final center = ref.read(navStateProvider)?.pos;
+    if (ctrl == null || !_styleLoaded || center == null) return;
+
+    final targetTypes = _resolveEligibleTypes(_navZoom);
+    _stickyEligibleTypes = targetTypes; // 매 틱 갱신 — fetch 성사 여부와 무관
+    if (targetTypes.isEmpty) {
+      _ambientFetchGen++; // 진행 중이던 fetch가 있으면 응답을 무효화
+      if (_ambientPois.isNotEmpty) {
+        _ambientPois = const [];
+        _updatePoiLayer(const []);
+      }
+      _lastAmbientFetchTypes = const {};
+      return;
+    }
+
+    // getVisibleRegion()(플랫폼 채널 호출)은 실제로 재조회할 때만 부른다 —
+    // 디바운스 판단 자체는 GPS 위치(center)만으로 매 틱 저비용으로 끝낸다.
+    final sameTypes = targetTypes.length == _lastAmbientFetchTypes.length &&
+        targetTypes.every(_lastAmbientFetchTypes.contains);
+    if (sameTypes) {
+      final lastAt = _lastAmbientFetchAt;
+      final lastCenter = _lastAmbientFetchCenter;
+      final movedEnough = lastCenter == null ||
+          PoiService.haversineMeters(lastCenter, center) >= 200;
+      final staleEnough = lastAt == null ||
+          DateTime.now().difference(lastAt) >= const Duration(seconds: 15);
+      if (!movedEnough && !staleEnough) return;
+    }
+
+    // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
+    // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
+    // 이 응답은 stale이니 버린다. getVisibleRegion 앞에서 찍어야
+    // 그 await 도중 끼어든 최신 호출까지 감지된다.
+    final myGen = ++_ambientFetchGen;
+
+    final ml.LatLngBounds bounds;
+    try {
+      bounds = await ctrl.getVisibleRegion();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || myGen != _ambientFetchGen) return;
+
+    final boundsCenter = LatLng(
+      (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+      (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+    );
+    final radius = min(
+      2000.0,
+      PoiService.haversineMeters(
+        boundsCenter,
+        LatLng(bounds.northeast.latitude, bounds.northeast.longitude),
+      ),
+    );
+
+    final pois = await ref.read(poiServiceProvider).fetchPois(
+          center: center,
+          radiusMeters: radius,
+          types: targetTypes.toList(),
+        );
+    if (!mounted || myGen != _ambientFetchGen) return;
+
+    final visible = pois
+        .where((p) =>
+            p.location.latitude >= bounds.southwest.latitude &&
+            p.location.latitude <= bounds.northeast.latitude &&
+            p.location.longitude >= bounds.southwest.longitude &&
+            p.location.longitude <= bounds.northeast.longitude)
+        .toList()
+      ..sort((a, b) => PoiService.haversineMeters(center, a.location)
+          .compareTo(PoiService.haversineMeters(center, b.location)));
+    final limited = visible.take(10).toList();
+
+    _ambientPois = limited;
+    _updatePoiLayer(limited);
+    _lastAmbientFetchAt = DateTime.now();
+    _lastAmbientFetchCenter = center;
+    _lastAmbientFetchTypes = targetTypes;
+  }
+
   /// 목적지/경유지는 widget 생명주기 동안 불변(ctor의 final 필드, 재할당 없음)
   /// 이므로 puck과 달리 틱마다 갱신할 필요 없이 스타일 로드 후 1회만 설정한다.
   /// route 레이어 위, puck 레이어 아래에 오도록 puck보다 먼저 생성한다.
@@ -751,6 +925,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       await _mlCtrl?.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
       _initDestLayer().whenComplete(() {
         _initLocationLayer().whenComplete(() => _ensureLocationMarker()); // unawaited — ③
+        _initPoiLayer(); // unawaited — 13-1b 상시 표시 POI 레이어
       });
     });
   }

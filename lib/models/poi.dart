@@ -39,6 +39,21 @@ extension PoiTypeX on PoiType {
         return 0xFFFFB300;
     }
   }
+
+  /// 상시 표시(ambient) POI 레이어가 이 카테고리를 노출하는 최소 줌 레벨.
+  /// 실측 기반 스펙: 주유소=11, 카페/편의점=13, 마트/식당=14.
+  int get minZoomLevel {
+    switch (this) {
+      case PoiType.gasStation:
+        return 11;
+      case PoiType.cafe:
+      case PoiType.convenienceStore:
+        return 13;
+      case PoiType.supermarket:
+      case PoiType.restaurant:
+        return 14;
+    }
+  }
 }
 
 class Poi {
