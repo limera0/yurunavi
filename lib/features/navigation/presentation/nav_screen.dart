@@ -116,10 +116,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<({String name, String type})> _arrivalPois = const [];
   // 도착배너 종료버튼 지오펜스+속도 게이트 (feat/arrival-fix SPEC_arrival_v2 포팅 —
   // 정차(속도<1.0) 게이트는 실 GPS에서 안 걸려 폐기됐던 전례가 있어 채택하지 않음).
-  static const _kExitGeofenceM = 30.0;  // 종료버튼 노출 지오펜스 반경(직선, m)
+  static const _kExitGeofenceM = 30.0;  // 종료버튼 노출 지오펜스 반경(폴리라인 잔여거리 기준, m)
   static const _kExitSpeedKmh = 30.0;   // 종료버튼 노출 속도 상한(km/h)
   bool _canExit = false;
-  static const _distance = Distance();
+  // _canExit이 true가 된 뒤 10초 경과 시 자동 종료 — 게이트가 다시 닫히거나
+  // 배너를 직접 닫으면 반드시 취소해야 한다(주행 중 화면이 갑자기 꺼지면 안 됨).
+  Timer? _exitAutoCloseTimer;
 
   // 음성 안내
   FlutterTts? _tts;
@@ -249,6 +251,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ));
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
+    _exitAutoCloseTimer?.cancel();
     _locationSub?.close();
     _progressSub?.close();
     _pulseCtrl.dispose();
@@ -308,7 +311,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             if (mounted) setState(() => _arrivalPois = pois);
           });
         }
-        if (_arrivalBannerVisible) _updateExitGate();
+        if (_arrivalBannerVisible) _updateExitGate(prog.distToDestM);
         if (!_saidArrival &&
             prog.distToDestM <= (_profile?.arrivalVoiceM ?? 8)) {
           _saidArrival = true;
@@ -332,19 +335,29 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
-  /// 도착배너 표시 중 지오펜스(30m 이내)+속도(30km/h 이하) 게이트로 종료버튼
-  /// 노출을 토글한다. 자동 종료는 없음 — 탭으로만 종료.
-  void _updateExitGate() {
-    final dest = widget.destination;
+  /// 도착배너 표시 중 지오펜스(폴리라인 잔여거리 30m 이내)+속도(30km/h 이하)
+  /// 게이트로 종료버튼 노출을 토글한다. 게이트가 열리면(false→true) 10초 뒤
+  /// 자동 종료 타이머를 시작하고, 닫히면(true→false) 그 타이머를 취소한다.
+  void _updateExitGate(double distToDestM) {
     final navState = ref.read(navStateProvider);
-    if (dest == null || navState == null) return;
+    if (navState == null) return;
     final can = exitGateOpen(
-      distanceM: _distance(navState.pos, dest),
+      distanceM: distToDestM,
       speedKmh: navState.speedKmh,
       geofenceM: _kExitGeofenceM,
       speedLimitKmh: _kExitSpeedKmh,
     );
-    if (can != _canExit) setState(() => _canExit = can);
+    if (can != _canExit) {
+      setState(() => _canExit = can);
+      _exitAutoCloseTimer?.cancel();
+      if (can) {
+        _exitAutoCloseTimer = Timer(const Duration(seconds: 10), () {
+          if (mounted && _canExit) Navigator.of(context).pop();
+        });
+      } else {
+        _exitAutoCloseTimer = null;
+      }
+    }
   }
 
   void _handleVoice(RouteProgress prog) {
@@ -1228,10 +1241,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                         ),
                         GestureDetector(
-                          onTap: () => setState(() {
-                            _arrivalBannerVisible = false;
-                            _canExit = false;
-                          }),
+                          onTap: () {
+                            _exitAutoCloseTimer?.cancel();
+                            setState(() {
+                              _arrivalBannerVisible = false;
+                              _canExit = false;
+                            });
+                          },
                           child: const Padding(
                             padding: EdgeInsets.all(4),
                             child: Icon(Icons.close_rounded, size: 20),
@@ -1261,9 +1277,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             padding: const EdgeInsets.only(right: 10),
                             child: Text('정차 후 종료 가능',
                                 style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: Text('10초 후 자동 종료',
+                                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
                           ),
                         GestureDetector(
-                          onTap: _canExit ? () => Navigator.of(context).pop() : null,
+                          onTap: _canExit
+                              ? () {
+                                  _exitAutoCloseTimer?.cancel();
+                                  Navigator.of(context).pop();
+                                }
+                              : null,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
