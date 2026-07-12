@@ -471,6 +471,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     await _tts!.setSpeechRate(0.5);
     await _tts!.setVolume(1.0);
     await _tts!.setAudioAttributesForNavigation();
+    // speak() Future가 네이티브 발화 완료(onDone/onStop/onError)까지 실제로
+    // 기다리게 만든다. 이게 없으면 VoicePackService의 직렬화 큐가 "채널 호출
+    // 성공"만 기다리게 되어 겹치는 speak 호출을 막지 못한다.
+    await _tts!.awaitSpeakCompletion(true);
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
     _landmarkService = await ExitLandmarkService.load('assets/data/kr_places.json');
