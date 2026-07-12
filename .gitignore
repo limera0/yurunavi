@@ -64,3 +64,8 @@ android/*.keystore
 # Google 공식 정책상 이 값들은 비밀이 아님(빌드된 APK 안에 그대로 포함되므로 git에서
 # 숨겨도 실제 보호 효과 없음, 진짜 보안 경계는 Firebase Security Rules/API 키 제한).
 # 커밋해서 신규 체크아웃에서도 flutter analyze/build가 바로 되게 함.
+
+# 공공데이터포털 서비스키 등 — 앱 패키지명/서명으로 바인딩되지 않는 순수 트래픽
+# 쿼터 토큰이라 firebase 키와 달리 진짜 비밀임. --dart-define-from-file=env.json으로
+# 빌드 시에만 주입, 절대 커밋하지 않음.
+env.json

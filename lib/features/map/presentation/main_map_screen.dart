@@ -136,8 +136,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // Course sheet
   bool _showCourseSheet = false;
-  // POI 탐색 시트 (13-1)
-  bool _poiSheetOpen = false;
 
   String? _rawStyle;   // 원본 JSON 1회 로드
   String? _styleJson;  // 언어 적용 후 주입 문자열
@@ -845,7 +843,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
   // ── POI 탐색 (13-1) ────────────────────────────────────────────────────
 
   void _showPoiExploreSheet() {
-    setState(() => _poiSheetOpen = true);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -860,7 +857,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     ).whenComplete(() {
       if (!mounted) return;
       ref.read(poiListProvider.notifier).clear();
-      setState(() => _poiSheetOpen = false);
     });
   }
 
@@ -1166,6 +1162,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 onSettings: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
+                onPoiSearch: _showPoiExploreSheet,
               ),
             ),
           ),
@@ -1183,8 +1180,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 onRecenter: _recenterMap,
                 onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
                 onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
-                onPoiExplore: _showPoiExploreSheet,
-                poiExploreActive: _poiSheetOpen,
               ),
             ),
           ),
@@ -1285,6 +1280,7 @@ class _MapHeader extends StatelessWidget {
   final VoidCallback onTourSummary;
   final VoidCallback onSavedCourses;
   final VoidCallback onSettings;
+  final VoidCallback onPoiSearch;
 
   const _MapHeader({
     required this.riderMode,
@@ -1293,6 +1289,7 @@ class _MapHeader extends StatelessWidget {
     required this.onTourSummary,
     required this.onSavedCourses,
     required this.onSettings,
+    required this.onPoiSearch,
   });
 
   @override
@@ -1304,28 +1301,70 @@ class _MapHeader extends StatelessWidget {
     return Container(
       color: bgColor,
       padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── 로고 ─────────────────────────────────────────────
-          _LogoBadge(riderMode: riderMode),
-          const Spacer(),
-          // ── 라이더 모드 토글 (햇빛 아이콘) ───────────────────
-          _HeaderIcon(
-            icon: riderMode ? Icons.wb_sunny : Icons.wb_sunny_outlined,
-            onTap: onRiderModeToggle,
-            active: riderMode,
-            activeColor: RiderModeColors.primary,
-            activeBg: RiderModeColors.surface,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // ── 로고 ─────────────────────────────────────────────
+              _LogoBadge(riderMode: riderMode),
+              const Spacer(),
+              // ── 라이더 모드 토글 (햇빛 아이콘) ───────────────────
+              _HeaderIcon(
+                icon: riderMode ? Icons.wb_sunny : Icons.wb_sunny_outlined,
+                onTap: onRiderModeToggle,
+                active: riderMode,
+                activeColor: RiderModeColors.primary,
+                activeBg: RiderModeColors.surface,
+              ),
+              const SizedBox(width: 6),
+              _HeaderIcon(icon: Icons.image_outlined, onTap: onCourseRegister),
+              const SizedBox(width: 6),
+              _HeaderIcon(icon: Icons.history_rounded, onTap: onTourSummary),
+              const SizedBox(width: 6),
+              _HeaderIcon(icon: Icons.bookmark_border_rounded, onTap: onSavedCourses),
+              const SizedBox(width: 6),
+              _HeaderIcon(icon: Icons.settings_outlined, onTap: onSettings),
+            ],
           ),
-          const SizedBox(width: 6),
-          _HeaderIcon(icon: Icons.image_outlined, onTap: onCourseRegister),
-          const SizedBox(width: 6),
-          _HeaderIcon(icon: Icons.history_rounded, onTap: onTourSummary),
-          const SizedBox(width: 6),
-          _HeaderIcon(icon: Icons.bookmark_border_rounded, onTap: onSavedCourses),
-          const SizedBox(width: 6),
-          _HeaderIcon(icon: Icons.settings_outlined, onTap: onSettings),
+          const SizedBox(height: 8),
+          // ── 장소 검색 진입 버튼 (탭하면 POI 탐색 시트가 열림) ─────
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: onPoiSearch,
+              child: Container(
+                height: 42,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.secondary.withValues(alpha: 0.13),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 20, color: AppColors.secondary),
+                    const SizedBox(width: 8),
+                    Text(
+                      '장소 검색',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textHint,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1454,16 +1493,12 @@ class _RightPanel extends ConsumerWidget {
   final VoidCallback onRecenter;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
-  final VoidCallback onPoiExplore;
-  final bool poiExploreActive;
 
   const _RightPanel({
     required this.showCourseSheet,
     required this.onRecenter,
     required this.onZoomIn,
     required this.onZoomOut,
-    required this.onPoiExplore,
-    this.poiExploreActive = false,
   });
 
   @override
@@ -1517,15 +1552,6 @@ class _RightPanel extends ConsumerWidget {
 
           // ── 줌 아웃 ───────────────────────────────────────
           _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true),
-
-          const SizedBox(height: 20),
-
-          // ── POI 탐색 (13-1) ─────────────────────────────────
-          _MapCtrlBtn(
-            icon: poiExploreActive ? Icons.storefront : Icons.storefront_outlined,
-            onTap: onPoiExplore,
-            active: poiExploreActive,
-          ),
         ],
       ),
     );
@@ -1551,13 +1577,11 @@ class _MapCtrlBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final bool bold;
-  final bool active;
 
   const _MapCtrlBtn({
     required this.icon,
     required this.onTap,
     this.bold = false,
-    this.active = false,
   });
 
   @override
@@ -1568,9 +1592,7 @@ class _MapCtrlBtn extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: active
-              ? AppColors.primary.withValues(alpha: 0.15)
-              : Colors.white,
+          color: Colors.white,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
@@ -1583,7 +1605,7 @@ class _MapCtrlBtn extends StatelessWidget {
         child: Icon(
           icon,
           size: bold ? 22 : 20,
-          color: active ? AppColors.primary : AppColors.secondary,
+          color: AppColors.secondary,
           weight: bold ? 700 : 400,
         ),
       ),
@@ -1933,12 +1955,49 @@ class _PoiExploreSheet extends ConsumerStatefulWidget {
 
 class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   final Set<PoiType> _selectedTypes = {};
+  final TextEditingController _searchCtrl = TextEditingController();
   bool _loading = false;
   List<Poi> _results = const [];
+  // 마지막으로 네트워크 조회에 사용된 "유효 카테고리 집합" — 이게 바뀔 때만 재조회.
+  Set<PoiType> _fetchedTypes = const {};
 
-  Future<void> _fetch() async {
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.removeListener(_onSearchChanged);
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 5종 전체, 둘 다 없으면 빈 집합.
+  Set<PoiType> get _effectiveTypes {
+    if (_selectedTypes.isNotEmpty) return _selectedTypes;
+    if (_searchCtrl.text.trim().isNotEmpty) return PoiType.values.toSet();
+    return const {};
+  }
+
+  bool _sameTypes(Set<PoiType> a, Set<PoiType> b) =>
+      a.length == b.length && a.containsAll(b);
+
+  void _onSearchChanged() {
+    final effective = _effectiveTypes;
+    if (_sameTypes(effective, _fetchedTypes)) {
+      // 유효 카테고리 집합이 바뀌지 않았으면 재조회 없이 클라이언트 필터링만 갱신.
+      setState(() {});
+      return;
+    }
+    _fetch(effective);
+  }
+
+  Future<void> _fetch(Set<PoiType> types) async {
+    _fetchedTypes = types;
     final origin = widget.origin;
-    if (origin == null || _selectedTypes.isEmpty) {
+    if (origin == null || types.isEmpty) {
       setState(() => _results = const []);
       ref.read(poiListProvider.notifier).clear();
       return;
@@ -1946,10 +2005,12 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     setState(() => _loading = true);
     final pois = await ref.read(poiServiceProvider).fetchPois(
           center: origin,
-          radiusMeters: 3000,
-          types: _selectedTypes.toList(),
+          radiusMeters: 1500,
+          types: types.toList(),
         );
-    if (!mounted) return;
+    // 응답이 늦게 오는 사이 유효 카테고리 집합이 또 바뀌었으면(연타 타이핑/칩 연타) 이 결과는
+    // 이미 낡은 것이니 버린다 — 아니면 지도 위 poiListProvider까지 stale 데이터로 덮어씀.
+    if (!mounted || !_sameTypes(_fetchedTypes, types)) return;
     pois.sort((a, b) => PoiService.haversineMeters(origin, a.location)
         .compareTo(PoiService.haversineMeters(origin, b.location)));
     ref.read(poiListProvider.notifier).set(pois);
@@ -1963,7 +2024,17 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     setState(() {
       if (!_selectedTypes.add(type)) _selectedTypes.remove(type);
     });
-    _fetch();
+    final effective = _effectiveTypes;
+    if (!_sameTypes(effective, _fetchedTypes)) {
+      _fetch(effective);
+    }
+  }
+
+  /// 검색어(있으면)로 클라이언트 필터링한 뒤 거리순으로 보여줄 목록.
+  List<Poi> get _visibleResults {
+    final query = _searchCtrl.text.trim().toLowerCase();
+    if (query.isEmpty) return _results;
+    return _results.where((p) => p.name.toLowerCase().contains(query)).toList();
   }
 
   String _formatDistance(double meters) {
@@ -2014,6 +2085,26 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                 ],
               ),
               const SizedBox(height: 8),
+
+              // ── 상호명 검색 ─────────────────────────────────────────────
+              TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: '상호명으로 검색 (예: 스타벅스)',
+                  hintStyle: const TextStyle(fontSize: 13),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.grey.shade100,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 10),
 
               // ── 카테고리 필터 칩 ────────────────────────────────────────────
               SizedBox(
@@ -2072,11 +2163,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         ),
       );
     }
-    if (_selectedTypes.isEmpty) {
+    if (_effectiveTypes.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
-          child: Text('카테고리를 선택하세요',
+          child: Text('카테고리를 선택하거나 상호명을 검색하세요',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
       );
@@ -2088,6 +2179,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       );
     }
     if (_results.isEmpty) {
+      // API 자체가 0건(NODATA 포함)을 반환한 경우.
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
@@ -2096,9 +2188,21 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         ),
       );
     }
+    final visible = _visibleResults;
+    if (visible.isEmpty) {
+      // 조회는 됐지만 상호명 검색어 필터 결과가 0건인 경우.
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('검색 결과가 없습니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
     return Column(
-      children: _results.map((poi) {
+      children: visible.map((poi) {
         final dist = PoiService.haversineMeters(origin, poi.location);
+        final address = poi.address;
         return ListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
@@ -2111,8 +2215,20 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
             ),
           ),
           title: Text(poi.name, style: const TextStyle(fontSize: 14)),
-          subtitle: Text(_formatDistance(dist),
-              style: const TextStyle(fontSize: 11)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_formatDistance(dist), style: const TextStyle(fontSize: 11)),
+              if (address != null)
+                Text(
+                  address,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
+          ),
           onTap: () => widget.onSelectDest(poi.location),
         );
       }).toList(),

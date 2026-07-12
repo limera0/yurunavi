@@ -6,121 +6,146 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/poi.dart';
 
-/// Overpass API를 통해 6종 POI를 실시간 수집하고
-/// 오모테나시 목적지 스냅 로직을 수행하는 서비스.
+/// 공공데이터포털 소상공인시장진흥공단 상가(상권)정보 API(storeListInRadius)를 통해
+/// 5종 POI를 실시간 수집하고 오모테나시 목적지 스냅 로직을 수행하는 서비스.
 class PoiService {
-  static const _overpassUrl = 'https://overpass-api.de/api/interpreter';
+  static const _semasBaseUrl =
+      'https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInRadius';
 
-  // ── Overpass 쿼리 헬퍼 ────────────────────────────────────────
+  /// 컴파일타임 주입 서비스키 (--dart-define-from-file=env.json).
+  /// analyze/test 시에는 빈 문자열이 되는 게 정상 동작 — fallback/에러처리 추가하지 말 것.
+  static const _serviceKey = String.fromEnvironment('SEMAS_SERVICE_KEY');
 
-  /// LatLng 중심, 반경(m)에 해당하는 특정 타입의 POI를 가져온다.
+  /// 카테고리 → 업종코드(대/중/소분류) 매핑. restaurant는 indsMclsCd 없이
+  /// 대분류(I2) 전체를 받아 클라이언트에서 필터링한다 (API가 중분류 다중선택 미지원).
+  static const Map<PoiType, Map<String, String>> _categoryCodes = {
+    PoiType.cafe: {
+      'indsLclsCd': 'I2',
+      'indsMclsCd': 'I212',
+      'indsSclsCd': 'I21201',
+    },
+    PoiType.convenienceStore: {
+      'indsLclsCd': 'G2',
+      'indsMclsCd': 'G204',
+      'indsSclsCd': 'G20405',
+    },
+    PoiType.gasStation: {
+      'indsLclsCd': 'G2',
+      'indsMclsCd': 'G214',
+      'indsSclsCd': 'G21401',
+    },
+    PoiType.supermarket: {
+      'indsLclsCd': 'G2',
+      'indsMclsCd': 'G204',
+      'indsSclsCd': 'G20404',
+    },
+    PoiType.restaurant: {
+      'indsLclsCd': 'I2',
+    },
+  };
+
+  /// restaurant(I2 대분류) 응답 중 "식당"으로 취급하지 않는 중분류
+  /// (구내식당/출장음식/이동음식/기타간이/주점/카페).
+  static const Set<String> _restaurantExcludeMcls = {
+    'I207', 'I208', 'I209', 'I210', 'I211', 'I212',
+  };
+
+  // ── 공공데이터포털 API 헬퍼 ────────────────────────────────────
+
+  /// LatLng 중심, 반경(m)에 해당하는 특정 타입들의 POI를 가져온다.
+  ///
+  /// 호출부 기본값은 1500m(2000m 미만 여유있게) 권장 — 이 API는 결과를 거리순으로
+  /// 정렬해주지 않고, 반경을 넓게+필터 없이 잡으면 서울 도심에서 500m만으로도
+  /// 800건대가 나올 만큼 조밀해서 정말 가까운 곳이 응답 앞쪽에 없을 수 있다(API 자체 한계,
+  /// numOfRows=500과의 조합으로 완화만 가능, 완전 해결 불가).
   Future<List<Poi>> fetchPois({
     required LatLng center,
     required double radiusMeters,
     required List<PoiType> types,
   }) async {
-    final parts = types.map((t) => _buildFilter(t)).join('\n');
-    final query = '''
-[out:json][timeout:25];
-(
-$parts
-);
-out body;
-''';
+    // API 최대 반경은 2000m.
+    final clampedRadius = radiusMeters.clamp(0, 2000).toDouble();
 
-    // Overpass QL의 around 필터를 위해 위도/경도와 반경 삽입
-    final filledQuery = query
-        .replaceAll('RADIUS', radiusMeters.toStringAsFixed(0))
-        .replaceAll('LAT', center.latitude.toString())
-        .replaceAll('LNG', center.longitude.toString());
+    final results = await Future.wait(
+      types.map((t) => _fetchOne(center: center, radiusMeters: clampedRadius, type: t)),
+    );
+
+    return results.expand((list) => list).toList();
+  }
+
+  Future<List<Poi>> _fetchOne({
+    required LatLng center,
+    required double radiusMeters,
+    required PoiType type,
+  }) async {
+    final codes = _categoryCodes[type] ?? const {};
+    final query = <String, String>{
+      'serviceKey': _serviceKey,
+      'radius': radiusMeters.toStringAsFixed(0),
+      'cx': center.longitude.toString(),
+      'cy': center.latitude.toString(),
+      'type': 'json',
+      'numOfRows': '500',
+      'pageNo': '1',
+      ...codes,
+    };
+
+    final uri = Uri.parse(_semasBaseUrl).replace(queryParameters: query);
 
     try {
-      final resp = await http
-          .post(
-            Uri.parse(_overpassUrl),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'data': filledQuery},
-          )
-          .timeout(const Duration(seconds: 30));
-
+      final resp = await http.get(uri).timeout(const Duration(seconds: 30));
       if (resp.statusCode != 200) return [];
 
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
-      final elements = (json['elements'] as List<dynamic>? ?? []);
+      final header = json['header'] as Map<String, dynamic>?;
+      if (header != null && header['resultCode'] != '00') return [];
 
-      return elements.map((e) => _parseElement(e as Map<String, dynamic>)).whereType<Poi>().toList();
+      final body = json['body'] as Map<String, dynamic>?;
+      final rawItems = body?['items'];
+      if (rawItems == null) return [];
+      final items = rawItems is List ? rawItems : [rawItems];
+
+      return items
+          .map((e) => _parseItem(e as Map<String, dynamic>, type))
+          .whereType<Poi>()
+          .toList();
     } catch (_) {
       return [];
     }
   }
 
-  String _buildFilter(PoiType type) {
-    switch (type) {
-      case PoiType.cafe:
-        return '  node["amenity"="cafe"](around:RADIUS,LAT,LNG);\n'
-            '  way["amenity"="cafe"](around:RADIUS,LAT,LNG);';
-      case PoiType.convenienceStore:
-        return '  node["shop"="convenience"](around:RADIUS,LAT,LNG);\n'
-            '  way["shop"="convenience"](around:RADIUS,LAT,LNG);';
-      case PoiType.gasStation:
-        return '  node["amenity"="fuel"](around:RADIUS,LAT,LNG);\n'
-            '  way["amenity"="fuel"](around:RADIUS,LAT,LNG);';
-      case PoiType.traditionalMarket:
-        return '  node["amenity"="marketplace"](around:RADIUS,LAT,LNG);\n'
-            '  way["amenity"="marketplace"](around:RADIUS,LAT,LNG);';
-      case PoiType.supermarket:
-        return '  node["shop"="supermarket"](around:RADIUS,LAT,LNG);\n'
-            '  way["shop"="supermarket"](around:RADIUS,LAT,LNG);';
-      case PoiType.restaurant:
-        return '  node["amenity"="restaurant"](around:RADIUS,LAT,LNG);\n'
-            '  way["amenity"="restaurant"](around:RADIUS,LAT,LNG);';
-    }
-  }
+  Poi? _parseItem(Map<String, dynamic> item, PoiType type) {
+    final indsMclsCd = item['indsMclsCd'] as String?;
 
-  Poi? _parseElement(Map<String, dynamic> e) {
-    final tags = (e['tags'] as Map<String, dynamic>?) ?? {};
-    final id = (e['id'] as num).toInt();
-    final name = (tags['name'] as String?) ?? '이름 없음';
-
-    double? lat;
-    double? lng;
-
-    if (e.containsKey('lat')) {
-      lat = (e['lat'] as num).toDouble();
-      lng = (e['lon'] as num).toDouble();
-    } else if (e.containsKey('center')) {
-      final center = e['center'] as Map<String, dynamic>;
-      lat = (center['lat'] as num).toDouble();
-      lng = (center['lon'] as num).toDouble();
-    } else {
+    // restaurant는 대분류(I2) 전체를 받아왔으므로 카페 등 제외 중분류를 걸러낸다.
+    if (type == PoiType.restaurant &&
+        indsMclsCd != null &&
+        _restaurantExcludeMcls.contains(indsMclsCd)) {
       return null;
     }
 
-    final type = _detectType(tags);
-    if (type == null) return null;
+    final lat = item['lat'];
+    final lon = item['lon'];
+    if (lat == null || lon == null) return null;
 
-    final ratingStr = tags['stars'] as String? ?? tags['rating'] as String?;
-    final rating = ratingStr != null ? double.tryParse(ratingStr) : null;
+    final id = item['bizesId'] as String?;
+    if (id == null) return null;
+
+    final name = (item['bizesNm'] as String?) ?? '이름 없음';
+    // rdnmAdr가 null이 아니라 빈 문자열로 오는 업소도 있어 isNotEmpty까지 확인해야 지번주소로
+    // 정상 폴백한다.
+    final rdnmAdr = item['rdnmAdr'] as String?;
+    final address = (rdnmAdr != null && rdnmAdr.isNotEmpty)
+        ? rdnmAdr
+        : item['lnoAdr'] as String?;
 
     return Poi(
       id: id,
       name: name,
       type: type,
-      location: LatLng(lat, lng),
-      rating: rating,
+      location: LatLng((lat as num).toDouble(), (lon as num).toDouble()),
+      address: address,
     );
-  }
-
-  PoiType? _detectType(Map<String, dynamic> tags) {
-    final amenity = tags['amenity'] as String?;
-    final shop = tags['shop'] as String?;
-    if (amenity == 'cafe') return PoiType.cafe;
-    if (shop == 'convenience') return PoiType.convenienceStore;
-    if (amenity == 'fuel') return PoiType.gasStation;
-    if (amenity == 'marketplace') return PoiType.traditionalMarket;
-    if (shop == 'supermarket') return PoiType.supermarket;
-    if (amenity == 'restaurant') return PoiType.restaurant;
-    return null;
   }
 
   // ── 거리 계산 ─────────────────────────────────────────────────
