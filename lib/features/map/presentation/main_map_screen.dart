@@ -2116,7 +2116,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
 
   /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 5종 전체, 둘 다 없으면 빈 집합.
   Set<PoiType> get _effectiveTypes {
-    if (_selectedTypes.isNotEmpty) return _selectedTypes;
+    if (_selectedTypes.isNotEmpty) return Set<PoiType>.from(_selectedTypes);
     if (_searchCtrl.text.trim().isNotEmpty) return PoiType.values.toSet();
     return const {};
   }
