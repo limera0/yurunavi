@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
@@ -109,7 +110,10 @@ class PoiService {
           .map((e) => _parseItem(e as Map<String, dynamic>, type))
           .whereType<Poi>()
           .toList();
-    } catch (_) {
+    } catch (e) {
+      // 네트워크 단절 시 "이 지역엔 POI가 없음"과 구분 불가능해 실기기 디버깅이 매우
+      // 어려웠음(2026-07-13 확인) — 최소한의 로그로 향후 진단 가능하게 함.
+      debugPrint('YNAV_POI fetch failed type=$type error=$e');
       return [];
     }
   }
