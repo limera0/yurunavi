@@ -93,6 +93,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _navRouteLayerId  = 'nav-route-layer';
   static const _navRouteTraveledSourceId = 'nav-route-traveled-source';
   static const _navRouteTraveledLayerId  = 'nav-route-traveled-layer';
+  // 코스 재선택 시트(재탐색 버튼)에서 선택 안 된 코스를 회색으로 비교
+  // 표시하는 레이어 — main_map_screen.dart의 route-bg-source/layer와 동일한
+  // 목적, nav_screen에는 지금까지 이 레이어가 없어서 재탐색 시 선택된 경로만
+  // 보이고 나머지 두 코스와 비교가 안 되던 버그를 고친다.
+  static const _navRouteBgSourceId = 'nav-route-bg-source';
+  static const _navRouteBgLayerId  = 'nav-route-bg-layer';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
   // 13-1b: 줌 레벨 기준으로 항상 켜져 있는 POI 레이어 (도착배너용 _arrivalPois와
@@ -691,6 +697,35 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ],
       };
 
+  Map<String, dynamic> _buildBgGeoJson(List<List<LatLng>> routes) => {
+        'type': 'FeatureCollection',
+        'features': routes.isEmpty
+            ? <dynamic>[]
+            : routes
+                .map((pts) => {
+                      'type': 'Feature',
+                      'geometry': {
+                        'type': 'LineString',
+                        'coordinates':
+                            pts.map((p) => [p.longitude, p.latitude]).toList(),
+                      },
+                      'properties': <String, dynamic>{},
+                    })
+                .toList(),
+      };
+
+  /// 코스 재선택 시트가 열려있는 동안, allRoutes 중 선택 안 된 코스들을
+  /// 회색 배경 레이어로 갱신한다. 시트가 닫히면 빈 리스트로 초기화해 평소
+  /// 내비 화면(지나온 경로 회색 레이어와는 별개)에는 보이지 않게 한다.
+  void _updateRouteBgLayer(List<List<LatLng>> allRoutes, int selIdx) {
+    if (!_styleLoaded) return;
+    final bgRoutes = [
+      for (int i = 0; i < allRoutes.length; i++)
+        if (i != selIdx) allRoutes[i],
+    ];
+    _mlCtrl?.setGeoJsonSource(_navRouteBgSourceId, _buildBgGeoJson(bgRoutes));
+  }
+
   Map<String, dynamic> _buildLocGeoJson(LatLng p, [double? bearing]) => {
         'type': 'FeatureCollection',
         'features': [
@@ -723,6 +758,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
       const ml.LineLayerProperties(
         lineColor: '#9E9E9E',
         lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      belowLayerId: 'waterway-name',
+    );
+    // 코스 재선택 시트용 비교 배경 레이어 — 평소엔 빈 소스라 아무것도 안
+    // 그려지고, _openCourseSheet()가 열려있는 동안만 _updateRouteBgLayer로
+    // 채워진다.
+    await ctrl.addGeoJsonSource(_navRouteBgSourceId, _buildBgGeoJson([]));
+    await ctrl.addLineLayer(
+      _navRouteBgSourceId,
+      _navRouteBgLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#9E9E9E',
+        lineWidth: 4.0,
         lineCap: 'round',
         lineJoin: 'round',
       ),
@@ -1115,7 +1165,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
       );
       if (!mounted || reqId != _courseSheetReqId) return;
       final notifier = ref.read(mapInteractionProvider.notifier);
-      notifier.setAllRoutes(routes.map((r) => r.points).toList());
+      final allPoints = routes.map((r) => r.points).toList();
+      notifier.setAllRoutes(allPoints);
+      _updateRouteBgLayer(
+          allPoints, ref.read(mapInteractionProvider).selectedRouteIdx);
       notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
         km: routes[i].distanceKm,
         mins: routes[i].durationMin,
@@ -1138,6 +1191,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
             _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
       }
       _recolorNavRouteLayer(idx);
+      _updateRouteBgLayer(
+          _fetchedRoutes.map((r) => r.points).toList(), idx);
     }
   }
 
@@ -1163,6 +1218,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _recolorNavRouteLayer(idx); // 마지막 프리뷰 탭과 이미 일치할 수 있으나 방어적으로 재설정
       _vps?.speak('reroute');
     }
+    _updateRouteBgLayer(const [], 0); // 코스 확정 — 비교용 회색 레이어 정리
     setState(() => _showCourseSheet = false);
     final ns = ref.read(navStateProvider);
     final pos = ns?.pos;
@@ -1190,6 +1246,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _navRouteSourceId, _buildRouteGeoJson(_routePoints));
     }
     _recolorNavRouteLayer(restoreIdx);
+    _updateRouteBgLayer(const [], 0); // 시트 취소 — 비교용 회색 레이어 정리
     setState(() => _showCourseSheet = false);
     final ns = ref.read(navStateProvider);
     final pos = ns?.pos;
