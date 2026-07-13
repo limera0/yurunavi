@@ -980,13 +980,31 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
 
   // ── POI 탐색 (13-1) ────────────────────────────────────────────────────
 
-  void _showPoiExploreSheet() {
+  Future<void> _showPoiExploreSheet() async {
+    // 지도를 팬(이동)해서 다른 지역을 보고 있을 수 있으므로, GPS 위치 대신 현재
+    // 화면에 보이는 지도 영역의 중심을 검색 기준점으로 쓴다. 실패 시 GPS로 폴백.
+    LatLng? origin = _origin ?? _lastKnown;
+    final ctrl = _mlCtrl;
+    if (ctrl != null) {
+      try {
+        final bounds = await ctrl.getVisibleRegion();
+        if (!mounted) return;
+        origin = LatLng(
+          (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+          (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+        );
+      } catch (_) {
+        origin = _origin ?? _lastKnown;
+      }
+    }
+    if (!mounted) return;
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _PoiExploreSheet(
-        origin: _origin ?? _lastKnown,
+        origin: origin,
         onSelectDest: (dest) {
           Navigator.pop(ctx);
           _applyDestination(dest);
@@ -2097,7 +2115,9 @@ class _PoiExploreSheet extends ConsumerStatefulWidget {
 class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   final Set<PoiType> _selectedTypes = {};
   final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   bool _loading = false;
+  bool _searchFocused = false;
   List<Poi> _results = const [];
   // 마지막으로 네트워크 조회에 사용된 "유효 카테고리 집합" — 이게 바뀔 때만 재조회.
   Set<PoiType> _fetchedTypes = const {};
@@ -2106,13 +2126,22 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   void initState() {
     super.initState();
     _searchCtrl.addListener(_onSearchChanged);
+    _searchFocusNode.addListener(_onSearchFocusChanged);
   }
 
   @override
   void dispose() {
     _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
+    _searchFocusNode.removeListener(_onSearchFocusChanged);
+    _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  // 포커스 시 시트를 거의 전체화면으로 키워서(build()에서 사용) 키보드에
+  // 검색창/결과가 가려지지 않게 한다.
+  void _onSearchFocusChanged() {
+    setState(() => _searchFocused = _searchFocusNode.hasFocus);
   }
 
   /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 5종 전체, 둘 다 없으면 빈 집합.
@@ -2185,11 +2214,19 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    // 키보드가 뜨면 그 높이만큼 시트 전체를 밀어올려 하단(검색창)이 가려지지 않게 한다.
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
       child: Container(
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.75,
+          // 검색창에 포커스가 가면 거의 전체화면으로 확장 — 그 전엔 기존 75%.
+          maxHeight: _searchFocused
+              ? MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  16
+              : MediaQuery.of(context).size.height * 0.75,
         ),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -2230,6 +2267,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
               // ── 상호명 검색 ─────────────────────────────────────────────
               TextField(
                 controller: _searchCtrl,
+                focusNode: _searchFocusNode,
                 decoration: InputDecoration(
                   hintText: '상호명으로 검색 (예: 스타벅스)',
                   hintStyle: const TextStyle(fontSize: 13),
@@ -2289,6 +2327,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
