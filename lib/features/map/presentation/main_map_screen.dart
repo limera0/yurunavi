@@ -1359,8 +1359,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               _locLayerReady = false;
               await _initRouteLayer();
               // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
-              final poly =
-                  ref.read(mapInteractionProvider).routePolyline;
+              final mapState = ref.read(mapInteractionProvider);
+              final poly = mapState.routePolyline;
               if (poly.isNotEmpty) _updateRouteLayer(poly);
               // B2: 목적지/경유지 핀 이미지 1회 등록 (addSymbol 호출보다 먼저)
               final pinBytes = await rootBundle.load('assets/images/pointer_red.png');
@@ -1370,6 +1370,21 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
               await _mlCtrl!.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
               await _mlCtrl!.setSymbolIconAllowOverlap(true);
+              // 스타일 재주입으로 네이티브 어노테이션이 파괴됐으므로(위 주석 참조)
+              // 목적지/경유지 핀도 경로 폴리라인과 마찬가지로 현재 상태에서
+              // 다시 그려야 한다 — 안 그러면 _destMarker/_waypointMarkers를
+              // null로만 초기화하고 실제 심볼은 재생성하지 않아 핀이 사라진 채로
+              // 남는 버그가 생긴다. 위 addImage 호출 이후에 실행해야
+              // 'pointer_red'/_kWpIcon 이미지가 등록된 상태에서 addSymbol이 나간다.
+              final currentDest = mapState.destination;
+              if (currentDest != null) {
+                await _ensureDestMarker(currentDest,
+                    name: mapState.destinationName);
+              }
+              if (mapState.waypoints.isNotEmpty) {
+                await _syncWaypointMarkers(
+                    mapState.waypoints, mapState.waypointNames);
+              }
               // B1: 현위치 화살표 puck — 경로 레이어 위에 그려지도록 마지막에 추가
               await _initLocationLayer();
               await _ensureLocationMarker();
