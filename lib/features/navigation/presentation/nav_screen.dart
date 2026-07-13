@@ -90,6 +90,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   static const _navRouteSourceId = 'nav-route-source';
   static const _navRouteLayerId  = 'nav-route-layer';
+  static const _navRouteTraveledSourceId = 'nav-route-traveled-source';
+  static const _navRouteTraveledLayerId  = 'nav-route-traveled-layer';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
   // 13-1b: 줌 레벨 기준으로 항상 켜져 있는 POI 레이어 (도착배너용 _arrivalPois와
@@ -303,6 +305,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _cardRemainingM = prog.distToNextTurnM;
           _stepIdx = prog.activeStepIdx.clamp(0, _steps.length - 1);
         });
+        _updateRouteSplit(prog.snapIdx);
         _handleVoice(prog);
         if (prog.arrived && !_arrived) {
           _arrived = true;
@@ -455,6 +458,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
+          _mlCtrl?.setGeoJsonSource(
+              _navRouteTraveledSourceId, _buildRouteGeoJson(const []));
         }
       }
     } on RoutingException {
@@ -693,6 +698,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Future<void> _initRouteLayer() async {
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
+    // 지나온 구간(회색) — 색상 레이어보다 먼저 추가하되 순서 자체는 중요하지
+    // 않음(좌표가 겹치지 않음), 둘 다 라벨 아래에 배치되기만 하면 됨.
+    await ctrl.addGeoJsonSource(
+        _navRouteTraveledSourceId, _buildRouteGeoJson([]));
+    await ctrl.addLineLayer(
+      _navRouteTraveledSourceId,
+      _navRouteTraveledLayerId,
+      const ml.LineLayerProperties(
+        lineColor: '#9E9E9E',
+        lineWidth: 6.0,
+        lineCap: 'round',
+        lineJoin: 'round',
+      ),
+      belowLayerId: 'waterway-name',
+    );
     await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
     final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
     await ctrl.addLineLayer(
@@ -704,6 +724,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: 'waterway-name',
     );
   }
 
@@ -1058,6 +1079,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (_styleLoaded) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(route.points));
+        _mlCtrl?.setGeoJsonSource(
+            _navRouteTraveledSourceId, _buildRouteGeoJson(const []));
       }
       _recolorNavRouteLayer(idx); // 마지막 프리뷰 탭과 이미 일치할 수 있으나 방어적으로 재설정
       _vps?.speak('reroute');
@@ -1114,7 +1137,33 @@ class _NavScreenState extends ConsumerState<NavScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: 'waterway-name',
     );
+  }
+
+  /// GPS 진행률(snapIdx)에 맞춰 경로를 지나온 구간(회색)과 남은 구간(코스
+  /// 색상)으로 나눠 각자의 레이어에 반영한다. 코스 프리뷰 시트가 열려있는
+  /// 동안은 시트가 보여주는 프리뷰 경로를 덮어쓰지 않도록 건너뛴다
+  /// (_isManualMode/_showCourseSheet일 때 카메라 추적을 건너뛰는 기존
+  /// 패턴과 동일한 이유).
+  void _updateRouteSplit(int snapIdx) {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || !_styleLoaded || _showCourseSheet) return;
+    if (_routePoints.length < 2) return;
+    final idx = snapIdx.clamp(0, _routePoints.length - 1);
+    final pos = ref.read(navStateProvider)?.pos;
+    final traveledPts = [
+      ..._routePoints.sublist(0, idx + 1),
+      ?pos,
+    ];
+    final remainingPts = [
+      ?pos,
+      ..._routePoints.sublist(idx + 1),
+    ];
+    ctrl.setGeoJsonSource(_navRouteTraveledSourceId,
+        _buildRouteGeoJson(traveledPts.length >= 2 ? traveledPts : const []));
+    ctrl.setGeoJsonSource(_navRouteSourceId,
+        _buildRouteGeoJson(remainingPts.length >= 2 ? remainingPts : const []));
   }
 
   @override

@@ -3,12 +3,13 @@
 이 세션에서도 API 에러(ECONNRESET)로 재차 끊길 가능성 있어 여기 기록하며 진행.
 **16장 PNG 분석은 완료됨** (`ANALYSIS_progress.md` 참조).
 
-## ▶ 다음 세션 시작점 (2026-07-13 종료 시점)
+## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 7번 완료 시점)
 
-**바로 이어갈 작업**: 아래 "아직 안 건드린 나머지 항목" 6번부터 순서대로 — 6번(검색
-프리페치/속도, 별도 기능이라 스코프 판단 필요)이나 7번(경로선 레이어가 도로 라벨 가림 +
-지나온 경로 회색 표시, 슬라이드13) 중 사용자에게 확인 후 진행. 이 문서 하나만 읽으면
-전체 맥락 파악 가능 — `ANALYSIS_progress.md`(슬라이드 원본 분석)는 필요할 때만 참조.
+**바로 이어갈 작업**: 7번(경로선 레이어 도로 라벨 가림 + 지나온 경로 회색 표시,
+슬라이드13) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 6번(검색 프리페치/
+속도, 별도 기능이라 스코프 판단 필요)이나 8/9/10번 중 사용자에게 확인 후 진행. 이 문서
+하나만 읽으면 전체 맥락 파악 가능 — `ANALYSIS_progress.md`(슬라이드 원본 분석)는
+필요할 때만 참조.
 
 **놓치면 안 되는 것**:
 - 실기기 테스트 인프라가 이번에 갖춰짐 — westinx 서버에 Galaxy M32F가 상시 USB 연결되어
@@ -22,9 +23,9 @@
   섹션 참조).
 - 2번(Y자 삼거리 좌회전 오안내)은 사용자가 명시적으로 보류 결정함 — 먼저 꺼내지 말 것.
 - 유턴/스위치백 costing 튜닝(슬라이드11)도 명시적으로 미룸 — 먼저 꺼내지 말 것.
-- `main_map_screen.dart`는 `dart format` 기준과 스타일이 어긋나 있는 상태(포맷팅 부채) —
-  이 파일 편집 시 절대 파일 전체에 `dart format` 돌리지 말 것(무관한 대량 diff 발생
-  사고 이미 한 번 있었음, 수동으로 변경분만 정리할 것).
+- `main_map_screen.dart`, `nav_screen.dart` 둘 다 `dart format` 기준과 스타일이 어긋나
+  있는 상태(포맷팅 부채) — 이 파일들 편집 시 절대 파일 전체에 `dart format` 돌리지 말 것
+  (무관한 대량 diff 발생 사고 이미 한 번 있었음, 수동으로 변경분만 정리할 것).
 
 ## 완료된 작업
 
@@ -278,12 +279,58 @@ your Engine" 슬라이드 버튼)이 `dismissThresholds: 0.75`를 `Dismissible`�
 - "로딩 속도 느림, 백그라운드 프리페치 요청"은 손 안 댐 — 별도 기능 추가(스코프 더 큼),
   아래 미착수 항목에 남겨둠.
 
+## 완료: 7. 경로선 레이어가 도로 라벨을 가림 + 지나온 경로 회색 표시 (슬라이드13)
+
+`nav_screen.dart`의 route `addLineLayer` 호출들이 `belowLayerId` 없이 항상 레이어 스택
+맨 위에 추가돼 스타일(`osm_liberty_yurunavi.json`)의 모든 도로명/POI/지명 라벨을 덮고
+있었음(repo 전체에 `addLayerBelow`/`belowLayerId` 사용례가 이번 수정 전까지 0건이었음).
+지나온/남은 구간 구분 로직도 아예 없어서 경로 전체가 항상 단일 코스 색으로만 그려졌음.
+
+**수정** (`lib/features/navigation/presentation/nav_screen.dart`, 전부 이 파일 안에서
+완결 — `main_map_screen.dart`엔 동일한 `belowLayerId` 부재 버그가 남아있으나 이번
+스코프 밖, 아래 "남은 이슈" 참조):
+- `_navRouteTraveledSourceId`/`_navRouteTraveledLayerId` 신규 추가 — 지나온 구간 전용
+  회색(`#9E9E9E`, `main_map_screen.dart`의 미선택 코스와 동일 색) 레이어.
+- `_initRouteLayer()`/`_recolorNavRouteLayer()`의 `addLineLayer` 호출 전부에
+  `belowLayerId: 'waterway-name'` 추가 — 스타일 layers 배열에서 첫 symbol(라벨) 레이어가
+  `waterway-name`(index 100/130)이라, 이 아래에 넣으면 모든 폴리곤/라인 레이어(도로,
+  건물, 물) 위 + 모든 텍스트 레이어 아래로 정확히 배치됨. `removeLayer`+재추가하는
+  recolor 경로에서도 유지되도록 처리(안 하면 코스 재선택 시마다 버그 재발).
+- 신규 메서드 `_updateRouteSplit(int snapIdx)` — `route_progress_provider.dart`가 이미
+  노출하던 `RouteProgress.snapIdx`(GPS로 갱신되는 폴리라인 세그먼트 인덱스, 단조 증가)를
+  이용해 매 progress 업데이트(`_progressSub` 리스너)마다 `_routePoints`를 현재 위치
+  기준 지나온/남은 두 구간으로 나눠 각자의 소스에 반영. 두 구간 모두 현재 GPS 위치를
+  경계점으로 공유시켜 시각적 gap 없이 이어지도록 함. `_showCourseSheet`(코스 프리뷰
+  시트가 열려있는 동안)는 갱신을 건너뛰어 프리뷰 경로를 덮어쓰지 않음(카메라 추적을
+  건너뛰는 기존 패턴과 동일 이유).
+- 코스 확정(`_onCourseSheetStart`)과 재탐색(`_reroute`) — 둘 다 활성 경로 자체가
+  바뀌는 시점이므로 이전 경로의 회색 지나온 구간이 새 경로에 잘못 남지 않도록 traveled
+  레이어를 명시적으로 빈 값으로 초기화. 코스 시트 취소(`_onCourseSheetClose`, 경로
+  자체는 안 바뀜)는 의도적으로 손대지 않음 — 다음 GPS tick에서 자연히 정정됨.
+- code-auditor PASS — 슬라이싱 인덱스 산수(단조성, 경계값 idx=0/length-1/length==2),
+  `pos==null` 방어 분기, `_showCourseSheet` 가드, `belowLayerId` 일관성을 전부 직접
+  코드 추적으로 검증받음. 감사 중 발견된 부수 이슈(재탐색 경로에도 동일 traveled 초기화
+  필요) 1건은 감사 후 직접 반영.
+- `flutter analyze` 0 issues, `flutter test` 97/97, `flutter build apk --debug
+  --dart-define-from-file=env.json` 빌드 성공.
+- **⚠️ 미확인 상태로 남은 것**: MapLibre 레이어 z-order/GeoJSON 소스 갱신은 정적
+  코드로는 완전히 검증했지만 실제 렌더링 결과(라벨이 실제로 위에 보이는지, 회색 구간이
+  주행 중 매끄럽게 따라오는지)는 headless 서버라 실기기 확인 못함. **다음 라이딩에서
+  확인 필요.**
+
+**남은 이슈(이번엔 손 안 댐)**: `main_map_screen.dart`(코스 선택 전 지도 화면)의 경로
+프리뷰 레이어도 동일한 `belowLayerId` 부재 버그를 갖고 있음 — 같은 원인, 같은 수정으로
+해결 가능하지만 이번 실주행 피드백(슬라이드13, 내비 화면 한정) 스코프 밖이라 남겨둠.
+다음에 일관성 정리 세션에서 처리하거나, 사용자가 실주행 재확인 시 코스 선택 화면에서도
+동일 증상을 보고하면 우선순위 올릴 것.
+
 ## 아직 안 건드린 나머지 항목 (우선순위 순, HANDOFF_0712_ridefeedback2.md §3 기반)
 6. 검색 로딩 속도 느림, 백그라운드 프리페치 요청 (슬라이드6, 5번에서 분리)
-7. 경로선 레이어가 도로 라벨을 가림, 지나온 경로 회색 표시 요청 (슬라이드13)
 8. 여러 UX 개선 요청(POI 프리로딩, 점 아이콘/터치, 목적지 확인 카드 등, 슬라이드1~6)
 9. **신규**: "Start your Engine" 슬라이드 버튼이 화면 끝까지 밀어야 완료됨 — 트랙
    디자인 안에서 끝나도록 UX 정리 필요 (이번 세션 실기기 검증 중 발견)
+10. **신규**: `main_map_screen.dart` 경로 프리뷰 레이어도 도로 라벨을 가리는 동일 버그
+    (위 7번 참조, 스코프상 이번엔 제외)
 
 ## 명시적으로 미룬 것
 - **유턴/스위치백 경로 costing 튜닝(슬라이드11)** — 사용자가 "미루고 다른 버그부터"라고
