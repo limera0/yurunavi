@@ -80,6 +80,7 @@
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2부터 진행 |
+| 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | TODO — 2026-07-13 발견 계기, 배포 전 필수 |
 
 ## 항목별 상세
 
@@ -406,9 +407,46 @@ MapLibre CircleLayer 렌더링)은 재사용 가능성 높음 — 데이터 소�
   연발할 수 있었던 문제 → 0.3 히스테리시스 추가, (3) 디바운스 판정 전에 매 GPS 틱마다
   불필요한 플랫폼채널 호출(`getVisibleRegion`)이 나가던 비효율 → 순서 재배치.
 - `flutter analyze` 0 issues, `flutter test` 96/96, debug APK 빌드 성공.
-- **⚠️ 여전히 실기기 육안 확인 못함**(헤드리스 서버) — 다음에 `adb install` 후 줌 레벨별로
-  카테고리가 순서대로 나타나는지, 10개 컷이 실제로 걸리는지, 홈/내비 화면 둘 다 확인 필요.
-- 다음 세션: 13-2(설정: 약관/오픈소스 라이선스 화면)부터 이어가면 됨.
+- 사용자가 실제로 라이딩 검증을 나갔다 와서 15~16페이지짜리 주석 스크린샷 피드백을 줬다.
+  최초엔 PDF로 받았으나 **PDF를 열려고 하면 세션이 죽는 문제가 확인됨**(API ECONNRESET) —
+  사용자가 대신 PNG 16장(`loop/feedback/260712_testDriveFeedback_1~16.PNG`)으로 재전달, PDF는
+  이제 사용 안 함. PNG 분석도 9번째 이미지에서 세션이 다시 끊겨 **16장 중 9장만 분석 완료**,
+  나머지는 다음 세션에서 이어감. 상세 인수인계·분석 내용은
+  `loop/HANDOFF_0712_ridefeedback2.md`(최신, 이 문서가 우선) +
+  `loop/feedback/ANALYSIS_progress.md`(슬라이드별 분석 원본) 참조 — **다음 세션은 13-2가
+  아니라 이 피드백 분석 이어서 완료하는 것부터 시작할 것**. 지금까지 나온 것 중 심각한 버그로
+  보이는 것: 내비 화면에 POI 안 뜸, 카테고리 필터링이 마트/식당에서도 주유소만 반환, 카페
+  칩에 비카페 결과 혼입, 카테고리 칩셋이 신/구 버전 뒤섞여 등장. 반대로 코너 진입 음성
+  타이밍은 "완벽히 해결됨"으로 확인됨(CORNER-VOICE-50M 항목 사실상 해소 가능성).
+- ~~다음 세션: 13-2(설정: 약관/오픈소스 라이선스 화면)부터 이어가면 됨.~~ → 위 피드백 분석이
+  선행되어야 함.
+
+### 14. Crashlytics fatal 오분류 전수 감사 — TODO (배포 전 필수)
+
+- **계기 (2026-07-13)**: Firebase Crashlytics가 1.0.1(2)에서 157건의 "치명적(Fatal)" 이벤트를
+  경고 메일로 보내왔으나, 실제로는 앱이 죽은 게 아니라 `lib/core/crash_reporting.dart:18`의
+  `FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;` 배선 때문에
+  **Flutter 프레임워크의 non-fatal debug 경고까지 전부 fatal로 기록**되고 있었던 것으로 확인됨.
+  이번 건의 구체적 원인(지도 탭 확인 바텀시트에서 `Container`+`BoxDecoration`이 `ListTile`과
+  Material 사이에 껴서 "ink splash 안 보일 수 있음" 경고 유발)은
+  `lib/features/map/presentation/main_map_screen.dart`에서 `Material`로 감싸도록 수정해 해소함
+  (커밋 `8e56b40`).
+- **왜 배포 전에 반드시 정리해야 하는가**: 지금은 개발자 1인이 디버그 APK로 단일 기기 테스트 중이라
+  발견·수정이 쉬웠지만, 배포 후 사용자가 여러 명이 되면 같은 종류의 프레임워크 경고가 여러 화면·
+  여러 기기에서 동시다발적으로 fatal로 잡혀 Crashlytics 대시보드의 크래시프리율 지표가 실제보다
+  훨씬 나빠 보이고, 진짜 치명적 버그가 노이즈에 묻혀 놓칠 위험이 있음.
+- **배포 전 해야 할 일**:
+  1. `flutter build apk --release`(assert가 스트립되는 빌드)에서도 이런 프레임워크 debug 경고가
+     여전히 `FlutterError.onError`를 타는지, 아니면 release에서는 애초에 발생 자체가 없는지 확인.
+     (assert 스트립 여부에 따라 이 항목의 실사용자 영향도가 크게 달라짐 — 확인 전엔 추측 금지.)
+  2. 위 확인 결과에 따라 `FlutterError.onError`를 `recordFlutterFatalError`(현재, Firebase
+     공식 권장값) 그대로 둘지, 실제로 앱을 죽이지 않는 프레임워크 경고까지 fatal로 잡히는 걸
+     막기 위해 `recordFlutterError`(non-fatal)로 완화할지 결정.
+  3. 오늘 고친 것과 같은 유형(색깔 있는 Container/DecoratedBox가 Material과 ListTile 사이에
+     끼는 패턴)이 다른 화면에도 남아있는지 전수 점검 — `main_map_screen.dart`/
+     `settings_screen.dart` 외 화면 포함.
+  4. 릴리스 빌드로 한 번 실사용 시나리오를 돌려보고 Crashlytics에 fatal 이벤트가 안 뜨는지
+     확인 (10번 "실제 release build 검증" 항목과 묶어서 진행 가능).
 
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
