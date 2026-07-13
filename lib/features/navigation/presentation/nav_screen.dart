@@ -165,6 +165,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   // 이탈 재탐색
   List<LatLng> _routePoints = []; // widget.routePolyline 의 가변 복사본
+  // 재탐색/코스 재선택으로 _routePoints가 통째로 바뀌기 직전까지 지나온
+  // 구간을 흡수해 누적하는 "그 날의 투어링" 전체 궤적. 투어링은 출발부터
+  // 목적지 도착까지 이어지는 하나의 기록이라 경로가 바뀌어도 끊기면 안 됨
+  // (사용자 피드백, BUGFIX_progress.md 7번). _updateRouteSplit이 매 tick
+  // 이 값 + 현재 활성 경로의 지나온 구간을 합쳐 회색 레이어에 반영한다.
+  List<LatLng> _traveledTrail = [];
   bool _isRerouting = false;
   Timer? _offRouteDebounce;
   static const _kDebounceSec = 3;  // 연속 이탈 확인 시간 (초)
@@ -446,6 +452,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (mounted && routes.isNotEmpty) {
         final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
         final newPoints = routes[selIdx].points;
+        _absorbTraveledIntoTrail(); // 경로 교체 전 지나온 구간을 궤적에 흡수
         setState(() {
           _routePoints = newPoints;
           _durationMin = routes[selIdx].durationMin;
@@ -458,8 +465,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (_styleLoaded) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
-          _mlCtrl?.setGeoJsonSource(
-              _navRouteTraveledSourceId, _buildRouteGeoJson(const []));
         }
       }
     } on RoutingException {
@@ -1070,6 +1075,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           .selectedRouteIdx
           .clamp(0, _fetchedRoutes.length - 1);
       final route = _fetchedRoutes[idx];
+      _absorbTraveledIntoTrail(); // 경로 교체 전 지나온 구간을 궤적에 흡수
       setState(() {
         _routePoints = route.points;
         _durationMin = route.durationMin;
@@ -1079,8 +1085,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (_styleLoaded) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(route.points));
-        _mlCtrl?.setGeoJsonSource(
-            _navRouteTraveledSourceId, _buildRouteGeoJson(const []));
       }
       _recolorNavRouteLayer(idx); // 마지막 프리뷰 탭과 이미 일치할 수 있으나 방어적으로 재설정
       _vps?.speak('reroute');
@@ -1141,11 +1145,23 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
   }
 
+  /// 재탐색/코스 재선택으로 _routePoints가 통째로 교체되기 직전에 호출해,
+  /// 그때까지 지나온 구간을 _traveledTrail에 흡수한다. 그 날의 투어링
+  /// 궤적은 경로가 바뀌어도 끊기지 않고 목적지 도착까지 이어져야 한다.
+  void _absorbTraveledIntoTrail() {
+    if (_routePoints.length < 2) return;
+    final snapIdx = ref.read(routeProgressProvider)?.snapIdx ?? 0;
+    final idx = snapIdx.clamp(0, _routePoints.length - 1);
+    _traveledTrail = [..._traveledTrail, ..._routePoints.sublist(0, idx + 1)];
+  }
+
   /// GPS 진행률(snapIdx)에 맞춰 경로를 지나온 구간(회색)과 남은 구간(코스
-  /// 색상)으로 나눠 각자의 레이어에 반영한다. 코스 프리뷰 시트가 열려있는
-  /// 동안은 시트가 보여주는 프리뷰 경로를 덮어쓰지 않도록 건너뛴다
-  /// (_isManualMode/_showCourseSheet일 때 카메라 추적을 건너뛰는 기존
-  /// 패턴과 동일한 이유).
+  /// 색상)으로 나눠 각자의 레이어에 반영한다. 지나온 구간은 재탐색 이전
+  /// 경로들에서 흡수된 _traveledTrail을 앞에 이어붙여, 경로가 바뀌어도
+  /// 그 날의 투어링 궤적 전체가 끊기지 않도록 한다. 코스 프리뷰 시트가
+  /// 열려있는 동안은 시트가 보여주는 프리뷰 경로를 덮어쓰지 않도록
+  /// 건너뛴다(_isManualMode/_showCourseSheet일 때 카메라 추적을 건너뛰는
+  /// 기존 패턴과 동일한 이유).
   void _updateRouteSplit(int snapIdx) {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded || _showCourseSheet) return;
@@ -1153,6 +1169,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final idx = snapIdx.clamp(0, _routePoints.length - 1);
     final pos = ref.read(navStateProvider)?.pos;
     final traveledPts = [
+      ..._traveledTrail,
       ..._routePoints.sublist(0, idx + 1),
       ?pos,
     ];

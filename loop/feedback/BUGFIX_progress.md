@@ -303,20 +303,39 @@ your Engine" 슬라이드 버튼)이 `dismissThresholds: 0.75`를 `Dismissible`�
   경계점으로 공유시켜 시각적 gap 없이 이어지도록 함. `_showCourseSheet`(코스 프리뷰
   시트가 열려있는 동안)는 갱신을 건너뛰어 프리뷰 경로를 덮어쓰지 않음(카메라 추적을
   건너뛰는 기존 패턴과 동일 이유).
-- 코스 확정(`_onCourseSheetStart`)과 재탐색(`_reroute`) — 둘 다 활성 경로 자체가
-  바뀌는 시점이므로 이전 경로의 회색 지나온 구간이 새 경로에 잘못 남지 않도록 traveled
-  레이어를 명시적으로 빈 값으로 초기화. 코스 시트 취소(`_onCourseSheetClose`, 경로
-  자체는 안 바뀜)는 의도적으로 손대지 않음 — 다음 GPS tick에서 자연히 정정됨.
-- code-auditor PASS — 슬라이싱 인덱스 산수(단조성, 경계값 idx=0/length-1/length==2),
-  `pos==null` 방어 분기, `_showCourseSheet` 가드, `belowLayerId` 일관성을 전부 직접
-  코드 추적으로 검증받음. 감사 중 발견된 부수 이슈(재탐색 경로에도 동일 traveled 초기화
-  필요) 1건은 감사 후 직접 반영.
+- code-auditor PASS(1차) — 슬라이싱 인덱스 산수(단조성, 경계값 idx=0/length-1/
+  length==2), `pos==null` 방어 분기, `_showCourseSheet` 가드, `belowLayerId` 일관성을
+  전부 직접 코드 추적으로 검증받음.
 - `flutter analyze` 0 issues, `flutter test` 97/97, `flutter build apk --debug
   --dart-define-from-file=env.json` 빌드 성공.
-- **⚠️ 미확인 상태로 남은 것**: MapLibre 레이어 z-order/GeoJSON 소스 갱신은 정적
-  코드로는 완전히 검증했지만 실제 렌더링 결과(라벨이 실제로 위에 보이는지, 회색 구간이
-  주행 중 매끄럽게 따라오는지)는 headless 서버라 실기기 확인 못함. **다음 라이딩에서
-  확인 필요.**
+
+**후속 수정(사용자 피드백 반영, 1차 구현 직후)**: 1차 구현은 코스 확정(`_onCourseSheetStart`)
+/재탐색(`_reroute`) 시 활성 경로가 통째로 바뀌므로 이전 경로의 회색 구간을 빈 값으로
+리셋했었음. 사용자가 이를 지적: "투어링은 집에서부터 목적지 도착까지 이어지는 하루치
+기록이고, 재탐색은 좋은 길 따라 마음내키는 대로 달리다 보면 빈번하게 발생하는 것 —
+재탐색이 일어나도 그 날의 투어링 궤적이 끊기면 안 됨"(주행 기록 히스토리 기능과도 맞닿는
+의미). 단순히 리셋 줄만 지우는 걸로는 해결 안 됨 — 지나온 구간 계산 자체가 활성 경로
+폴리라인+`snapIdx`에서만 나오는 구조라 경로가 바뀌면 계산 기반 자체가 사라지기 때문.
+- 새 인스턴스 필드 `_traveledTrail`(누적 궤적)과 새 메서드 `_absorbTraveledIntoTrail()`
+  추가 — 경로가 통째로 교체되기 **직전**(`_routePoints` 재할당 전, `setState`보다 먼저)에
+  그때까지 지나온 구간을 `_traveledTrail`에 흡수. `_updateRouteSplit`의 회색 레이어는
+  이제 `_traveledTrail + 현재 활성 경로의 지나온 구간 + 현재 GPS 위치`로 구성 — 재탐색/
+  코스 재선택이 몇 번 일어나도 궤적이 계속 이어짐. 코스 프리뷰(`_onCourseCardTap`, 아직
+  미확정)는 흡수 대상이 아님 — 그대로 미터치.
+- code-auditor PASS(2차) — 흡수 호출이 `_routePoints` 재할당보다 항상 먼저 실행되는지
+  (안 그러면 이미 바뀐 경로에서 잘못 흡수함), `_absorbTraveledIntoTrail()`이 읽는
+  `routeProgressProvider`의 `snapIdx`가 `setRoute()`의 리셋(post-frame으로 지연)보다
+  먼저 읽혀 안전한지, 재탐색 반복 시 좌표 중복/역행 없이 이어지는지 코드 추적으로 검증.
+  재탐색 접합부에서 이전 경로 마지막 스냅 지점과 새 경로 시작점 사이에 최대 한 세그먼트
+  길이 정도의 미세한 시각적 이음새(gap/kink)가 있을 수 있음을 확인했으나(재탐색 시
+  origin을 heading 방향으로 40m 오프셋시키는 기존 설계의 부수 효과, 이번 diff로 생긴
+  회귀 아님), 안전/정확성 문제는 아니라 blocking 아님.
+- `flutter analyze` 0 issues, `flutter test` 97/97, `flutter build apk --debug
+  --dart-define-from-file=env.json` 빌드 성공.
+- **⚠️ 미확인 상태로 남은 것**: MapLibre 레이어 z-order/GeoJSON 소스 갱신, 그리고 이번
+  누적 궤적 로직은 정적 코드로는 완전히 검증했지만 실제 렌더링 결과(라벨이 실제로 위에
+  보이는지, 회색 궤적이 재탐색을 몇 번 거쳐도 매끄럽게 이어지는지)는 headless 서버라
+  실기기 확인 못함. **다음 라이딩에서 확인 필요.**
 
 **남은 이슈(이번엔 손 안 댐)**: `main_map_screen.dart`(코스 선택 전 지도 화면)의 경로
 프리뷰 레이어도 동일한 `belowLayerId` 부재 버그를 갖고 있음 — 같은 원인, 같은 수정으로
