@@ -3,14 +3,14 @@
 이 세션에서도 API 에러(ECONNRESET)로 재차 끊길 가능성 있어 여기 기록하며 진행.
 **16장 PNG 분석은 완료됨** (`ANALYSIS_progress.md` 참조).
 
-## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 10번 완료 시점)
+## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 9번 완료 시점)
 
-**바로 이어갈 작업**: 7번(경로선 레이어 도로 라벨 가림 + 지나온 경로 회색 표시,
-슬라이드13)과 10번(코스선택 화면 `main_map_screen.dart`의 동일 버그, 커밋
-`44a29f4`) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 6번(검색 프리페치/
-속도, 별도 기능이라 스코프 판단 필요)이나 8/9번 중 사용자에게 확인 후 진행. 이 문서
-하나만 읽으면 전체 맥락 파악 가능 — `ANALYSIS_progress.md`(슬라이드 원본 분석)는
-필요할 때만 참조.
+**바로 이어갈 작업**: 7번(경로선 레이어 라벨 가림), 10번(main_map_screen.dart 동일
+버그, 커밋 `44a29f4`), 9번(Start your Engine 슬라이드 버튼 드래그 임계값 버그, 커밋
+`34fc4fd`) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 6번(검색 프리페치/
+속도, 별도 기능이라 스코프 판단 필요)이나 8번(UX 개선 묶음, 아직 세부 미정리) 중
+사용자에게 확인 후 진행. 이 문서 하나만 읽으면 전체 맥락 파악 가능 —
+`ANALYSIS_progress.md`(슬라이드 원본 분석)는 필요할 때만 참조.
 
 **놓치면 안 되는 것**:
 - 실기기 테스트 인프라가 이번에 갖춰짐 — westinx 서버에 Galaxy M32F가 상시 USB 연결되어
@@ -359,11 +359,42 @@ your Engine" 슬라이드 버튼)이 `dismissThresholds: 0.75`를 `Dismissible`�
 - **⚠️ 미확인 상태로 남은 것**: 실제 렌더링 결과(코스 선택 화면에서 라벨이 실제로 경로선
   위에 보이는지)는 headless 서버라 실기기 확인 못함. **다음 실기기 접근 시 확인 필요.**
 
+## 완료: 9. Start your Engine 슬라이드 버튼 드래그 임계값 버그
+
+**원인**: 서드파티 `slider_button` 패키지(v3.1.0)가 내부 `Dismissible` 자식 폭을
+`widget.width - (buttonWidth ?? height)`로 계산하는데, 우리 코드가 `width:
+double.infinity`를 넘기고 `buttonWidth`는 미설정이라 `infinity - height`가 여전히
+`infinity`로 남음 → Flutter의 `BoxConstraints.enforce` 클램핑이 이 안쪽 Dismissible을
+"트랙 폭 - 버튼 폭"이 아니라 트랙 전체 폭으로 그대로 resolve해버려서, `dismissThresholds:
+0.75`(자기 자신 렌더 폭의 75%)가 사실상 화면 거의 끝까지 드래그해야 충족되는 값이 됨.
+패키지는 pub-cache 밖(item 3 flutter_tts와 동일한 제약)이라 패치 불가 — 클라이언트
+쪽에서 `width`를 유한값으로 넘기는 방식으로 우회 수정.
+
+**수정** (`lib/core/widgets/slider_start_button.dart`, 커밋 `34fc4fd`):
+- `SliderButton` 생성을 `LayoutBuilder`로 감싸 실제 바운딩된 `constraints.maxWidth`를
+  획득, `width: double.infinity` → `width: constraints.maxWidth`로 교체(바깥 트랙의
+  시각적 전체폭 모양은 기존과 동일하게 유지 — 예전에도 `double.infinity`가 결국 같은
+  바운딩 폭으로 클램핑됐던 것과 같은 값이라 외형 변화 없음, 안쪽 Dismissible 계산만
+  고쳐짐).
+- 기존 `buttonSize: 52`와 맞춰 `buttonWidth: 52` 추가 — 패키지 자체 문서가 "wide,
+  non-squared 버튼엔 buttonWidth를 쓰라"고 명시한 대로, 드래그 완료 영역이 실제 버튼
+  폭만큼 줄어들도록 정렬.
+- 신규 테스트 `test/core/widgets/slider_start_button_test.dart` 추가 — `find.byType
+  (SliderButton)`로 생성된 위젯을 찾아 `width`가 유한값인지(다시 `double.infinity`로
+  회귀하지 않는지) 검증. 드래그 제스처 자체는 시뮬레이션 안 함(스코프 밖).
+- code-auditor PASS — 패키지 소스 직접 재확인으로 constraint 클램핑 추론 검증,
+  `course_sheet.dart`/`main_map_screen.dart`/`nav_screen.dart` 호출 체인 전부 확인해
+  `LayoutBuilder`가 unbounded width를 받을 위험 없음(모두 `Positioned`+`SafeArea`+
+  `Column` 체인, `Row`/가로 `ListView` 없음) 확인, `buttonWidth: 52` 값이 실제 폰 폭
+  기준 안전한 양수 범위임을 산수로 검증.
+- `flutter analyze` 0 issues, `flutter test` 98/98, `flutter build apk --debug
+  --dart-define-from-file=env.json` 빌드 성공.
+- **⚠️ 미확인 상태로 남은 것**: 실제 손가락 드래그 완료 체감(트랙 안에서 자연스럽게
+  끝나는지)은 headless 서버라 실기기 확인 못함. **다음 실기기 접근 시 확인 필요.**
+
 ## 아직 안 건드린 나머지 항목 (우선순위 순, HANDOFF_0712_ridefeedback2.md §3 기반)
 6. 검색 로딩 속도 느림, 백그라운드 프리페치 요청 (슬라이드6, 5번에서 분리)
 8. 여러 UX 개선 요청(POI 프리로딩, 점 아이콘/터치, 목적지 확인 카드 등, 슬라이드1~6)
-9. "Start your Engine" 슬라이드 버튼이 화면 끝까지 밀어야 완료됨 — 트랙
-   디자인 안에서 끝나도록 UX 정리 필요 (실기기 검증 중 발견, 아직 미착수)
 
 ## 명시적으로 미룬 것
 - **유턴/스위치백 경로 costing 튜닝(슬라이드11)** — 사용자가 "미루고 다른 버그부터"라고
