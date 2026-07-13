@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_providers.dart';
 import '../../../models/map_language.dart';
 import '../../profile/presentation/profile_screen.dart';
+import 'terms_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -44,7 +45,24 @@ class SettingsScreen extends ConsumerWidget {
           // TODO Phase 2: 지도 다운로드
 
           const _SectionHeader(title: '기타'),
-          // TODO Phase 2: 약관 / 오픈소스 라이선스
+          ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: const Text('이용약관'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TermsScreen()),
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.code),
+            title: const Text('오픈소스 라이선스'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showLicensePage(
+              context: context,
+              applicationName: '유루나비',
+            ),
+          ),
         ],
       ),
     );
