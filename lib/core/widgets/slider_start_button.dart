@@ -23,36 +23,41 @@ class SliderStartButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      child: SliderButton(
-        action: () async {
-          await _triggerHaptic();
-          onSlideComplete();
-          return true;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SliderButton(
+            action: () async {
+              await _triggerHaptic();
+              onSlideComplete();
+              return true;
+            },
+            label: Text(
+              'Start your Engine',
+              style: AppTextStyles.labelLG.copyWith(
+                color: AppColors.secondary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
+            icon: Container(
+              decoration: const BoxDecoration(
+                color: AppColors.primary,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.double_arrow_rounded, color: Colors.white, size: 26),
+            ),
+            width: constraints.maxWidth,
+            buttonWidth: 52,
+            radius: 14,
+            buttonColor: AppColors.primary,
+            backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+            highlightedColor: AppColors.primary.withValues(alpha: 0.25),
+            baseColor: AppColors.primary,
+            buttonSize: 52,
+            shimmer: true,
+          );
         },
-        label: Text(
-          'Start your Engine',
-          style: AppTextStyles.labelLG.copyWith(
-            color: AppColors.secondary,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.6,
-          ),
-        ),
-        icon: Container(
-          decoration: const BoxDecoration(
-            color: AppColors.primary,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.double_arrow_rounded, color: Colors.white, size: 26),
-        ),
-        width: double.infinity,
-        radius: 14,
-        buttonColor: AppColors.primary,
-        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-        highlightedColor: AppColors.primary.withValues(alpha: 0.25),
-        baseColor: AppColors.primary,
-        buttonSize: 52,
-        shimmer: true,
       ),
     );
   }
