@@ -476,8 +476,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   /// 현재 줌 레벨에서 노출 대상인 카테고리를 계산하고, 필요 시(카테고리 변경 시
   /// 즉시 / 그 외엔 200m 이동 또는 15초 경과 디바운스) 뷰포트 중심 기준으로
-  /// POI를 재조회해 ambient 레이어를 갱신한다. 화면에 실제 보이는 것만, 가까운
-  /// 순 최대 10개로 제한한다.
+  /// POI를 재조회해 ambient 레이어를 갱신한다. 화면에 실제 보이는 것만, 카테고리
+  /// 우선순위(주유소>편의점>카페>대형마트>식당)와 화면 분포를 함께 고려해 최대
+  /// 20개로 제한한다.
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
@@ -553,10 +554,16 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
             p.location.latitude <= bounds.northeast.latitude &&
             p.location.longitude >= bounds.southwest.longitude &&
             p.location.longitude <= bounds.northeast.longitude)
-        .toList()
-      ..sort((a, b) => PoiService.haversineMeters(center, a.location)
-          .compareTo(PoiService.haversineMeters(center, b.location)));
-    final limited = visible.take(10).toList();
+        .toList();
+    final limited = PoiService.selectForAmbientDisplay(
+      candidates: visible,
+      south: bounds.southwest.latitude,
+      north: bounds.northeast.latitude,
+      west: bounds.southwest.longitude,
+      east: bounds.northeast.longitude,
+      center: center,
+      maxCount: 20,
+    );
 
     _ambientPois = limited;
     _updateAmbientPoiLayer(limited);
@@ -2228,7 +2235,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
 
   void _onSearchChanged() {
     setState(() {});
-    ref.read(poiListProvider.notifier).set(_visibleResults);
+    ref.read(poiListProvider.notifier).set(_mapPinPois);
   }
 
   Future<void> _fetchAll() async {
@@ -2246,14 +2253,14 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       _allPois = pois;
       _loading = false;
     });
-    ref.read(poiListProvider.notifier).set(_visibleResults);
+    ref.read(poiListProvider.notifier).set(_mapPinPois);
   }
 
   void _toggleType(PoiType type) {
     setState(() {
       if (!_selectedTypes.add(type)) _selectedTypes.remove(type);
     });
-    ref.read(poiListProvider.notifier).set(_visibleResults);
+    ref.read(poiListProvider.notifier).set(_mapPinPois);
   }
 
   /// 검색어(있으면)로 클라이언트 필터링한 뒤 거리순으로 보여줄 목록.
@@ -2262,6 +2269,38 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     final query = _searchCtrl.text.trim().toLowerCase();
     if (query.isEmpty) return byType;
     return byType.where((p) => p.name.toLowerCase().contains(query)).toList();
+  }
+
+  /// poiListProvider(지도 위 핀)에 넘길 때만 우선순위+분포 기반으로 20개 캡 — 번화가에서
+  /// 스크롤 리스트는 그대로 두고 지도 핀만 "수십 개가 한꺼번에 표시" 되던 버그 수정.
+  /// 시트 열릴 때 이미 구한 뷰포트 bounds가 없으므로(검색 시트는 리스트 전용, 지도
+  /// 뷰포트 개념이 없음) origin을 중심으로 한 정사각형 근사 bounds를 사용한다.
+  List<Poi> get _mapPinPois {
+    final results = _visibleResults;
+    final origin = widget.origin;
+    if (origin == null) {
+      // degenerate bounds(south==north)로 넘겨 selectForAmbientDisplay 자체의
+      // priorityIndex 가드(미매핑 타입 방어)를 그대로 재사용 — 별도 정렬 로직 중복 방지.
+      return PoiService.selectForAmbientDisplay(
+        candidates: results,
+        south: 0,
+        north: 0,
+        west: 0,
+        east: 0,
+        center: const LatLng(0, 0),
+        maxCount: 20,
+      );
+    }
+    const delta = 0.02; // ~2.2km, 그리드 분산용 근사치일 뿐 실제 필터링엔 영향 없음.
+    return PoiService.selectForAmbientDisplay(
+      candidates: results,
+      south: origin.latitude - delta,
+      north: origin.latitude + delta,
+      west: origin.longitude - delta,
+      east: origin.longitude + delta,
+      center: origin,
+      maxCount: 20,
+    );
   }
 
   String _formatDistance(double meters) {

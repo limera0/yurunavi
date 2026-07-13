@@ -51,6 +51,16 @@ class PoiService {
     'I207', 'I208', 'I209', 'I210', 'I211', 'I212',
   };
 
+  /// 카테고리 표시 우선순위: 주유소>편의점>카페>대형마트>식당 (요청 원문의 "전통시장"은
+  /// 이 API에 대응 카테고리가 없어 스코프 밖 — 식당을 최하위로 대체).
+  static const List<PoiType> displayPriority = [
+    PoiType.gasStation,
+    PoiType.convenienceStore,
+    PoiType.cafe,
+    PoiType.supermarket,
+    PoiType.restaurant,
+  ];
+
   // ── 공공데이터포털 API 헬퍼 ────────────────────────────────────
 
   /// LatLng 중심, 반경(m)에 해당하는 특정 타입들의 POI를 가져온다.
@@ -180,6 +190,82 @@ class PoiService {
   static double bearingDiff(double a, double b) {
     final diff = ((a - b).abs()) % 360;
     return diff > 180 ? 360 - diff : diff;
+  }
+
+  // ── 상시(ambient) 표시 선정 로직 ─────────────────────────────────
+
+  /// ambient POI 레이어(홈 지도 위 상시 점) 및 검색 시트의 지도 핀 레이어에서 공용으로
+  /// 쓰는 "화면에 보여줄 N개 고르기" 로직.
+  ///
+  /// 단순 거리순 정렬만 쓰면(과거 방식) 화면 중심 근처에 우연히 몰려 있는 후보가
+  /// 캡을 다 채워버려 사용자 눈엔 "랜덤하게" 보이고, 정작 화면 가장자리엔 아무 것도
+  /// 안 뜨는 문제가 있었다(실주행 피드백). 이를 뷰포트를 grid로 나눠 라운드로빈으로
+  /// 골고루 뽑는 방식으로 바꾸되, 각 grid cell 안에서는 카테고리 우선순위(주유소 >
+  /// 편의점 > 카페 > 대형마트 > 식당)를 최우선, 거리를 tie-break로 적용해 "우선순위가
+  /// 있어 보이면서도 화면 전체에 고르게 분포"하는 두 요구를 동시에 만족시킨다.
+  static List<Poi> selectForAmbientDisplay({
+    required List<Poi> candidates,
+    required double south,
+    required double north,
+    required double west,
+    required double east,
+    required LatLng center,
+    int maxCount = 20,
+    int gridSize = 4,
+  }) {
+    if (candidates.isEmpty) return const [];
+
+    int priorityIndex(Poi p) {
+      final idx = displayPriority.indexOf(p.type);
+      return idx < 0 ? displayPriority.length : idx;
+    }
+
+    int comparePriorityThenDistance(Poi a, Poi b) {
+      final pa = priorityIndex(a);
+      final pb = priorityIndex(b);
+      if (pa != pb) return pa.compareTo(pb);
+      return haversineMeters(center, a.location)
+          .compareTo(haversineMeters(center, b.location));
+    }
+
+    final latSpan = (north - south).abs();
+    final lonSpan = (east - west).abs();
+    if (latSpan <= 0 || lonSpan <= 0) {
+      final sorted = List<Poi>.from(candidates)
+        ..sort(comparePriorityThenDistance);
+      return sorted.take(maxCount).toList();
+    }
+
+    final cells = <int, List<Poi>>{};
+    for (final poi in candidates) {
+      final row = ((poi.location.latitude - south) / latSpan * gridSize)
+          .floor()
+          .clamp(0, gridSize - 1);
+      final col = ((poi.location.longitude - west) / lonSpan * gridSize)
+          .floor()
+          .clamp(0, gridSize - 1);
+      final key = row * gridSize + col;
+      (cells[key] ??= []).add(poi);
+    }
+    for (final cell in cells.values) {
+      cell.sort(comparePriorityThenDistance);
+    }
+
+    final result = <Poi>[];
+    var round = 0;
+    while (result.length < maxCount) {
+      var pickedAny = false;
+      for (final cell in cells.values) {
+        if (round >= cell.length) continue;
+        result.add(cell[round]);
+        pickedAny = true;
+        if (result.length >= maxCount) break;
+      }
+      if (!pickedAny) break;
+      round++;
+    }
+
+    return result.take(maxCount).toList();
   }
 
   // ── 오모테나시 스냅 로직 ───────────────────────────────────────
