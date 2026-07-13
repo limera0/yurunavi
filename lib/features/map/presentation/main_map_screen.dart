@@ -854,9 +854,19 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     final hasRoute = _showCourseSheet;
     final act = await _showTapConfirmSheet(tapped, poi, hasRoute);
     if (!mounted) return;
+    await _applyTapAction(act, tapped, origin, preResolvedName: poi?.name);
+  }
 
+  /// `_onMapTap`/`_handlePoiTap`가 확인시트에서 선택한 `_TapAction`을 실제로
+  /// 적용하는 공통 꼬리부분 — 목적지 설정 또는 경유지 추가.
+  Future<void> _applyTapAction(
+    _TapAction? act,
+    LatLng loc,
+    LatLng origin, {
+    String? preResolvedName,
+  }) async {
     if (act == _TapAction.waypoint) {
-      ref.read(mapInteractionProvider.notifier).addWaypoint(tapped);
+      ref.read(mapInteractionProvider.notifier).addWaypoint(loc);
       final dest = ref.read(mapInteractionProvider).destination;
       if (dest != null) {
         ref.read(mapInteractionProvider.notifier).setLoading(true);
@@ -873,10 +883,41 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     if (act != _TapAction.destination) return;
 
     setState(() {
-      _touchPoint = tapped;
-      _touchDistKm = _haversineKm(origin, tapped);
+      _touchPoint = loc;
+      _touchDistKm = _haversineKm(origin, loc);
     });
-    await _applyDestination(tapped, preResolved: poi?.name);
+    await _applyDestination(loc, preResolved: preResolvedName);
+  }
+
+  /// ambient/검색 POI 점 탭 또는 검색시트 리스트 탭 공통 처리 — 기존 지도 빈 곳 탭과
+  /// 동일한 확인시트(_showTapConfirmSheet)를 재사용해 "탭하면 바로 목적지로 잡힘" 문제를
+  /// 없앤다. 이미 Poi 객체로 이름/카테고리를 알고 있으므로 _resolveTappedPoi(리버스
+  /// 조회)는 생략.
+  Future<void> _handlePoiTap(Poi poi) async {
+    final origin = _origin ?? _lastKnown;
+    if (origin == null) {
+      // ambient POI 레이어는 GPS 확보 전(_maybeFetchAmbientPois가 카메라 뷰포트만으로도
+      // 동작)에도 뜰 수 있어 _onMapTap과 달리 이 가드가 실제로 도달 가능함 — 조용히
+      // 무시하지 않고 동일한 안내를 보여준다.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('GPS 위치를 기다리는 중입니다…'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final interaction = ref.read(mapInteractionProvider);
+    if (interaction.isLoading) return;
+
+    final hasRoute = _showCourseSheet;
+    final act = await _showTapConfirmSheet(
+      poi.location,
+      _TappedPoi(name: poi.name, category: poi.type.label),
+      hasRoute,
+    );
+    if (!mounted) return;
+    await _applyTapAction(act, poi.location, origin, preResolvedName: poi.name);
   }
 
   Future<_TapAction?> _showTapConfirmSheet(LatLng tapped, _TappedPoi? poi, bool hasRoute) {
@@ -1134,9 +1175,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       builder: (ctx) => _PoiExploreSheet(
         origin: origin,
         initialPois: initialPois,
-        onSelectDest: (dest) {
+        onSelectDest: (poi) {
           Navigator.pop(ctx);
-          _applyDestination(dest);
+          _handlePoiTap(poi);
         },
       ),
     ).whenComplete(() {
@@ -1324,7 +1365,29 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             // 기울기도 잠금 (2D 유지)
             tiltGesturesEnabled: false,
             compassEnabled: false,
-            onMapCreated: (c) => _mlCtrl = c,
+            onMapCreated: (c) {
+              _mlCtrl = c;
+              c.onFeatureTapped.add((point, coords, id, layerId, annotation) {
+                if (layerId != _ambientPoiLayerId && layerId != _poiLayerId) {
+                  return;
+                }
+                final tapLoc = LatLng(coords.latitude, coords.longitude);
+                final candidates = layerId == _ambientPoiLayerId
+                    ? _ambientPois
+                    : ref.read(poiListProvider);
+                if (candidates.isEmpty) return;
+                Poi? nearest;
+                var bestDist = double.infinity;
+                for (final p in candidates) {
+                  final d = PoiService.haversineMeters(tapLoc, p.location);
+                  if (d < bestDist) {
+                    bestDist = d;
+                    nearest = p;
+                  }
+                }
+                if (nearest != null) _handlePoiTap(nearest);
+              });
+            },
             onStyleLoadedCallback: () async {
               _styleLoaded = true;
               // 스타일 재주입 시 네이티브 어노테이션 매니저가 파괴·재생성되므로
@@ -2243,7 +2306,7 @@ class _PoiExploreSheet extends ConsumerStatefulWidget {
   final LatLng? origin;
   // 백그라운드 프리페치 캐시(5종 전체) — null이면 시트가 직접 조회(폴백).
   final List<Poi>? initialPois;
-  final void Function(LatLng dest) onSelectDest;
+  final void Function(Poi poi) onSelectDest;
 
   const _PoiExploreSheet({
     required this.origin,
@@ -2587,7 +2650,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                 ),
             ],
           ),
-          onTap: () => widget.onSelectDest(poi.location),
+          onTap: () => widget.onSelectDest(poi),
         );
       }).toList(),
     );
