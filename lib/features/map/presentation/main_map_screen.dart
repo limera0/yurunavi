@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:math' show Point, cos, sqrt, asin, min;
+import 'dart:typed_data' show Uint8List;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
@@ -44,6 +46,54 @@ class _TappedPoi {
 /// Last-resort map framing: first install + no last-known position.
 /// Camera only — never treated as the rider's location.
 const LatLng kInitialMapView = LatLng(36.5, 127.5); // 한국 지리 중심 (서울 아님)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POI 아이콘 래스터화
+// 원격 글리프 서버(tiles.westinx.com)는 Noto Sans만 서빙 — Material Icons
+// 코드포인트는 없어 SymbolLayer text-field로 직접 렌더링할 수 없다. 그래서
+// IconData를 dart:ui로 PNG 비트맵으로 그려 addImage에 등록해 iconImage로 쓴다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Future<Uint8List> renderPoiIconPng(
+  IconData icon,
+  Color bgColor, {
+  double size = 96,
+}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final radius = size / 2;
+  canvas.drawCircle(Offset(radius, radius), radius, Paint()..color = bgColor);
+  canvas.drawCircle(
+    Offset(radius, radius),
+    radius - 2,
+    Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5, // 기존 CircleLayer의 circleStrokeWidth:2/circleStrokeColor:#FFFFFF와 시각적 일관성
+  );
+  // ui. 접두어 명시 — package:intl도 별도의 TextDirection 클래스를 export해
+  // 이 파일에서 이름이 충돌한다(intl은 .LTR/.RTL, dart:ui는 .ltr/.rtl).
+  final textPainter = TextPainter(textDirection: ui.TextDirection.ltr)
+    ..text = TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        fontSize: size * 0.55,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        color: Colors.white,
+      ),
+    )
+    ..layout();
+  textPainter.paint(
+    canvas,
+    Offset((size - textPainter.width) / 2, (size - textPainter.height) / 2),
+  );
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(size.toInt(), size.toInt());
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return byteData!.buffer.asUint8List();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid-based POI clustering
@@ -117,6 +167,23 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const double _kWpIconSize = 1.05; // nav_screen과 동일 배율
   static const String _kArrowIcon = 'nav_arrow';
   static const double _kArrowIconSize = 1.0; // nav_screen과 동일
+
+  // POI 카테고리 → 아이콘/배경색 (기존 CircleLayer match 표현식과 동일 색상 유지).
+  // 이름 규칙 'poi-icon-${PoiType.name}'으로 addImage 등록 및 SymbolLayer에서 참조.
+  static const Map<PoiType, Color> _poiIconBgColors = {
+    PoiType.cafe: Color(0xFFFF7700),
+    PoiType.convenienceStore: Color(0xFF2196F3),
+    PoiType.gasStation: Color(0xFFE53935),
+    PoiType.supermarket: Color(0xFF8E24AA),
+    PoiType.restaurant: Color(0xFFFFB300),
+  };
+  static const Map<PoiType, IconData> _poiIcons = {
+    PoiType.gasStation: Icons.local_gas_station,
+    PoiType.cafe: Icons.local_cafe,
+    PoiType.convenienceStore: Icons.local_convenience_store,
+    PoiType.supermarket: Icons.shopping_cart,
+    PoiType.restaurant: Icons.restaurant,
+  };
 
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용
 
@@ -405,6 +472,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
                   },
                   'properties': <String, dynamic>{
                     'poiType': p.type.name,
+                    'poiIcon': 'poi-icon-${p.type.name}',
+                    'name': p.name,
                   },
                 })
             .toList(),
@@ -414,23 +483,24 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
     await ctrl.addGeoJsonSource(_poiSourceId, _buildPoiGeoJson(const []));
-    await ctrl.addCircleLayer(
+    await ctrl.addSymbolLayer(
       _poiSourceId,
       _poiLayerId,
-      const ml.CircleLayerProperties(
-        circleRadius: 7,
-        circleColor: [
-          'match',
-          ['get', 'poiType'],
-          'cafe', '#FF7700',
-          'convenienceStore', '#2196F3',
-          'gasStation', '#E53935',
-          'supermarket', '#8E24AA',
-          'restaurant', '#FFB300',
-          '#9E9E9E',
-        ],
-        circleStrokeWidth: 2,
-        circleStrokeColor: '#FFFFFF',
+      const ml.SymbolLayerProperties(
+        iconImage: ['get', 'poiIcon'],
+        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconAllowOverlap: true,
+        iconAnchor: 'center',
+        textField: ['get', 'name'],
+        textFont: ['Noto Sans Regular'],
+        textSize: 11,
+        textOffset: [0, 1.6],
+        textAnchor: 'top',
+        textColor: '#212121',
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.2,
+        textAllowOverlap: false,
+        textOptional: true, // 라벨 공간이 없어도 아이콘은 계속 표시
       ),
     );
   }
@@ -448,23 +518,24 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
     await ctrl.addGeoJsonSource(_ambientPoiSourceId, _buildPoiGeoJson(const []));
-    await ctrl.addCircleLayer(
+    await ctrl.addSymbolLayer(
       _ambientPoiSourceId,
       _ambientPoiLayerId,
-      const ml.CircleLayerProperties(
-        circleRadius: 7,
-        circleColor: [
-          'match',
-          ['get', 'poiType'],
-          'cafe', '#FF7700',
-          'convenienceStore', '#2196F3',
-          'gasStation', '#E53935',
-          'supermarket', '#8E24AA',
-          'restaurant', '#FFB300',
-          '#9E9E9E',
-        ],
-        circleStrokeWidth: 2,
-        circleStrokeColor: '#FFFFFF',
+      const ml.SymbolLayerProperties(
+        iconImage: ['get', 'poiIcon'],
+        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconAllowOverlap: true,
+        iconAnchor: 'center',
+        textField: ['get', 'name'],
+        textFont: ['Noto Sans Regular'],
+        textSize: 11,
+        textOffset: [0, 1.6],
+        textAnchor: 'top',
+        textColor: '#212121',
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.2,
+        textAllowOverlap: false,
+        textOptional: true, // 라벨 공간이 없어도 아이콘은 계속 표시
       ),
     );
   }
@@ -1277,6 +1348,17 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               // B1: 현위치 화살표 puck — 경로 레이어 위에 그려지도록 마지막에 추가
               await _initLocationLayer();
               await _ensureLocationMarker();
+              // POI 카테고리 아이콘 — 스타일 재주입마다 다시 등록해야 한다
+              // (addImage도 네이티브 스타일에 종속되어 재생성 시 사라짐).
+              // SymbolLayer가 참조하기 전, _initPoiLayer/_initAmbientPoiLayer보다
+              // 먼저 등록한다.
+              for (final type in PoiType.values) {
+                final bytes = await renderPoiIconPng(
+                  _poiIcons[type]!,
+                  _poiIconBgColors[type]!,
+                );
+                await _mlCtrl!.addImage('poi-icon-${type.name}', bytes);
+              }
               // 13-1: POI 탐색 결과 원형 레이어
               await _initPoiLayer();
               final pois = ref.read(poiListProvider);
