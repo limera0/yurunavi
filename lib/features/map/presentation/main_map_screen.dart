@@ -772,60 +772,61 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       builder: (_) => SafeArea(
         child: Container(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          decoration: BoxDecoration(
+          child: Material(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 36, height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    Text(subtitle,
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade600)),
-                  ],
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey.shade600)),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.flag_outlined, color: Color(0xFF008080)),
-                title: const Text('여기로 안내'),
-                onTap: () => Navigator.pop(context, _TapAction.destination),
-              ),
-              if (hasRoute)
+                const SizedBox(height: 4),
+                const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.add_location_alt_outlined,
-                      color: Color(0xFF008080)),
-                  title: const Text('경유지 추가'),
-                  subtitle: const Text('현재 경로에 경유지를 삽입합니다',
-                      style: TextStyle(fontSize: 12)),
-                  onTap: () => Navigator.pop(context, _TapAction.waypoint),
+                  leading: const Icon(Icons.flag_outlined, color: Color(0xFF008080)),
+                  title: const Text('여기로 안내'),
+                  onTap: () => Navigator.pop(context, _TapAction.destination),
                 ),
-              ListTile(
-                leading: const Icon(Icons.close, color: Colors.grey),
-                title: const Text('닫기'),
-                onTap: () => Navigator.pop(context, null),
-              ),
-              const SizedBox(height: 8),
-            ],
+                if (hasRoute)
+                  ListTile(
+                    leading: const Icon(Icons.add_location_alt_outlined,
+                        color: Color(0xFF008080)),
+                    title: const Text('경유지 추가'),
+                    subtitle: const Text('현재 경로에 경유지를 삽입합니다',
+                        style: TextStyle(fontSize: 12)),
+                    onTap: () => Navigator.pop(context, _TapAction.waypoint),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.close, color: Colors.grey),
+                  title: const Text('닫기'),
+                  onTap: () => Navigator.pop(context, null),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
       ),
