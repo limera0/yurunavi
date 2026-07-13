@@ -3,13 +3,13 @@
 이 세션에서도 API 에러(ECONNRESET)로 재차 끊길 가능성 있어 여기 기록하며 진행.
 **16장 PNG 분석은 완료됨** (`ANALYSIS_progress.md` 참조).
 
-## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 9번 완료 시점)
+## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 6번 완료 시점)
 
 **바로 이어갈 작업**: 7번(경로선 레이어 라벨 가림), 10번(main_map_screen.dart 동일
 버그, 커밋 `44a29f4`), 9번(Start your Engine 슬라이드 버튼 드래그 임계값 버그, 커밋
-`34fc4fd`) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 6번(검색 프리페치/
-속도, 별도 기능이라 스코프 판단 필요)이나 8번(UX 개선 묶음, 아직 세부 미정리) 중
-사용자에게 확인 후 진행. 이 문서 하나만 읽으면 전체 맥락 파악 가능 —
+`34fc4fd`), 6번(검색 프리페치/속도, GPS 확보 시점부터 상시 프리페치로 스코프 확정 후
+구현) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 8번(UX 개선 묶음, 아직
+세부 미정리) — 사용자에게 확인 후 진행. 이 문서 하나만 읽으면 전체 맥락 파악 가능 —
 `ANALYSIS_progress.md`(슬라이드 원본 분석)는 필요할 때만 참조.
 
 **놓치면 안 되는 것**:
@@ -392,8 +392,52 @@ double.infinity`를 넘기고 `buttonWidth`는 미설정이라 `infinity - heigh
 - **⚠️ 미확인 상태로 남은 것**: 실제 손가락 드래그 완료 체감(트랙 안에서 자연스럽게
   끝나는지)은 headless 서버라 실기기 확인 못함. **다음 실기기 접근 시 확인 필요.**
 
+## 완료: 6. 검색 로딩 속도 느림, 백그라운드 프리페치 요청 (슬라이드6, 5번에서 분리)
+
+**스코프 확인**: 프리페치 트리거 시점을 "검색 버튼 탭 시점"과 "지도 화면 진입/GPS 확보
+시점부터 상시" 두 안 중 사용자에게 확인 — **후자로 결정**(체감 속도가 더 빠름을 우선,
+GPS 확보 즉시 백그라운드로 미리 받아두는 쪽).
+
+**원인**: `_PoiExploreSheet`는 사용자가 시트를 열고 카테고리 칩을 고르거나 검색어를
+입력해야 그 시점부터 네트워크 요청을 시작하는 구조였음 — 그 사이 대기시간이 "느림"으로
+체감됨. 게다가 칩을 여러 개 연속으로 토글하면(예: 카페→편의점 추가) `_effectiveTypes`가
+바뀔 때마다 매번 새 네트워크 요청이 발생해 대기가 반복됐음.
+
+**수정** (`lib/features/map/presentation/main_map_screen.dart`):
+- 신규 `_maybeFetchSearchPrefetch(LatLng center)` — `_startLocationTracking()`의 GPS
+  갱신 경로(캐시된 마지막 위치 도착 시 + `navStateProvider` 매 틱) 양쪽에서
+  `unawaited(...)`로 호출. 5종 카테고리 전체를 1500m 반경으로 한 번에 가져와
+  `_searchPrefetchPois`/`_searchPrefetchCenter`/`_searchPrefetchAt`에 캐시. 500m 이동
+  또는 60초 경과 전엔 재조회하지 않음(기존 ambient 레이어의 200m/15초보다 완화된
+  디바운스 — 반경이 넓어 약간의 위치 오차가 결과에 큰 영향 없고, 검색은 ambient만큼
+  실시간성이 필요 없음). `_searchPrefetchGen` 카운터로 stale 응답 가드(기존
+  `_ambientFetchGen`과 동일 패턴).
+- `_showPoiExploreSheet()`가 시트를 열 때 계산한 origin과 `_searchPrefetchCenter`가
+  1km 이내면 캐시를 `_PoiExploreSheet`의 신규 `initialPois` 파라미터로 그대로 넘겨
+  네트워크 재요청을 완전히 생략. 캐시가 없거나 너무 멀면 시트가 폴백으로 자체 조회.
+- `_PoiExploreSheet`/`_PoiExploreSheetState` 구조 변경: 기존엔 칩/검색어가 바뀔 때마다
+  그 유효 카테고리 집합만 골라 매번 재조회(`_fetchedTypes`/`_sameTypes`/`_fetch`)했는데,
+  이제는 5종 전체를 **딱 한 번**만 가져와(`initState`에서 `initialPois` 즉시 반영 또는
+  `_fetchAll()` 단일 호출) `_allPois`에 저장하고, 이후 칩 토글/검색어 입력은 전부
+  `_typeFilteredPois`/`_visibleResults`로 클라이언트 필터링만 함 — 재조회 0회. 지도 위
+  검색결과 핀(`poiListProvider`)은 `_toggleType`/`_onSearchChanged`/`_fetchAll` 완료
+  시점에 `_visibleResults`로 동기화.
+- code-auditor PASS — initState에서 `_fetchAll()` 호출이 첫 `await` 전에 `setState`를
+  안 써서 build 중 setState 위험 없음(`_loading=true`는 순수 필드 대입), `_searchPrefetchGen`
+  가드가 겹치는 GPS 틱 사이 (`pois`, `center`) 불일치 조합을 만들 수 없음, `_fetchAll`이
+  네트워크 실패해도 `PoiService.fetchPois`가 예외를 삼키고 `[]`를 반환하므로 `_loading`이
+  영구히 멈추는 경로 없음, `poiListProvider`가 카테고리 미선택 상태에서 조기 오염되지
+  않음을 전부 코드 추적으로 검증. `initialPois`가 프리페치 중심(최대 1km 오차) 기준으로
+  조회된 것이라 실제 origin 기준 1500m 원과 정확히 일치하지 않는 근사치라는 점은 인지된
+  트레이드오프로 확인(리스트 표시 거리/정렬은 항상 실제 origin 기준으로 재계산되므로
+  화면에 보이는 값 자체는 부정확하지 않음, 후보 집합만 약간 fuzzy).
+- `flutter analyze` 0 issues, `flutter test` 98/98, `flutter build apk --debug
+  --dart-define-from-file=env.json` 빌드 성공.
+- **⚠️ 미확인 상태로 남은 것**: 실제 GPS 이동 중 프리페치가 매끄럽게 갱신되는지, 시트를
+  열었을 때 실제로 "즉시" 뜨는 체감인지는 headless 서버라 실기기 확인 못함. **다음
+  실기기 접근 시 확인 필요.**
+
 ## 아직 안 건드린 나머지 항목 (우선순위 순, HANDOFF_0712_ridefeedback2.md §3 기반)
-6. 검색 로딩 속도 느림, 백그라운드 프리페치 요청 (슬라이드6, 5번에서 분리)
 8. 여러 UX 개선 요청(POI 프리로딩, 점 아이콘/터치, 목적지 확인 카드 등, 슬라이드1~6)
 
 ## 명시적으로 미룬 것

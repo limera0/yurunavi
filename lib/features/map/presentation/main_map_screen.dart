@@ -147,6 +147,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
   int _ambientFetchGen = 0;
 
+  // 6번: 검색 시트("장소 검색") 전용 백그라운드 프리페치 — ambient 레이어(위)와는
+  // 완전히 별개. GPS 위치 갱신 시마다 5종 전체를 미리 받아 캐시해 둬서, 시트를
+  // 열었을 때 네트워크 대기 없이 바로 칩 필터링이 가능하게 한다.
+  List<Poi> _searchPrefetchPois = const [];
+  LatLng? _searchPrefetchCenter;
+  DateTime? _searchPrefetchAt;
+  int _searchPrefetchGen = 0;
+
   // Course sheet
   bool _showCourseSheet = false;
 
@@ -218,6 +226,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
           ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
         );
         _ensureLocationMarker(); // unawaited — B1
+        unawaited(_maybeFetchSearchPrefetch(loc));
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
@@ -235,6 +244,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         }
         final heading = _resolveHeading(next.speedKmh, next.headingDeg);
         _ensureLocationMarker(heading); // unawaited — B1
+        unawaited(_maybeFetchSearchPrefetch(loc));
       },
       fireImmediately: true,
     );
@@ -553,6 +563,32 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _lastAmbientFetchAt = DateTime.now();
     _lastAmbientFetchCenter = center;
     _lastAmbientFetchTypes = targetTypes;
+  }
+
+  /// GPS 위치가 갱신될 때마다(캐시된 마지막 위치 포함) 호출 — 검색 시트(_PoiExploreSheet)용
+  /// 5종 카테고리 전체를 1500m 반경으로 미리 받아둔다. 500m 이동 또는 60초 경과 전엔
+  /// 재조회하지 않는다 — ambient 레이어보다 완화된 디바운스(반경이 넓어 약간의 위치 오차가
+  /// 결과에 큰 영향을 주지 않고, 검색은 ambient만큼 실시간성이 필요하지 않음).
+  Future<void> _maybeFetchSearchPrefetch(LatLng center) async {
+    final lastCenter = _searchPrefetchCenter;
+    final lastAt = _searchPrefetchAt;
+    final movedEnough =
+        lastCenter == null || PoiService.haversineMeters(lastCenter, center) >= 500;
+    final staleEnough =
+        lastAt == null || DateTime.now().difference(lastAt) >= const Duration(seconds: 60);
+    if (!movedEnough && !staleEnough) return;
+
+    final myGen = ++_searchPrefetchGen;
+    final pois = await ref.read(poiServiceProvider).fetchPois(
+          center: center,
+          radiusMeters: 1500,
+          types: PoiType.values,
+        );
+    if (!mounted || myGen != _searchPrefetchGen) return;
+
+    _searchPrefetchPois = pois;
+    _searchPrefetchCenter = center;
+    _searchPrefetchAt = DateTime.now();
   }
 
   Future<void> _ensureLocationMarker([double? heading]) async {
@@ -1002,12 +1038,24 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     }
     if (!mounted) return;
 
+    // 백그라운드 프리페치 캐시가 이 origin과 충분히 가까우면(1km 이내) 네트워크
+    // 재요청 없이 그대로 넘겨서 시트가 뜨자마자 칩 필터링이 가능하게 한다 —
+    // 너무 멀리 팬했거나 캐시가 아직 없으면 시트가 자체적으로 새로 조회(폴백).
+    List<Poi>? initialPois;
+    final cacheCenter = _searchPrefetchCenter;
+    if (cacheCenter != null &&
+        origin != null &&
+        PoiService.haversineMeters(cacheCenter, origin) <= 1000) {
+      initialPois = _searchPrefetchPois;
+    }
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _PoiExploreSheet(
         origin: origin,
+        initialPois: initialPois,
         onSelectDest: (dest) {
           Navigator.pop(ctx);
           _applyDestination(dest);
@@ -2104,10 +2152,13 @@ class _PlacesSheet extends ConsumerWidget {
 
 class _PoiExploreSheet extends ConsumerStatefulWidget {
   final LatLng? origin;
+  // 백그라운드 프리페치 캐시(5종 전체) — null이면 시트가 직접 조회(폴백).
+  final List<Poi>? initialPois;
   final void Function(LatLng dest) onSelectDest;
 
   const _PoiExploreSheet({
     required this.origin,
+    this.initialPois,
     required this.onSelectDest,
   });
 
@@ -2121,15 +2172,28 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   final FocusNode _searchFocusNode = FocusNode();
   bool _loading = false;
   bool _searchFocused = false;
-  List<Poi> _results = const [];
-  // 마지막으로 네트워크 조회에 사용된 "유효 카테고리 집합" — 이게 바뀔 때만 재조회.
-  Set<PoiType> _fetchedTypes = const {};
+  // origin 반경 내 5종 카테고리 전체 — 프리페치 캐시를 즉시 쓰거나(네트워크 대기
+  // 없음), 없으면 이 시트에서 딱 한 번만 조회한다. 이후 칩/검색어 필터링은 전부
+  // 클라이언트에서만 처리하고 재조회하지 않는다.
+  List<Poi> _allPois = const [];
 
   @override
   void initState() {
     super.initState();
     _searchCtrl.addListener(_onSearchChanged);
     _searchFocusNode.addListener(_onSearchFocusChanged);
+    final initial = widget.initialPois;
+    if (initial != null) {
+      final origin = widget.origin;
+      _allPois = List<Poi>.from(initial)
+        ..sort((a, b) => origin == null
+            ? 0
+            : PoiService.haversineMeters(origin, a.location)
+                .compareTo(PoiService.haversineMeters(origin, b.location)));
+    } else if (widget.origin != null) {
+      _loading = true;
+      _fetchAll();
+    }
   }
 
   @override
@@ -2154,60 +2218,50 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     return const {};
   }
 
-  bool _sameTypes(Set<PoiType> a, Set<PoiType> b) =>
-      a.length == b.length && a.containsAll(b);
-
-  void _onSearchChanged() {
-    final effective = _effectiveTypes;
-    if (_sameTypes(effective, _fetchedTypes)) {
-      // 유효 카테고리 집합이 바뀌지 않았으면 재조회 없이 클라이언트 필터링만 갱신.
-      setState(() {});
-      return;
-    }
-    _fetch(effective);
+  /// _allPois 중 현재 유효 카테고리에 속하는 것만(검색어 필터 전) — API 자체가
+  /// 이 카테고리에 결과가 없는지, 검색어 때문에 줄었는지 구분해 안내 문구를 고르는 데 쓴다.
+  List<Poi> get _typeFilteredPois {
+    final types = _effectiveTypes;
+    if (types.isEmpty) return const [];
+    return _allPois.where((p) => types.contains(p.type)).toList();
   }
 
-  Future<void> _fetch(Set<PoiType> types) async {
-    _fetchedTypes = types;
+  void _onSearchChanged() {
+    setState(() {});
+    ref.read(poiListProvider.notifier).set(_visibleResults);
+  }
+
+  Future<void> _fetchAll() async {
     final origin = widget.origin;
-    if (origin == null || types.isEmpty) {
-      setState(() => _results = const []);
-      ref.read(poiListProvider.notifier).clear();
-      return;
-    }
-    setState(() => _loading = true);
+    if (origin == null) return;
     final pois = await ref.read(poiServiceProvider).fetchPois(
           center: origin,
           radiusMeters: 1500,
-          types: types.toList(),
+          types: PoiType.values,
         );
-    // 응답이 늦게 오는 사이 유효 카테고리 집합이 또 바뀌었으면(연타 타이핑/칩 연타) 이 결과는
-    // 이미 낡은 것이니 버린다 — 아니면 지도 위 poiListProvider까지 stale 데이터로 덮어씀.
-    if (!mounted || !_sameTypes(_fetchedTypes, types)) return;
+    if (!mounted) return;
     pois.sort((a, b) => PoiService.haversineMeters(origin, a.location)
         .compareTo(PoiService.haversineMeters(origin, b.location)));
-    ref.read(poiListProvider.notifier).set(pois);
     setState(() {
-      _results = pois;
+      _allPois = pois;
       _loading = false;
     });
+    ref.read(poiListProvider.notifier).set(_visibleResults);
   }
 
   void _toggleType(PoiType type) {
     setState(() {
       if (!_selectedTypes.add(type)) _selectedTypes.remove(type);
     });
-    final effective = _effectiveTypes;
-    if (!_sameTypes(effective, _fetchedTypes)) {
-      _fetch(effective);
-    }
+    ref.read(poiListProvider.notifier).set(_visibleResults);
   }
 
   /// 검색어(있으면)로 클라이언트 필터링한 뒤 거리순으로 보여줄 목록.
   List<Poi> get _visibleResults {
+    final byType = _typeFilteredPois;
     final query = _searchCtrl.text.trim().toLowerCase();
-    if (query.isEmpty) return _results;
-    return _results.where((p) => p.name.toLowerCase().contains(query)).toList();
+    if (query.isEmpty) return byType;
+    return byType.where((p) => p.name.toLowerCase().contains(query)).toList();
   }
 
   String _formatDistance(double meters) {
@@ -2361,7 +2415,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (_results.isEmpty) {
+    if (_typeFilteredPois.isEmpty) {
       // API 자체가 0건(NODATA 포함)을 반환한 경우.
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
