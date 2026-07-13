@@ -111,6 +111,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
 
+  // 다중 경유지 통과 판정 — Organic Maps의 단조증가 m_passedIdx 패턴 채택:
+  // 경유지별 상태 플래그 대신 "몇 번째까지 통과했는지"만 카운트하고, 재탐색 시
+  // widget.waypoints를 이 인덱스부터 슬라이스해 이미 통과한 경유지를 구조적으로
+  // 배제한다 (별도 필터링 불필요).
+  int _passedWaypointCount = 0;
+  static const _kWaypointArrivalM = 40.0;   // 경유지 통과 판정 지오펜스 반경(m)
+  static const _kWaypointStopSpeedKmh = 8.0; // 이 이하면 "정차"로 간주(도착 vs 통과 구분)
+
   // 도착 감지
   bool _arrived = false;
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
@@ -298,6 +306,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
         _ensureLocationMarker(effectiveHeadingDeg);
         unawaited(_maybeFetchAmbientPois());
+        _checkWaypointProgress(loc, next.speedKmh);
       },
       fireImmediately: true,
     );
@@ -313,7 +322,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         });
         _updateRouteSplit(prog.snapIdx);
         _handleVoice(prog);
-        if (prog.arrived && !_arrived) {
+        if (prog.arrived && !_arrived && _passedWaypointCount >= widget.waypoints.length) {
           _arrived = true;
           setState(() => _arrivalBannerVisible = true);
           _fetchNearbyPois(widget.destination!).then((pois) {
@@ -447,7 +456,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       final routes = await RoutingService.fetchRoutes(
         origin: routeOrigin,
         destination: dest,
-        waypoints: widget.waypoints,
+        waypoints: widget.waypoints.sublist(_passedWaypointCount),
       );
       if (mounted && routes.isNotEmpty) {
         final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
@@ -841,6 +850,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return result;
   }
 
+  /// 현재 위치가 다음 미통과 경유지의 지오펜스 반경 내로 들어오면 통과 처리.
+  /// 정차 여부(속도)로 "도착" vs "통과" 음성을 구분하되, 두 경우 모두
+  /// _passedWaypointCount를 증가시켜 이후 재탐색에서 배제한다.
+  void _checkWaypointProgress(LatLng pos, double speedKmh) {
+    if (_passedWaypointCount >= widget.waypoints.length) return;
+    final target = widget.waypoints[_passedWaypointCount];
+    final distM = PoiService.haversineMeters(pos, target);
+    if (distM <= _kWaypointArrivalM) {
+      final stopped = speedKmh <= _kWaypointStopSpeedKmh;
+      _passedWaypointCount++;
+      _vps?.speak(stopped ? 'waypoint_arrived' : 'waypoint_passed');
+    }
+  }
+
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
     final center = ref.read(navStateProvider)?.pos;
@@ -1033,7 +1056,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       final routes = await RoutingService.fetchRoutes(
         origin: origin,
         destination: dest,
-        waypoints: widget.waypoints,
+        waypoints: widget.waypoints.sublist(_passedWaypointCount),
       );
       if (!mounted || reqId != _courseSheetReqId) return;
       final scores = await Future.wait(

@@ -9,6 +9,8 @@
     "reroute":   "경로를 재탐색했습니다",
     "arrival":   "목적지에 도착했습니다",
     "dest_passed": "목적지를 지나쳤습니다",
+    "waypoint_arrived": "경유지에 도착했습니다",
+    "waypoint_passed":  "이번 경유지를 통과했습니다",
     "turn_left_approach":       "{dist}미터 앞 좌회전",
     "turn_left_imminent":       "좌회전입니다",
     "turn_left_imminent_fast":  "곧 좌회전입니다",
