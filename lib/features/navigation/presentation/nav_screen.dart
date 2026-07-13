@@ -20,6 +20,7 @@ import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
 import '../../../services/native_engine.dart';
+import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
@@ -795,6 +796,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
                   },
                   'properties': <String, dynamic>{
                     'poiType': p.type.name,
+                    'poiIcon': 'poi-icon-${p.type.name}',
+                    'name': p.name,
                   },
                 })
             .toList(),
@@ -804,23 +807,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null) return;
     await ctrl.addGeoJsonSource(_navPoiSourceId, _buildPoiGeoJson(const []));
-    await ctrl.addCircleLayer(
+    await ctrl.addSymbolLayer(
       _navPoiSourceId,
       _navPoiLayerId,
-      const ml.CircleLayerProperties(
-        circleRadius: 7,
-        circleColor: [
-          'match',
-          ['get', 'poiType'],
-          'cafe', '#FF7700',
-          'convenienceStore', '#2196F3',
-          'gasStation', '#E53935',
-          'supermarket', '#8E24AA',
-          'restaurant', '#FFB300',
-          '#9E9E9E',
-        ],
-        circleStrokeWidth: 2,
-        circleStrokeColor: '#FFFFFF',
+      const ml.SymbolLayerProperties(
+        iconImage: ['get', 'poiIcon'],
+        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconAllowOverlap: true,
+        iconAnchor: 'center',
+        textField: ['get', 'name'],
+        textFont: ['Noto Sans Regular'],
+        textSize: 11,
+        textOffset: [0, 1.6],
+        textAnchor: 'top',
+        textColor: '#212121',
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.2,
+        textAllowOverlap: false,
+        textOptional: true, // 라벨 공간이 없어도 아이콘은 계속 표시
       ),
     );
   }
@@ -866,8 +870,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
-    final center = ref.read(navStateProvider)?.pos;
-    if (ctrl == null || !_styleLoaded || center == null) return;
+    final gpsPos = ref.read(navStateProvider)?.pos;
+    if (ctrl == null || !_styleLoaded || gpsPos == null) return;
 
     final targetTypes = _resolveEligibleTypes(_navZoom);
     _stickyEligibleTypes = targetTypes; // 매 틱 갱신 — fetch 성사 여부와 무관
@@ -881,45 +885,76 @@ class _NavScreenState extends ConsumerState<NavScreen>
       return;
     }
 
-    // getVisibleRegion()(플랫폼 채널 호출)은 실제로 재조회할 때만 부른다 —
-    // 디바운스 판단 자체는 GPS 위치(center)만으로 매 틱 저비용으로 끝낸다.
+    // 디바운스 판단용 저비용 중심점(플랫폼 채널 호출 없음): 수동 팬 모드(rider가
+    // 지도를 직접 팬해 자동추종을 벗어난 상태)에선 카메라 target을, 자동추종
+    // 모드에선 GPS 위치를 쓴다. 실제 getVisibleRegion()은 재조회가 확정된
+    // 뒤(_isManualMode 분기)에만 부른다.
+    final LatLng approxCenter;
+    if (_isManualMode) {
+      final camTarget = ctrl.cameraPosition?.target;
+      if (camTarget == null) return;
+      approxCenter = LatLng(camTarget.latitude, camTarget.longitude);
+    } else {
+      approxCenter = gpsPos;
+    }
+
     final sameTypes = targetTypes.length == _lastAmbientFetchTypes.length &&
         targetTypes.every(_lastAmbientFetchTypes.contains);
     if (sameTypes) {
       final lastAt = _lastAmbientFetchAt;
       final lastCenter = _lastAmbientFetchCenter;
       final movedEnough = lastCenter == null ||
-          PoiService.haversineMeters(lastCenter, center) >= 200;
+          PoiService.haversineMeters(lastCenter, approxCenter) >= 200;
       final staleEnough = lastAt == null ||
           DateTime.now().difference(lastAt) >= const Duration(seconds: 15);
       if (!movedEnough && !staleEnough) return;
     }
 
-    // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
-    // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
-    // 이 응답은 stale이니 버린다. getVisibleRegion 앞에서 찍어야
-    // 그 await 도중 끼어든 최신 호출까지 감지된다.
+    // 이 호출 시작 시점의 세대를 기록 — 아래 await(getVisibleRegion/fetchPois)
+    // 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면) 이 응답은
+    // stale이니 버린다.
     final myGen = ++_ambientFetchGen;
 
-    final ml.LatLngBounds bounds;
-    try {
-      bounds = await ctrl.getVisibleRegion();
-    } catch (_) {
-      return;
+    final LatLng center;
+    final double south, north, west, east, radius;
+    if (_isManualMode) {
+      // 수동 팬 모드 — main_map_screen._maybeFetchAmbientPois와 동일하게 실제
+      // 뷰포트 bounds를 중심/필터링 기준으로 쓴다.
+      final ml.LatLngBounds bounds;
+      try {
+        bounds = await ctrl.getVisibleRegion();
+      } catch (_) {
+        return;
+      }
+      if (!mounted || myGen != _ambientFetchGen) return;
+      center = LatLng(
+        (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+        (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+      );
+      south = bounds.southwest.latitude;
+      north = bounds.northeast.latitude;
+      west = bounds.southwest.longitude;
+      east = bounds.northeast.longitude;
+      radius = min(
+        2000.0,
+        PoiService.haversineMeters(center, LatLng(north, east)),
+      );
+    } else {
+      // 자동추종 모드 — 카메라가 항상 헤딩에 맞춰 회전해 축 정렬된 실제
+      // 뷰포트 bounds 개념이 no map-pan case와 맞지 않으므로, GPS 위치를
+      // 중심으로 한 정사각형 근사 bounds를 쓴다(main_map_screen._mapPinPois와
+      // 동일 패턴).
+      center = gpsPos;
+      const delta = 0.02; // ~2.2km, 그리드 분산용 근사치일 뿐 실제 필터링엔 영향 없음.
+      south = center.latitude - delta;
+      north = center.latitude + delta;
+      west = center.longitude - delta;
+      east = center.longitude + delta;
+      radius = min(
+        2000.0,
+        PoiService.haversineMeters(center, LatLng(north, east)),
+      );
     }
-    if (!mounted || myGen != _ambientFetchGen) return;
-
-    final boundsCenter = LatLng(
-      (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
-      (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
-    );
-    final radius = min(
-      2000.0,
-      PoiService.haversineMeters(
-        boundsCenter,
-        LatLng(bounds.northeast.latitude, bounds.northeast.longitude),
-      ),
-    );
 
     final pois = await ref.read(poiServiceProvider).fetchPois(
           center: center,
@@ -930,14 +965,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     final visible = pois
         .where((p) =>
-            p.location.latitude >= bounds.southwest.latitude &&
-            p.location.latitude <= bounds.northeast.latitude &&
-            p.location.longitude >= bounds.southwest.longitude &&
-            p.location.longitude <= bounds.northeast.longitude)
-        .toList()
-      ..sort((a, b) => PoiService.haversineMeters(center, a.location)
-          .compareTo(PoiService.haversineMeters(center, b.location)));
-    final limited = visible.take(10).toList();
+            p.location.latitude >= south &&
+            p.location.latitude <= north &&
+            p.location.longitude >= west &&
+            p.location.longitude <= east)
+        .toList();
+    final limited = PoiService.selectForAmbientDisplay(
+      candidates: visible,
+      south: south,
+      north: north,
+      west: west,
+      east: east,
+      center: center,
+      maxCount: 20,
+    );
 
     _ambientPois = limited;
     _updatePoiLayer(limited);
@@ -989,6 +1030,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
       await _mlCtrl?.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
       final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
       await _mlCtrl?.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
+      // POI 카테고리 아이콘 — 스타일 재주입마다 다시 등록해야 한다(addImage도
+      // 네이티브 스타일에 종속되어 재생성 시 사라짐). SymbolLayer가 참조하기
+      // 전, _initPoiLayer보다 먼저 등록한다.
+      for (final type in PoiType.values) {
+        final bytes = await renderPoiIconPng(
+          poiIcons[type]!,
+          poiIconBgColors[type]!,
+        );
+        await _mlCtrl?.addImage('poi-icon-${type.name}', bytes);
+      }
       _initDestLayer().whenComplete(() {
         _initLocationLayer().whenComplete(() => _ensureLocationMarker()); // unawaited — ③
         _initPoiLayer(); // unawaited — 13-1b 상시 표시 POI 레이어
