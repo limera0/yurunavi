@@ -305,6 +305,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: 'waterway-name',
     );
     // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
@@ -318,6 +319,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: 'waterway-name',
     );
   }
 
@@ -334,6 +336,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         lineCap: 'round',
         lineJoin: 'round',
       ),
+      belowLayerId: 'waterway-name',
     );
   }
 
