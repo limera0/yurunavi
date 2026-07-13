@@ -40,7 +40,7 @@ class GuidanceProfile {
         ],
         enabledEvents: {
           'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-          'keep', 'merge', 'roundabout', 'destination',
+          'keep', 'keep_left', 'keep_right', 'merge', 'roundabout', 'destination',
         },
       );
 

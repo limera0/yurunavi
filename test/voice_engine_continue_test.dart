@@ -16,7 +16,8 @@ void main() {
       GuidanceTier(minEntryM: 0,   pointsM: []),
     ],
     enabledEvents: {
-      'turn_left', 'turn_right', 'uturn', 'ramp', 'exit', 'keep', 'merge',
+      'turn_left', 'turn_right', 'uturn', 'ramp', 'exit', 'keep',
+      'keep_left', 'keep_right', 'merge',
       'roundabout', 'destination', 'continue',
     },
   );
@@ -59,6 +60,7 @@ void main() {
         ],
         enabledEvents: {
           'turn_left', 'turn_right', 'uturn', 'ramp', 'exit', 'keep',
+          'keep_left', 'keep_right',
           'merge', 'roundabout', 'destination',
         },
       );
@@ -122,24 +124,24 @@ void main() {
       expect(intents.last.key, 'keep_imminent');
     });
 
-    test('type 23 (keep left) still emits plain keep_*, not continue_*', () {
+    test('type 23 (keep right — kStayRight) still emits plain keep_*, not continue_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 23), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
-        expect(i.key, startsWith('keep_'));
+        expect(i.key, startsWith('keep_right_'));
       }
-      expect(intents.last.key, 'keep_imminent');
+      expect(intents.last.key, 'keep_right_imminent');
     });
 
-    test('type 24 (keep right) still emits plain keep_*, not continue_*', () {
+    test('type 24 (keep left — kStayLeft) still emits plain keep_*, not continue_*', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 24), step0(type: 4)];
       final intents = drive(engine, 0, [600, 5], steps);
       for (final i in intents) {
-        expect(i.key, startsWith('keep_'));
+        expect(i.key, startsWith('keep_left_'));
       }
-      expect(intents.last.key, 'keep_imminent');
+      expect(intents.last.key, 'keep_left_imminent');
     });
   });
 }

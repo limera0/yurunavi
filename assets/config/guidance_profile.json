@@ -52,6 +52,8 @@
       ]
     },
     "keep":        { "enabled": true },
+    "keep_left":   { "enabled": true },
+    "keep_right":  { "enabled": true },
     "merge":       { "enabled": true },
     "roundabout": {
       "enabled": true,

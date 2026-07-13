@@ -19,7 +19,9 @@ String? eventForType(int type) {
     case 12: case 13:          return 'uturn';
     case 17: case 18: case 19: return 'ramp';
     case 20: case 21:          return 'exit';
-    case 22: case 23: case 24: return 'keep';
+    case 22:                   return 'keep';
+    case 23:                   return 'keep_right';
+    case 24:                   return 'keep_left';
     case 25: case 37: case 38: return 'merge';
     case 26:                   return 'roundabout_enter';
     case 27:                   return 'roundabout_exit';
