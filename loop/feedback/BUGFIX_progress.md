@@ -3,14 +3,18 @@
 이 세션에서도 API 에러(ECONNRESET)로 재차 끊길 가능성 있어 여기 기록하며 진행.
 **16장 PNG 분석은 완료됨** (`ANALYSIS_progress.md` 참조).
 
-## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 6번 완료 시점)
+## ▶ 다음 세션 시작점 (2026-07-13 세션 계속, 8번 완료 시점)
 
 **바로 이어갈 작업**: 7번(경로선 레이어 라벨 가림), 10번(main_map_screen.dart 동일
 버그, 커밋 `44a29f4`), 9번(Start your Engine 슬라이드 버튼 드래그 임계값 버그, 커밋
 `34fc4fd`), 6번(검색 프리페치/속도, GPS 확보 시점부터 상시 프리페치로 스코프 확정 후
-구현) 완료·커밋됨. 다음은 아래 "아직 안 건드린 나머지 항목" 8번(UX 개선 묶음, 아직
-세부 미정리) — 사용자에게 확인 후 진행. 이 문서 하나만 읽으면 전체 맥락 파악 가능 —
-`ANALYSIS_progress.md`(슬라이드 원본 분석)는 필요할 때만 참조.
+구현), 8번(UX 개선 묶음, 슬라이드1~6 — 5개 커밋으로 완료, 아래 "완료: 8." 섹션 참조)
+전부 완료·커밋됨. **"아직 안 건드린 나머지 항목"이 이제 비어있음** — `BUGFIX_progress.md`
+기준 피드백 버그픽스 트랙 자체가 일단락됨. 다음 세션은 `loop/RELEASE_ROADMAP.md`의
+13-2(설정: 약관/오픈소스 라이선스 화면)로 복귀하거나, 아래 "명시적으로 미룬 것"(Y자
+삼거리 오안내, 유턴/스위치백 costing 튜닝) 중 사용자가 먼저 꺼내는 쪽부터 진행. 이
+문서 하나만 읽으면 전체 맥락 파악 가능 — `ANALYSIS_progress.md`(슬라이드 원본 분석)는
+필요할 때만 참조.
 
 **놓치면 안 되는 것**:
 - 실기기 테스트 인프라가 이번에 갖춰짐 — westinx 서버에 Galaxy M32F가 상시 USB 연결되어
@@ -437,8 +441,126 @@ GPS 확보 즉시 백그라운드로 미리 받아두는 쪽).
   열었을 때 실제로 "즉시" 뜨는 체감인지는 headless 서버라 실기기 확인 못함. **다음
   실기기 접근 시 확인 필요.**
 
-## 아직 안 건드린 나머지 항목 (우선순위 순, HANDOFF_0712_ridefeedback2.md §3 기반)
-8. 여러 UX 개선 요청(POI 프리로딩, 점 아이콘/터치, 목적지 확인 카드 등, 슬라이드1~6)
+## 완료: 8. 여러 UX 개선 요청(슬라이드1~6, main_map_screen.dart 홈 지도 화면 전용)
+
+착수 전 사용자에게 두 가지 확인: (1) 오늘 밤 범위 — "전부 순차 진행" 선택(ambient POI
+레이어 5개 + 검색시트 목적지 확인카드 2개를 한 세션에서 다 진행), (2) 슬라이드2/5가
+요청한 "네이버지도 스타일 아이콘"(가스펌프/그릇/포크나이프 등) — 리포에 에셋이 없어
+"Material Icons로 대체"(커스텀 에셋 대기 대신 즉시 구현) 선택. 슬라이드1~6은 전부
+`main_map_screen.dart`(코스 선택 전 홈 지도 화면) 소관이라는 걸 재확인 후 5단계
+체크포인트로 분해, 각 단계 flutter-coder 구현 → code-auditor 감사 → PASS 시 커밋 순서로
+진행(CLAUDE.md TDD 루프).
+
+**1단계(커밋 `9ae2166`) — 우선순위+분포 기반 선택 알고리즘, 개수제한 버그 수정**:
+- `PoiService.selectForAmbientDisplay()` 신규(순수 정적 함수, I/O 없음) — 뷰포트를
+  gridSize×gridSize(기본 4×4) 격자로 나눠 셀별로 우선순위(주유소>편의점>카페>대형마트>
+  식당 — 사용자 원문의 "전통시장"은 API에 대응 카테고리가 없어 스코프 밖, 대신 식당을
+  최하위로 둠) + 거리 순 정렬 후 라운드로빈으로 뽑아 최대 20개(기존 10개)로 추린다 —
+  화면 중심에만 몰리던 문제와 "우선순위가 랜덤처럼 보임" 문제를 동시에 해소.
+- ambient 레이어(`_maybeFetchAmbientPois`, take(10) 단순 거리정렬)를 이 알고리즘으로
+  교체.
+- **실제 원인 발견**: "번화가에서 10개 제한이 깨지고 수십 개 표시" 버그는 ambient
+  레이어(이미 take(10)으로 정상 제한 중이었음)가 아니라 **검색시트("장소 검색")의 지도
+  핀 레이어**(`poiListProvider`→`_poiSourceId`)가 애초에 캡이 전혀 없었던 게 원인 —
+  스크롤 리스트(`_visibleResults`)는 그대로 무제한 유지하되 지도 핀에 넘기는 값만
+  `_mapPinPois`(신규 getter, origin 중심 ±0.02° 근사 bounds로 동일 알고리즘 적용)로
+  캡핑.
+- 신규 유닛테스트 5개(`test/services/poi_service_test.dart`) — 빈 후보/캡 초과 안 함/
+  단일셀 우선순위/멀티셀 라운드로빈 분산/degenerate bounds 폴백.
+- code-auditor PASS. 감사에서 나온 사소한 개선 제안(null-origin 폴백 경로가
+  `PoiService.displayPriority.indexOf`를 직접 써서 미매핑 타입 방어가 없음, 논블로킹)은
+  바로 반영 — `selectForAmbientDisplay`의 degenerate-bounds 경로를 재사용하도록 수정.
+- `flutter analyze` 0 issues, `flutter test` 103/103(98+신규5), `flutter build apk
+  --debug --dart-define-from-file=env.json` 빌드 성공.
+
+**2단계(커밋 `1c66ce9`) — 아이콘+이름 라벨 렌더링**:
+- **제약 확인**: 지도 글리프 서버(`tiles.westinx.com/fonts/...`)는 Noto Sans
+  Regular/CJK만 호스팅 — Material Icons 폰트/PUA 코드포인트가 없어 `text-field`로 직접
+  렌더링 불가(한글 상호명은 Noto라 문제없음). 따라서 아이콘은 런타임에 `dart:ui`로
+  `IconData`+배경원을 PNG로 래스터라이즈해 `controller.addImage()`로 등록하는 방식
+  채택(기존 `pointer_red.png` 등 정적 에셋 등록 패턴과 동일한 자리, 다만 에셋이 아니라
+  런타임 생성).
+- `renderPoiIconPng()` 신규 — 5종 카테고리(주유소=가스펌프/카페=커피컵/편의점=편의점
+  아이콘/마트=쇼핑카트/식당=포크나이프) × 기존 CircleLayer와 동일한 5색 배경.
+  `onStyleLoadedCallback`(스타일 재주입마다 재실행 필요 — 기존 pointer 아이콘들과 동일
+  이유)에서 5개 등록.
+- ambient·검색시트 두 POI 레이어 모두 `CircleLayer` → `SymbolLayer`로 전환
+  (`iconImage`+`textField`(이름, Noto 폰트)). `belowLayerId`는 기존에도 없었으므로
+  유지(최상단 렌더링 유지, 다른 세션의 경로선 라벨가림 수정과는 무관).
+- code-auditor 1차 FAIL — `renderPoiIconPng`에서 `ui.Image`가 `dispose()` 없이 leak
+  (스타일 재주입마다 5개씩 누적, GC에 의존한 비결정적 해제) → `toByteData()` 직후
+  `image.dispose()` 추가해 해소, 2차 확인 후 커밋.
+- `flutter analyze` 0 issues, `flutter test` 103/103, `flutter build apk --debug` 빌드
+  성공.
+
+**3+4단계(커밋 `7e8b0f2`) — POI 점 탭 + 검색시트 리스트 탭 → 확인카드**:
+- 기존 지도 빈 곳 탭 시 쓰던 확인시트(`_showTapConfirmSheet`/`_TapAction`/`_TappedPoi`,
+  "여기로 안내"/"경유지 추가"/"닫기")를 재사용 — `_onMapTap`의 꼬리부분(액션 분기+경로
+  재조회)을 `_applyTapAction()`으로 순수 추출(기존 동작과 100% 동일, 리팩터만) 후,
+  신규 `_handlePoiTap(Poi)`가 이미 알고 있는 이름/카테고리로 같은 시트를 띄우고
+  `_applyTapAction`으로 위임.
+- 지도 위 POI 점 탭 감지: `controller.onFeatureTapped`(기존 이 리포에서 미사용이던 API)를
+  `onMapCreated`(컨트롤러 생애주기당 1회, 스타일 재주입마다 도는 `onStyleLoadedCallback`과
+  달리 중복 등록 위험 없음)에서 등록, layerId로 ambient/검색 레이어 구분 후 탭 좌표에서
+  가장 가까운 Poi를 haversine으로 찾아 매칭(GeoJSON feature id 왕복 대신 "현재 렌더링
+  중인 후보 리스트 중 최근접" 방식 채택 — 헤드리스 서버라 네이티브 feature-id 시맨틱을
+  직접 검증할 수 없어 더 안전한 방법 선택).
+- 검색시트 리스트 탭: `_PoiExploreSheet.onSelectDest` 시그니처를 `LatLng` → `Poi`로 변경,
+  즉시 목적지 확정 대신 `_handlePoiTap(poi)` 경유(확인카드 거침). 즐겨찾기/최근경로
+  시트(`_PlacesSheet`, 별개 위젯)는 스코프 아님 — 그대로 즉시 확정 유지.
+- code-auditor PASS. 감사 중 실제 회귀 1건 발견(논블로킹으로 분류됐으나 바로 수정) —
+  `_handlePoiTap`의 `origin == null` 가드가 `_onMapTap`과 달리 조용히 no-op이었는데,
+  ambient POI 레이어는 GPS 확보 전(카메라 뷰포트만으로 동작)에도 뜰 수 있어 실제로
+  도달 가능한 데드클릭이었음 → `_onMapTap`과 동일한 "GPS 위치를 기다리는 중입니다…"
+  스낵바를 추가해 조용한 무반응 대신 피드백 제공.
+- `flutter analyze` 0 issues, `flutter test` 103/103, `flutter build apk --debug` 빌드
+  성공.
+
+**5단계(커밋 `dd25dff`) — 목적지/경유지 지도 포인터 이름 라벨**:
+- `MapInteractionState`에 `waypointNames`(`List<String?>`, `waypoints`와 index 정렬)
+  신규 추가, `addWaypoint(LatLng, {String? name})`/`removeWaypoint`가 두 리스트를 항상
+  같이 갱신.
+- `_ensureDestMarker`/`_syncWaypointMarkers`에 `textField`(Noto 폰트, 흰 헤일로) 추가해
+  목적지/경유지 핀 아래 이름 표시.
+- code-auditor 1차 **FAIL — 실사용 경로에서 재현되는 버그 2건 발견**:
+  1. **경쟁상태로 목적지 마커 중복 생성**: `_applyDestination`에서 이름을 이미 아는 경우
+     (POI 탭 등) `_ensureDestMarker(dest, name: preResolved)`를 unawaited로 던진 직후
+     `setDestinationName(preResolved)`가 동기적으로 리스너를 트리거하는데, riverpod의
+     `ref.listen` 알림이 `addSymbol`의 플랫폼채널 왕복(진짜 비동기 IPC)보다 먼저
+     끝나버려서 `_destMarker`가 아직 null인 상태로 리스너가 또 `_ensureDestMarker`를
+     호출 → `addSymbol`이 두 번 발생, 마커 2개가 겹쳐 생성되고 나중에 끝난 쪽만
+     `_destMarker`에 남아 다른 하나는 참조를 잃어 영구히 남는 문제. **"POI 탭으로
+     목적지 설정"이라는 이 기능의 핵심 경로에서 거의 매번 재현되는 심각도**로 판단돼
+     `await`로 전환해 첫 마커 생성이 확정된 뒤에 리스너가 돌게 수정.
+  2. **이름 없는 목적지로 갈아탈 때 이전 라벨이 안 지워짐**: `updateSymbol`은 null
+     필드를 "변경 없음"으로 처리하는 라이브러리 동작이라(기존 코드가 이미 이 특성에
+     의존 중이었음 — geometry만 넘겨도 아이콘이 유지되는 게 그 증거), 이름 있는
+     목적지를 찍은 뒤 이름 없는 곳(빈 지도 탭)으로 다시 찍으면 새 위치에 이전 라벨
+     텍스트가 그대로 남음 → `_ensureDestMarker`가 `textField: name`을 `textField: name
+     ?? ''`로 바꿔 이름 없을 때 빈 문자열을 명시적으로 보내 확실히 지우도록 수정
+     (`_syncWaypointMarkers`는 매번 전체 재생성이라 이 문제 없음, 그대로 둠).
+  2차 재감사 없이 두 수정을 직접 반영 후 `flutter analyze`/`flutter test` 재실행으로
+  회귀 없음 확인(감사자가 제시한 수정안을 그대로 적용한 기계적 수정이라 재감사 생략,
+  이후 실기기 확인 시 함께 재검증 필요).
+- `flutter analyze` 0 issues, `flutter test` 103/103, `flutter build apk --debug
+  --dart-define-from-file=env.json` 빌드 성공.
+
+**슬라이드1(앱 시작 시 POI 로딩 5초+, 백그라운드 프리로딩 요청)은 별도 구현 불필요**:
+6번(검색 프리페치, 이미 완료·커밋됨)이 GPS 확보 시점부터 상시 백그라운드로 5종
+카테고리를 미리 받아두는 구조라, 슬라이드1이 요구한 "로딩 체감 단축"을 이미 만족함 —
+검색시트를 열 때 캐시가 이미 따뜻하면 네트워크 재요청 자체가 생략됨. 별도 코드 변경
+없음.
+
+**⚠️ 8번 전체에서 미확인 상태로 남은 것** (5단계 전부 headless 서버라 실기기 확인 못함,
+다음 실기기 접근 시 확인 필요):
+- ambient/검색 POI 점이 실제로 아이콘 모양+이름 라벨로 렌더링되는지(스타일 재로드 시
+  이미지 등록 타이밍 포함).
+- 지도 위 점 탭이 실제 손가락 터치에서 정확히 히트되는지(원 반지름이 작아 오차 여지),
+  탭 시 확인카드가 정상적으로 뜨는지.
+- 검색시트 리스트 탭 → 확인카드 → 목적지/경유지 확정 흐름 전체.
+- 목적지/경유지 핀 아래 이름 라벨이 실제로 보이는지, 이름 있음→없음 전환 시 라벨이
+  깨끗이 지워지는지(5단계 감사에서 발견된 두 버그의 실기기 재현 여부 포함).
+- ambient 레이어의 20개 상한·우선순위·화면 분포가 실제 번화가에서 체감상 개선됐는지.
 
 ## 명시적으로 미룬 것
 - **유턴/스위치백 경로 costing 튜닝(슬라이드11)** — 사용자가 "미루고 다른 버그부터"라고
