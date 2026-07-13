@@ -182,15 +182,71 @@
 Y자/T자 분기를 지날 때 카드 문구와 음성 문구를 한 번 더 정확히 확인해주시면
 그때 진짜 버그인지 확정 가능.
 
+## ▶ 2026-07-14 세션에서 완료된 항목 (실기기 재검증 대기)
+
+같은 세션에서 이어서 진행, 전부 code-auditor PASS + `flutter analyze` 0 issues +
+`flutter test` 105/105 + `flutter build apk --debug` 성공 확인 후 커밋:
+
+- **P0-A** 슬라이드 버튼 — `slider_button` 패키지(Dismissible 기반) 제거, 순수
+  position-based 커스텀 위젯으로 재작성(velocity 무관, 85% 임계값). 커밋 `22ba3b3`.
+- **P0-B** 경유지 상태머신(4+17번 묶음) — Organic Maps의 `m_passedIdx` 단조증가
+  패턴 채택. `_passedWaypointCount`가 GPS 40m 이내 진입 시 전진, 재탐색 시
+  `waypoints.sublist(_passedWaypointCount)`로 이미 지난 경유지 배제, 도착배너는
+  `_passedWaypointCount >= waypoints.length`일 때만(진짜 최종 목적지) 발동.
+  "경유지에 도착했습니다"(정차)/"이번 경유지를 통과했습니다"(통과) 음성 분리.
+  커밋 `6ee8da5`.
+- **P1-A** 내비 화면 POI 업그레이드 — `renderPoiIconPng`/아이콘·색상 맵을
+  `lib/services/poi_icon_renderer.dart`로 공유 추출, `nav_screen.dart`도
+  CircleLayer→SymbolLayer(아이콘+이름) 전환 + `selectForAmbientDisplay` 캡핑
+  적용. 조회 중심점은 `_isManualMode`(기존 팬 감지 플래그) 기준 분기 —
+  수동 팬 중엔 `getVisibleRegion()` 뷰포트, 자동 추적 중엔 GPS 위치 + 근사
+  bounds(main_map_screen의 `_mapPinPois` 패턴 재사용). 커밋 `14dd76e`.
+- **P1-B** 목적지/경유지 핀 소실 — 근본원인 확진: `onStyleLoadedCallback`(스타일
+  재주입, 예: 언어 토글)이 `_destMarker`/`_waypointMarkers`를 null로만
+  초기화하고 실제 심볼 재생성 코드가 아예 없었음. `mapInteractionProvider`
+  상태로부터 `_ensureDestMarker`/`_syncWaypointMarkers`를 다시 호출하도록 추가
+  (아이콘 `addImage` 등록 이후에 실행되도록 순서 확정 — 1차 시도는 순서가
+  틀려 code-auditor가 FAIL 판정, 재배치 후 PASS). 커밋 `507c88f`.
+- **P2-C** 재탐색 화면 3코스 미표시 — 근본원인 확진: `_openCourseSheet()`가 3개
+  코스를 다 받아 상태엔 저장하지만 선택된 1개만 지도에 그리는 레이어밖에 없었음.
+  `main_map_screen.dart`의 회색 배경 비교 레이어(`route-bg-source/layer`) 패턴을
+  `nav_screen.dart`에 이식(`nav-route-bg-source/layer`). 커밋 `0bdb14c`.
+
+## ▶ P1-C/P2-B 원인 확진 완료 — 둘 다 "버그"가 아니라 신규 기능으로 스코프 확정
+
+**18번(급커브 안내 누락)**: 좌표(37.05517, 127.05061) 인근 고덕갈평로 구간을 로컬
+Valhalla `/route`(`localhost:8002`)에 직접 태워봄 — 이 도로는 진입부(동쪽 방향)에서
+종료부(북쪽 방향)까지 약 700m에 걸쳐 실제로 90도 가까이 굽어있는데, **Valhalla가
+반환한 maneuver는 시작(type 1)과 도착(type 4) 딱 2개뿐, 중간에 어떤 회전/커브
+안내도 없음.** 확인 결과: **Valhalla는 교차로(결정 지점)에서만 maneuver를
+생성** — 교차로가 아닌 순수 도로 형상(선택지가 없는 단일 way의 곡률)은 애초에
+maneuver 후보 자체가 안 됨. 이건 이 리포의 Valhalla 포크(`motorcyclecost.cc`,
+costing에만 관여)로도 손댈 수 없는 stock 엔진의 근본 특성 — Y자 삼거리 조사 때
+확인한 것과 같은 계열의 한계. **결론: 클라이언트가 경로 폴리라인 자체의 곡률을
+직접 계산해서 "이건 급커브다"를 판단하고, 기존 `sharp_turn_left`/`sharp_turn_right`
+음성 이벤트를 Valhalla maneuver 없이도 독립적으로 발화시키는 신규 기능이 필요.**
+버그 수정이 아니라 기존 guidance 파이프라인에 새 감지 레이어를 얹는 작업 —
+스코프가 원래 예상보다 큼(곡률 임계값 튜닝, 오탐 방지, 기존 turn 안내와 겹칠 때
+우선순위 처리 등 설계 필요).
+
+**19번(고가/터널 안내)**: 아직 라이브 조사 전이지만 코드 확인 결과 이 앱은 OSM의
+`layer`/`bridge`/`tunnel` 태그를 라우팅 응답 어디에서도 소비하지 않음 — Valhalla
+자체는 이 태그들을 알고 있지만(costing 레벨에서 `long_bridge_factor`/
+`long_tunnel_factor`로 이미 쓰고 있음, `routing_service.dart` 확인됨) 그
+정보를 안내 문구로 클라이언트에 노출하는 경로가 없음. 이것도 "버그 수정"이
+아니라 라우팅 응답에 태그 데이터를 실어 보내는 것부터 시작하는 신규 기능.
+
+이 두 항목은 **다음 세션에 전용으로 설계·구현 진행 권장** — 오늘 세션에 처리한
+나머지 6개 항목과 스코프가 다름(버그 수정이 아니라 신규 guidance 기능).
+
 ## 다음 세션 착수 순서 제안
-1. P0-A(슬라이드 버튼 재작성) — 스코프 명확, 독립적, 빠르게 끝남.
-2. P0-B(경유지 상태 머신, 4+17번 묶음) — Organic Maps 리서치부터 시작, 스코프
-   가장 큼, 안전 관련(도착 판정 오류) 등급 높음.
-3. P1-A(내비 화면 POI 업그레이드) — 사용자에게 "드래그 시 갱신" 의도 재확인 후.
-4. P1-B(핀 소실) — 재조사.
-5. P1-C/P2-B(급커브·고가차도 안내) — 좌표 기준 Valhalla maneuver 덤프부터.
-6. P2(카페 데이터 오염) — 휴리스틱 필터 도입 여부 사용자 결정 대기.
-7. P2-C(재탐색 3코스 미표시) — 빠르게 확인 가능할 듯.
+
+P0-A/P0-B/P1-A/P1-B/P2-C는 2026-07-14 세션에 전부 완료·커밋됨(위 섹션 참조,
+실기기 재검증 대기). 남은 것:
+1. **P1-C/P2-B(급커브·고가차도 안내)** — 신규 기능으로 스코프 확정됨(위 섹션
+   참조). 곡률 감지 설계부터 시작하는 전용 세션 권장.
+2. **P2(카페 데이터 오염)** — 휴리스틱 필터 도입 여부 사용자 결정 대기 중
+   (옵션 (a)/(b), 위 섹션 참조).
 
 ## 하지 말 것
 - 1번(Y자 삼거리)은 재현 근거 없이 코드 재수정하지 말 것 — 다음 실주행 재확인
