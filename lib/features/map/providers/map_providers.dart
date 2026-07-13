@@ -97,6 +97,7 @@ class MapInteractionState {
   final MapInteractionMode mode;
   final LatLng? destination;
   final List<LatLng> waypoints; // 다중 경유지
+  final List<String?> waypointNames; // waypoints와 index-aligned 지명
   final double distanceKm;
   final bool isLoading;
   final List<LatLng> routePolyline; // 선택된 카드의 경로 좌표
@@ -109,6 +110,7 @@ class MapInteractionState {
     this.mode = MapInteractionMode.idle,
     this.destination,
     this.waypoints = const [],
+    this.waypointNames = const [],
     this.distanceKm = 0,
     this.isLoading = false,
     this.routePolyline = const [],
@@ -125,6 +127,7 @@ class MapInteractionState {
     MapInteractionMode? mode,
     LatLng? destination,
     List<LatLng>? waypoints,
+    List<String?>? waypointNames,
     double? distanceKm,
     bool? isLoading,
     List<LatLng>? routePolyline,
@@ -141,6 +144,8 @@ class MapInteractionState {
       mode: mode ?? this.mode,
       destination: clearDestination ? null : destination ?? this.destination,
       waypoints: clearWaypoints ? [] : waypoints ?? this.waypoints,
+      waypointNames:
+          clearWaypoints ? [] : waypointNames ?? this.waypointNames,
       distanceKm: distanceKm ?? this.distanceKm,
       isLoading: isLoading ?? this.isLoading,
       routePolyline: clearRoute ? [] : routePolyline ?? this.routePolyline,
@@ -170,9 +175,10 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
   }
 
   /// 경유지 추가 (다중 경유지 지원)
-  void addWaypoint(LatLng wp) {
+  void addWaypoint(LatLng wp, {String? name}) {
     state = state.copyWith(
       waypoints: [...state.waypoints, wp],
+      waypointNames: [...state.waypointNames, name],
       mode: MapInteractionMode.idle,
     );
   }
@@ -187,8 +193,10 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
 
   /// 경유지 제거
   void removeWaypoint(int idx) {
-    final updated = [...state.waypoints]..removeAt(idx);
-    state = state.copyWith(waypoints: updated);
+    final updatedPoints = [...state.waypoints]..removeAt(idx);
+    final updatedNames = [...state.waypointNames];
+    if (idx < updatedNames.length) updatedNames.removeAt(idx);
+    state = state.copyWith(waypoints: updatedPoints, waypointNames: updatedNames);
   }
 
   void setLoading(bool v) => state = state.copyWith(isLoading: v);

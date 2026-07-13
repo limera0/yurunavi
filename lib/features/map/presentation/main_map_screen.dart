@@ -677,20 +677,30 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     await c.setGeoJsonSource(_locSourceId, _buildLocGeoJson(p, heading));
   }
 
-  Future<void> _ensureDestMarker(LatLng dest) async {
+  Future<void> _ensureDestMarker(LatLng dest, {String? name}) async {
     final c = _mlCtrl;
     if (c == null || !_styleLoaded) return;
     final geo = _toMl(dest);
+    final options = ml.SymbolOptions(
+      geometry: geo,
+      iconImage: _kDestIcon,
+      iconSize: _kDestIconSize,
+      iconAnchor: 'bottom',
+      zIndex: 10,
+      // updateSymbol은 null 필드를 "변경 없음"으로 처리해 이전 라벨이 남을 수 있으므로
+      // 이름이 없을 땐 빈 문자열을 명시적으로 보내 이전 값을 확실히 지운다.
+      textField: name ?? '',
+      textSize: 12,
+      textOffset: const Offset(0, 1.4),
+      textAnchor: 'top',
+      textColor: '#212121',
+      textHaloColor: '#FFFFFF',
+      textHaloWidth: 1.2,
+    );
     if (_destMarker == null) {
-      _destMarker = await c.addSymbol(ml.SymbolOptions(
-        geometry: geo,
-        iconImage: _kDestIcon,
-        iconSize: _kDestIconSize,
-        iconAnchor: 'bottom',
-        zIndex: 10,
-      ));
+      _destMarker = await c.addSymbol(options);
     } else {
-      await c.updateSymbol(_destMarker!, ml.SymbolOptions(geometry: geo));
+      await c.updateSymbol(_destMarker!, options);
     }
   }
 
@@ -702,20 +712,29 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _destMarker = null;
   }
 
-  Future<void> _syncWaypointMarkers(List<LatLng> waypoints) async {
+  Future<void> _syncWaypointMarkers(
+      List<LatLng> waypoints, List<String?> names) async {
     final c = _mlCtrl;
     if (c == null || !_styleLoaded) return;
     for (final s in _waypointMarkers) {
       await c.removeSymbol(s);
     }
     _waypointMarkers = [];
-    for (final wp in waypoints) {
+    for (var i = 0; i < waypoints.length; i++) {
+      final name = i < names.length ? names[i] : null;
       final s = await c.addSymbol(ml.SymbolOptions(
-        geometry: _toMl(wp),
+        geometry: _toMl(waypoints[i]),
         iconImage: _kWpIcon,
         iconSize: _kWpIconSize,
         iconAnchor: 'bottom',
         zIndex: 5,
+        textField: name,
+        textSize: 12,
+        textOffset: const Offset(0, 1.4),
+        textAnchor: 'top',
+        textColor: '#212121',
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.2,
       ));
       _waypointMarkers.add(s);
     }
@@ -866,7 +885,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     String? preResolvedName,
   }) async {
     if (act == _TapAction.waypoint) {
-      ref.read(mapInteractionProvider.notifier).addWaypoint(loc);
+      ref.read(mapInteractionProvider.notifier)
+          .addWaypoint(loc, name: preResolvedName);
       final dest = ref.read(mapInteractionProvider).destination;
       if (dest != null) {
         ref.read(mapInteractionProvider.notifier).setLoading(true);
@@ -1028,7 +1048,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     });
     _sheetCtrl.forward();
 
-    _ensureDestMarker(dest); // unawaited — B2
+    // await 필요 — preResolved가 이미 있으면 아래 setDestinationName이 곧바로 리스너를
+    // 동기 트리거하는데, _destMarker 대입 전에 그 리스너가 또 addSymbol을 부르면 마커가
+    // 두 개 생성되고 하나는 참조를 잃어 영원히 남는 경쟁상태가 생긴다.
+    await _ensureDestMarker(dest, name: preResolved);
 
     // Valhalla 3회 병렬 호출 (시골길·지방도로·국도) → 3카드 동시 표시
     _fetchAndStoreAllRoutes(origin, dest);
@@ -1196,7 +1219,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     _sheetCtrl.reverse();
     _recenterMap();
     _removeDestMarker(); // unawaited — B2
-    _syncWaypointMarkers(const []); // unawaited — 경유지 핀 전체 제거
+    _syncWaypointMarkers(const [], const []); // unawaited — 경유지 핀 전체 제거
   }
 
   void _startNavigation() {
@@ -1293,10 +1316,15 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         _updateRouteLayer(next.routePolyline);
       }
       if (prev?.waypoints != next.waypoints) {
-        _syncWaypointMarkers(next.waypoints); // unawaited
+        _syncWaypointMarkers(next.waypoints, next.waypointNames); // unawaited
       }
       if (prev?.selectedRouteIdx != next.selectedRouteIdx) {
         _recolorRouteLayer(next.selectedRouteIdx); // unawaited
+      }
+      if (prev?.destinationName != next.destinationName &&
+          next.destination != null) {
+        _ensureDestMarker(next.destination!,
+            name: next.destinationName); // unawaited — 비동기 이름 해석 완료 후 라벨 갱신
       }
     });
 
