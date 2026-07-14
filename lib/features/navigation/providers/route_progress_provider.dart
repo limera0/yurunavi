@@ -2,7 +2,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
-import '../../../services/routing_service.dart' show ManeuverStep;
+import '../../../services/routing_service.dart'
+    show ManeuverStep, StructureType, StructureZone;
 import 'nav_state_provider.dart';
 
 @immutable
@@ -13,6 +14,9 @@ class RouteProgress {
   final double distToDestM;     // snap → 폴리라인 끝까지 누적
   final bool arrived;
   final bool offRoute;          // 스냅 실패(코리도 밖). 재탐색 트리거용
+  final int structureZoneIdx;   // _zones 인덱스, "현재 안내 대상 구조물" 식별. 없으면 -1
+  final double distToNextStructureM; // snap → 다음 구조물 진입(beginShapeIdx)까지 누적. 없으면 ∞
+  final StructureType? nextStructureType; // 다음 구조물 타입. 없으면 null
   const RouteProgress({
     required this.snapIdx,
     required this.activeStepIdx,
@@ -20,6 +24,9 @@ class RouteProgress {
     required this.distToDestM,
     required this.arrived,
     required this.offRoute,
+    required this.structureZoneIdx,
+    required this.distToNextStructureM,
+    required this.nextStructureType,
   });
 }
 
@@ -31,6 +38,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // ── 경로 컨텍스트 (setRoute로 주입) ──
   List<LatLng> _pts = const [];
   List<ManeuverStep> _maneuvers = const [];
+  List<StructureZone> _zones = const [];
 
   // ── 사전계산 ──
   List<double> _segLenM = const [];  // _pts[i]→_pts[i+1] 길이
@@ -39,6 +47,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
   // ── 진행 상태 ──
   int _snapIdx = 0;
+  double _traveledM = 0.0; // snap 세그먼트 내 실제 진행거리 포함, 폴리라인 시작 기준 누적거리
 
   // ── 튜닝 상수 ──
   static const _kSnapWindow = 50;       // 앞쪽 탐색 세그먼트 수
@@ -66,7 +75,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   }) {
     _pts = points;
     _maneuvers = maneuvers;
+    _zones = const []; // 구조물 구간은 setStructureZones로 비동기 별도 주입
     _snapIdx = 0;
+    _traveledM = 0.0;
 
     // 세그먼트 길이 + 누적 사전계산 (O(n) 1회)
     final n = points.length;
@@ -87,6 +98,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       debugPrint('YNAV_ROUTE steps=${maneuvers.length} pts=${points.length} lastBegin=${maneuvers.last.beginShapeIdx} lastEnd=${maneuvers.last.endShapeIdx}');
     }
 
+    final structFields = _structureFieldsFor(0, 0.0);
     state = RouteProgress(
       snapIdx: 0,
       activeStepIdx: 0,
@@ -94,6 +106,30 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       distToDestM: _totalM,
       arrived: false,
       offRoute: false,
+      structureZoneIdx: structFields.idx,
+      distToNextStructureM: structFields.distM,
+      nextStructureType: structFields.type,
+    );
+  }
+
+  /// 다리/터널 구간 주입. trace_attributes HTTP 호출이 setRoute 이후 비동기로
+  /// 완료되므로 별도 메서드로 분리 — 라이더가 이미 주행 중일 수 있어 현재
+  /// _snapIdx 기준으로 즉시 재계산해 state를 다시 emit한다.
+  void setStructureZones(List<StructureZone> zones) {
+    _zones = zones;
+    final current = state;
+    if (current == null) return; // 아직 경로 없음 — 다음 setRoute에서 반영
+    final structFields = _structureFieldsFor(_snapIdx, _traveledM);
+    state = RouteProgress(
+      snapIdx: current.snapIdx,
+      activeStepIdx: current.activeStepIdx,
+      distToNextTurnM: current.distToNextTurnM,
+      distToDestM: current.distToDestM,
+      arrived: current.arrived,
+      offRoute: current.offRoute,
+      structureZoneIdx: structFields.idx,
+      distToNextStructureM: structFields.distM,
+      nextStructureType: structFields.type,
     );
   }
 
@@ -130,6 +166,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
     // 현재 위치의 폴리라인 누적거리
     final traveledM = _cumFromStartM[bestSeg] + bestAlongM;
+    _traveledM = traveledM;
 
     // active step: snap이 지난 maneuver를 제외한 다음 턴
     final activeStep = _activeStepFor(bestSeg);
@@ -149,6 +186,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     }
     debugPrint('YNAV_PROG snap=$bestSeg step=$activeStep next=${distToNext.toStringAsFixed(1)} dest=${distToDest.toStringAsFixed(1)} off=$offRoute perp=${bestPerp.toStringAsFixed(1)}');
 
+    final structFields = _structureFieldsFor(bestSeg, traveledM);
     state = RouteProgress(
       snapIdx: bestSeg,
       activeStepIdx: activeStep,
@@ -156,6 +194,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       distToDestM: distToDest,
       arrived: arrived,
       offRoute: offRoute,
+      structureZoneIdx: structFields.idx,
+      distToNextStructureM: structFields.distM,
+      nextStructureType: structFields.type,
     );
   }
 
@@ -178,6 +219,35 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     if (s >= _maneuvers.length) return _pts.length - 1;
     // 다음 턴 지점 = 현재 active maneuver의 종료 shape(그 지점에서 회전)
     return _clampIdx(_maneuvers[s].endShapeIdx);
+  }
+
+  /// snap 세그먼트 기준, 아직 지나지 않은 다음 구조물(zone) 인덱스.
+  /// _zones는 buildStructureZones 계약에 따라 beginShapeIdx 오름차순 정렬됨.
+  /// 모두 지났거나(또는 비어 있으면) -1.
+  int _nextZoneIdxFor(int seg) {
+    for (int i = 0; i < _zones.length; i++) {
+      if (_zones[i].endShapeIdx > seg) return i;
+    }
+    return -1;
+  }
+
+  /// snap 세그먼트 기준 다음 구조물의 (인덱스, 진입까지 거리, 타입).
+  /// 다음 구조물이 없으면 (-1, ∞, null).
+  /// [traveledM]은 세그먼트 시작점이 아닌, 세그먼트 내 실제 진행거리까지 포함한
+  /// 폴리라인 시작 기준 누적거리(= _advance()의 로컬 traveledM / _traveledM)여야
+  /// 정확하다. 세그먼트 시작점만 쓰면 세그먼트 길이만큼 과대평가된다.
+  ({int idx, double distM, StructureType? type}) _structureFieldsFor(
+      int seg, double traveledM) {
+    final idx = _nextZoneIdxFor(seg);
+    if (idx < 0) return (idx: -1, distM: double.infinity, type: null);
+    final cumBegin = _cumFromStartM.isEmpty
+        ? 0.0
+        : _cumFromStartM[_clampIdx(_zones[idx].beginShapeIdx)];
+    return (
+      idx: idx,
+      distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
+      type: _zones[idx].type,
+    );
   }
 
   double _distToShapeIdx(int fromSeg, int toShape) {

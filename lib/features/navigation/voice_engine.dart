@@ -137,3 +137,70 @@ class VoiceEngine {
     _immediatePoint = null;
   }
 }
+
+/// 고가도로/터널 등 구조물(zone) 진입 음성 안내.
+/// [VoiceEngine]의 tiered "pending points, drain as distance decreases" 방식을
+/// 그대로 따르되 maneuver step이 아닌 구조물 zone 인덱스/거리/타입 기반으로 동작한다.
+/// 회전 관련 로직(_fast 축약, 출구명/랜드마크, 로터리 출구 번호 등)은 없다.
+class StructureVoiceEngine {
+  final GuidanceProfile profile;
+  StructureVoiceEngine(this.profile);
+
+  int _zoneIdx = -1;
+  List<double> _pendingPoints = [];
+  double? _immediatePoint;
+
+  List<SpeakIntent> onProgress(int zoneIdx, double d, StructureType? type) {
+    if (type == null || zoneIdx < 0) {
+      // 모든 구조물 통과(zoneIdx=-1) 후에도 _zoneIdx를 갱신해두지 않으면,
+      // 재탐색 후 새 경로의 첫 구간이 우연히 같은 인덱스를 재사용할 때
+      // "이미 본 구간"으로 오인해 안내가 조용히 스킵될 수 있다.
+      _zoneIdx = zoneIdx;
+      _pendingPoints = [];
+      _immediatePoint = null;
+      return const [];
+    }
+    final event = type == StructureType.bridge ? 'bridge' : 'tunnel';
+    final imminentM = profile.imminentForEvent(event);
+    if (zoneIdx != _zoneIdx) {
+      _zoneIdx = zoneIdx;
+      final entryD = d;
+      final tierList = profile.tiersForEvent(event);
+      final tier = tierList.firstWhere(
+        (t) => entryD >= t.minEntryM,
+        orElse: () => tierList.last,
+      );
+      final filtered = {...tier.pointsM, imminentM}
+          .where((p) => p < entryD)
+          .toList()
+        ..sort((a, b) => b.compareTo(a));
+      if (filtered.isEmpty && entryD >= 0) {
+        // 이 구조물을 처음 관측한 시점에 이미 imminent 지점까지도 지나쳐
+        // 있는 경우(짧은 간격의 연속 구조물, 또는 비동기 zone 조회가 늦게
+        // 도착한 경우) — 안내가 아예 없는 대신 즉시 1회 안내한다.
+        // VoiceEngine._immediatePoint와 동일한 처리.
+        filtered.add(entryD);
+        _immediatePoint = entryD;
+      } else {
+        _immediatePoint = null;
+      }
+      _pendingPoints = filtered;
+    }
+
+    final out = <SpeakIntent>[];
+    while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
+      final point = _pendingPoints.removeAt(0);
+      if (!profile.isEnabled(event)) continue;
+      final isImminent = point == imminentM || point == _immediatePoint;
+      final phase = isImminent ? 'imminent' : 'approach';
+      out.add(SpeakIntent('${event}_$phase', {'dist': point.toStringAsFixed(0)}));
+    }
+    return out;
+  }
+
+  void reset() {
+    _zoneIdx = -1;
+    _pendingPoints = [];
+    _immediatePoint = null;
+  }
+}

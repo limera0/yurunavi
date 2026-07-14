@@ -50,6 +50,10 @@
     "roundabout_exit_approach":  "{dist}미터 앞 회전교차로 진출",
     "roundabout_exit_imminent":  "곧 진출입니다",
     "destination_approach":     "{dist}미터 앞 목적지",
-    "destination_imminent":     "목적지 부근입니다"
+    "destination_imminent":     "목적지 부근입니다",
+    "bridge_approach": "{dist}미터 앞부터 고가도로 구간입니다",
+    "bridge_imminent": "고가도로 진입",
+    "tunnel_approach": "{dist}미터 앞부터 터널 구간입니다",
+    "tunnel_imminent": "터널 진입"
   }
 }
