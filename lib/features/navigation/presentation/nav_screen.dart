@@ -146,6 +146,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   int _lastAnnouncedIdx = -1;  // 중복 발화 방지 (_announceStep용)
   GuidanceProfile? _profile;
   VoiceEngine? _voiceEngine;
+  StructureVoiceEngine? _structureVoiceEngine;
   ExitLandmarkService? _landmarkService;
 
   // progress 구독
@@ -203,6 +204,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
+  // 구조물(다리/터널) zone 비동기 페치 stale-response 가드 — _applyRouteGuidance
+  // 호출마다 증가시켜, 이전 세대의 fetchStructureZones 응답이 늦게 도착해도
+  // 최신 경로에 잘못 반영되지 않게 한다.
+  int _routeGeneration = 0;
 
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
@@ -395,9 +400,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
     }
+    final structureIntents = _structureVoiceEngine!.onProgress(
+        prog.structureZoneIdx, prog.distToNextStructureM, prog.nextStructureType);
+    for (final it in structureIntents) {
+      _vps?.speak(it.key, vars: it.vars);
+      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} zone=${prog.structureZoneIdx}');
+    }
   }
 
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
+    final generation = ++_routeGeneration;
     _steps = maneuvers.isNotEmpty
         ? maneuvers.map(_TurnStep.fromManeuver).toList()
         : const [
@@ -410,6 +422,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _cardRemainingM = 0.0;
     _lastAnnouncedIdx = -1;
     _voiceEngine?.reset();
+    _structureVoiceEngine?.reset();
     if (widget.destination != null) {
       // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
       // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
@@ -421,7 +434,22 @@ class _NavScreenState extends ConsumerState<NavScreen>
           destination: widget.destination!,
         );
       });
+      // 다리/터널 zone 조회는 다음 프레임을 기다릴 필요 없는 순수 HTTP 호출 —
+      // setRoute post-frame 콜백과 독립적으로 즉시 fire-and-forget.
+      unawaited(_loadStructureZones(_routePoints, generation));
     }
+  }
+
+  /// Valhalla trace_attributes로 다리/터널 구간을 비동기 조회해 provider에
+  /// 주입한다. 실패해도 예외를 던지지 않는 부가 기능(routing_service 계약) —
+  /// 조회가 느리거나 실패해도 내비게이션 본편은 정상 진행된다. generation이
+  /// 최신 _applyRouteGuidance 호출과 다르면(그 사이 재탐색/코스 재선택으로
+  /// 경로가 또 바뀌었으면) stale 응답이니 버린다.
+  Future<void> _loadStructureZones(List<LatLng> points, int generation) async {
+    final zones = await RoutingService.fetchStructureZones(points);
+    if (!mounted || generation != _routeGeneration) return;
+    debugPrint('YNAV_STRUCT zones=${zones.length}');
+    ref.read(routeProgressProvider.notifier).setStructureZones(zones);
   }
 
   void _triggerReroute() {
@@ -518,6 +546,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
     _landmarkService = await ExitLandmarkService.load('assets/data/kr_places.json');
     _voiceEngine = VoiceEngine(_profile!, landmarkService: _landmarkService);
+    _structureVoiceEngine = StructureVoiceEngine(_profile!);
     _announceStep(0);
   }
 
