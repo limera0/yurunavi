@@ -286,4 +286,34 @@ void main() {
       expect(intents[0].vars['dist'], '50');
     });
   });
+
+  group('L — 경유지 vs 최종목적지 dest_word 분기 (2026-07-15 실주행 회귀 가드)', () {
+    // steps[turnIdx]=steps[1] is a segment-end maneuver (type 4/5/6) — this is
+    // exactly the shape produced at the end of a sub-route to a waypoint, not
+    // just the final destination.
+    test('isFinalDestination default(true): dest_word=목적지', () {
+      final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 4)];
+      final intents = drive(engine, 0, [600, 500], steps);
+      expect(intents, isNotEmpty);
+      for (final it in intents) {
+        expect(it.key.startsWith('destination_'), isTrue);
+        expect(it.vars['dest_word'], '목적지');
+      }
+    });
+
+    test('isFinalDestination=false (경유지 구간): dest_word=경유지', () {
+      final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 4)];
+      final out = <SpeakIntent>[];
+      for (final d in <double>[600, 500]) {
+        out.addAll(engine.onProgress(0, d, steps, isFinalDestination: false));
+      }
+      expect(out, isNotEmpty);
+      for (final it in out) {
+        expect(it.key.startsWith('destination_'), isTrue);
+        expect(it.vars['dest_word'], '경유지');
+      }
+    });
+  });
 }

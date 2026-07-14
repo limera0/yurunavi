@@ -50,6 +50,7 @@ class VoiceEngine {
     List<ManeuverStep> steps, {
     double speedKmh = 0,
     List<LatLng> shapePoints = const [],
+    bool isFinalDestination = true,
   }) {
     final turnIdx = step + 1;
     if (turnIdx >= steps.length) return const [];
@@ -104,6 +105,9 @@ class VoiceEngine {
             ? '_fast'
             : '';
         final vars = {'dist': point.toStringAsFixed(0)};
+        if (event == 'destination') {
+          vars['dest_word'] = isFinalDestination ? '목적지' : '경유지';
+        }
         var key = '${event}_$phase$suffix';
         if (event == 'roundabout_enter') {
           final exitCount = steps[turnIdx].roundaboutExitCount;

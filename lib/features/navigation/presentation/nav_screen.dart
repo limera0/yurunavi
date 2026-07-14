@@ -396,7 +396,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final intents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
         speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0,
-        shapePoints: _routePoints);
+        shapePoints: _routePoints,
+        isFinalDestination: _passedWaypointCount >= widget.waypoints.length);
     for (final it in intents) {
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
@@ -418,7 +419,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
     final generation = ++_routeGeneration;
     _steps = maneuvers.isNotEmpty
-        ? maneuvers.map(_TurnStep.fromManeuver).toList()
+        ? maneuvers
+            .map((m) => _TurnStep.fromManeuver(
+                m,
+                isFinalDestination:
+                    _passedWaypointCount >= widget.waypoints.length))
+            .toList()
         : const [
             _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
             _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
@@ -1171,7 +1177,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final maxLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
     final minLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
     final maxLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
-    _mlCtrl?.animateCamera(
+    await _mlCtrl?.animateCamera(
       ml.CameraUpdate.newLatLngBounds(
         ml.LatLngBounds(
           southwest: ml.LatLng(minLat, minLng),
@@ -1183,6 +1189,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         bottom: 360,
       ),
     );
+    await _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(0));
 
     final currentMapState = ref.read(mapInteractionProvider);
     _originalSelectedIdx = currentMapState.selectedRouteIdx;
@@ -1941,10 +1948,10 @@ class _TurnStep {
   final int type;
   const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0]);
 
-  factory _TurnStep.fromManeuver(ManeuverStep m) {
+  factory _TurnStep.fromManeuver(ManeuverStep m, {bool isFinalDestination = true}) {
     return _TurnStep(
       _iconForType(m.type),
-      _labelForType(m.type, m.roundaboutExitCount),
+      _labelForType(m.type, m.roundaboutExitCount, isFinalDestination),
       _formatDist(m.distanceKm),
       m.distanceKm,
       m.type,
@@ -1968,10 +1975,11 @@ class _TurnStep {
     }
   }
 
-  static String _labelForType(int type, [int? roundaboutExitCount]) {
+  static String _labelForType(int type,
+      [int? roundaboutExitCount, bool isFinalDestination = true]) {
     switch (type) {
       case 1: case 2: case 3: return '출발';
-      case 4: case 5: case 6: return '목적지 도착';
+      case 4: case 5: case 6: return isFinalDestination ? '목적지 도착' : '경유지 도착';
       case 7: return '도로명 변경';
       case 8: case 22: return '직진';
       case 9: return '약간 우회전';
