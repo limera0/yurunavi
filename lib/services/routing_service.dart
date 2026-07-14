@@ -54,6 +54,21 @@ class ManeuverStep {
   });
 }
 
+/// 고가도로/터널 등 구조물 종류.
+enum StructureType { bridge, tunnel }
+
+/// 경로 상의 다리/터널 구간 (전역 shape 인덱스 기준).
+class StructureZone {
+  final StructureType type;
+  final int beginShapeIdx; // 전역 shape 인덱스, ManeuverStep.beginShapeIdx/endShapeIdx와 동일 좌표계
+  final int endShapeIdx;   // 전역 shape 인덱스
+  const StructureZone({
+    required this.type,
+    required this.beginShapeIdx,
+    required this.endShapeIdx,
+  });
+}
+
 /// Valhalla 라우팅 결과 단위.
 class RouteResult {
   final List<LatLng> points;
@@ -61,12 +76,15 @@ class RouteResult {
   final int durationMin; // round(distance / realistic_speed_kmh * 60)
   final double windingScore; // 0~100 from NativeEngine.calcWindingScore
   final List<ManeuverStep> maneuvers; // Valhalla 턴바이턴 단계
+  /// 다리/터널 구간 (fetchRoutes()/_doFetch()는 채우지 않음 — 별도 호출자가 채운다).
+  final List<StructureZone> structures;
   const RouteResult({
     required this.points,
     required this.distanceKm,
     required this.durationMin,
     this.windingScore = 0.0,
     this.maneuvers = const [],
+    this.structures = const [],
   });
 }
 
@@ -463,6 +481,134 @@ class RoutingService {
       }
     }
     return points;
+  }
+
+  /// trace_attributes 응답의 edges 배열에서 다리/터널 구간을 추출한다.
+  ///
+  /// bridge/tunnel을 각각 독립적으로 추적해 배열 순서상 연속된(run-adjacent)
+  /// edge들을 하나의 구간으로 묶는다. 합산 길이가 [minLengthM] 미만인 구간은
+  /// 버린다. 반환값은 beginShapeIdx 오름차순 정렬(타입 무관하게 shape 순서).
+  static List<StructureZone> buildStructureZones(
+    List<dynamic> edges, {
+    double minLengthM = 100,
+  }) {
+    final zones = <StructureZone>[];
+
+    void collect(StructureType type, bool Function(Map edge) isType) {
+      int? runBegin;
+      int runEnd = 0;
+      double runLengthM = 0;
+
+      void flush() {
+        if (runBegin != null && runLengthM >= minLengthM) {
+          zones.add(StructureZone(
+            type: type,
+            beginShapeIdx: runBegin!,
+            endShapeIdx: runEnd,
+          ));
+        }
+        runBegin = null;
+        runLengthM = 0;
+      }
+
+      for (final e in edges) {
+        final edge = e as Map;
+        if (isType(edge)) {
+          final b = (edge['begin_shape_index'] as num?)?.toInt() ?? 0;
+          final end = (edge['end_shape_index'] as num?)?.toInt() ?? 0;
+          final lenM = ((edge['length'] as num?)?.toDouble() ?? 0.0) * 1000;
+          runBegin ??= b;
+          runEnd = end;
+          runLengthM += lenM;
+        } else {
+          flush();
+        }
+      }
+      flush();
+    }
+
+    collect(StructureType.bridge, (e) => (e['bridge'] as bool?) ?? false);
+    collect(StructureType.tunnel, (e) => (e['tunnel'] as bool?) ?? false);
+
+    zones.sort((a, b) => a.beginShapeIdx.compareTo(b.beginShapeIdx));
+    return zones;
+  }
+
+  /// 경로 좌표 목록으로 Valhalla trace_attributes를 호출해 다리/터널 구간을
+  /// 조회한다. 부가 기능이므로 어떤 실패에서도 예외를 던지지 않고 빈 리스트를
+  /// 반환한다.
+  static Future<List<StructureZone>> fetchStructureZones(
+    List<LatLng> points,
+  ) async {
+    if (points.length < 2) return [];
+
+    try {
+      final encoded = _encodePolyline6(points);
+      final resp = await http
+          .post(
+            Uri.parse('$_valhallaBase/trace_attributes'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'encoded_polyline': encoded,
+              'shape_match': 'edge_walk',
+              'costing': 'motorcycle',
+              'filters': {
+                'attributes': [
+                  'edge.begin_shape_index',
+                  'edge.end_shape_index',
+                  'edge.length',
+                  'edge.bridge',
+                  'edge.tunnel',
+                ],
+                'action': 'include',
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (resp.statusCode != 200) {
+        dev.log(
+          'trace_attributes ${resp.statusCode}: '
+          '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
+          name: 'RoutingService',
+          level: 900,
+        );
+        return [];
+      }
+
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final edges = data['edges'] as List? ?? [];
+      return buildStructureZones(edges);
+    } catch (e) {
+      dev.log('fetchStructureZones 실패: $e', name: 'RoutingService', level: 900);
+      return [];
+    }
+  }
+
+  /// Valhalla encoded polyline 인코더 (precision 6) — [_decodePolyline6]의 역연산.
+  static String _encodePolyline6(List<LatLng> points) {
+    final buffer = StringBuffer();
+    int prevLat = 0;
+    int prevLng = 0;
+
+    void encodeValue(int value) {
+      int v = value < 0 ? ~(value << 1) : (value << 1);
+      while (v >= 0x20) {
+        buffer.writeCharCode((0x20 | (v & 0x1f)) + 63);
+        v >>= 5;
+      }
+      buffer.writeCharCode(v + 63);
+    }
+
+    for (final p in points) {
+      final lat = (p.latitude * 1e6).round();
+      final lng = (p.longitude * 1e6).round();
+      encodeValue(lat - prevLat);
+      encodeValue(lng - prevLng);
+      prevLat = lat;
+      prevLng = lng;
+    }
+    return buffer.toString();
   }
 
   /// Valhalla encoded polyline 디코더 (precision 6).
