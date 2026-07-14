@@ -147,6 +147,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   GuidanceProfile? _profile;
   VoiceEngine? _voiceEngine;
   StructureVoiceEngine? _structureVoiceEngine;
+  CurveVoiceEngine? _curveVoiceEngine;
   ExitLandmarkService? _landmarkService;
 
   // progress 구독
@@ -406,6 +407,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} zone=${prog.structureZoneIdx}');
     }
+    final curveIntents = _curveVoiceEngine!.onProgress(
+        prog.curveZoneIdx, prog.distToNextCurveM, prog.nextCurveDirection);
+    for (final it in curveIntents) {
+      _vps?.speak(it.key, vars: it.vars);
+      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} curve=${prog.curveZoneIdx}');
+    }
   }
 
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
@@ -423,6 +430,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _lastAnnouncedIdx = -1;
     _voiceEngine?.reset();
     _structureVoiceEngine?.reset();
+    _curveVoiceEngine?.reset();
     if (widget.destination != null) {
       // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
       // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.
@@ -547,6 +555,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _landmarkService = await ExitLandmarkService.load('assets/data/kr_places.json');
     _voiceEngine = VoiceEngine(_profile!, landmarkService: _landmarkService);
     _structureVoiceEngine = StructureVoiceEngine(_profile!);
+    _curveVoiceEngine = CurveVoiceEngine(_profile!);
     _announceStep(0);
   }
 
