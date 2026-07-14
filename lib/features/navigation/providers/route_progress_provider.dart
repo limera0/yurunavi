@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../services/routing_service.dart'
-    show ManeuverStep, StructureType, StructureZone;
+    show RoutingService, ManeuverStep, StructureType, StructureZone, CurveDirection, SharpCurveZone;
 import 'nav_state_provider.dart';
 
 @immutable
@@ -17,6 +17,9 @@ class RouteProgress {
   final int structureZoneIdx;   // _zones 인덱스, "현재 안내 대상 구조물" 식별. 없으면 -1
   final double distToNextStructureM; // snap → 다음 구조물 진입(beginShapeIdx)까지 누적. 없으면 ∞
   final StructureType? nextStructureType; // 다음 구조물 타입. 없으면 null
+  final int curveZoneIdx;       // _curves 인덱스, "현재 안내 대상 급커브" 식별. 없으면 -1
+  final double distToNextCurveM; // snap → 다음 급커브 진입(beginShapeIdx)까지 누적. 없으면 ∞
+  final CurveDirection? nextCurveDirection; // 다음 급커브 방향. 없으면 null
   const RouteProgress({
     required this.snapIdx,
     required this.activeStepIdx,
@@ -27,6 +30,9 @@ class RouteProgress {
     required this.structureZoneIdx,
     required this.distToNextStructureM,
     required this.nextStructureType,
+    required this.curveZoneIdx,
+    required this.distToNextCurveM,
+    required this.nextCurveDirection,
   });
 }
 
@@ -39,6 +45,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   List<LatLng> _pts = const [];
   List<ManeuverStep> _maneuvers = const [];
   List<StructureZone> _zones = const [];
+  List<SharpCurveZone> _curves = const [];
 
   // ── 사전계산 ──
   List<double> _segLenM = const [];  // _pts[i]→_pts[i+1] 길이
@@ -76,6 +83,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _pts = points;
     _maneuvers = maneuvers;
     _zones = const []; // 구조물 구간은 setStructureZones로 비동기 별도 주입
+    // 급커브는 순수 geometry 계산이라 fetchStructureZones처럼 비동기 HTTP
+    // 응답을 기다릴 필요가 없다 — setRoute 시점에 바로 계산해 반영한다.
+    _curves = RoutingService.detectSharpCurves(points, maneuvers);
     _snapIdx = 0;
     _traveledM = 0.0;
 
@@ -99,6 +109,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     }
 
     final structFields = _structureFieldsFor(0, 0.0);
+    final curveFields = _curveFieldsFor(0, 0.0);
     state = RouteProgress(
       snapIdx: 0,
       activeStepIdx: 0,
@@ -109,6 +120,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       structureZoneIdx: structFields.idx,
       distToNextStructureM: structFields.distM,
       nextStructureType: structFields.type,
+      curveZoneIdx: curveFields.idx,
+      distToNextCurveM: curveFields.distM,
+      nextCurveDirection: curveFields.direction,
     );
   }
 
@@ -130,6 +144,11 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       structureZoneIdx: structFields.idx,
       distToNextStructureM: structFields.distM,
       nextStructureType: structFields.type,
+      // 급커브는 이 메서드와 무관(순수 geometry, setRoute에서 이미 계산됨) —
+      // 기존 값을 그대로 통과시킨다.
+      curveZoneIdx: current.curveZoneIdx,
+      distToNextCurveM: current.distToNextCurveM,
+      nextCurveDirection: current.nextCurveDirection,
     );
   }
 
@@ -187,6 +206,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     debugPrint('YNAV_PROG snap=$bestSeg step=$activeStep next=${distToNext.toStringAsFixed(1)} dest=${distToDest.toStringAsFixed(1)} off=$offRoute perp=${bestPerp.toStringAsFixed(1)}');
 
     final structFields = _structureFieldsFor(bestSeg, traveledM);
+    final curveFields = _curveFieldsFor(bestSeg, traveledM);
     state = RouteProgress(
       snapIdx: bestSeg,
       activeStepIdx: activeStep,
@@ -197,6 +217,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       structureZoneIdx: structFields.idx,
       distToNextStructureM: structFields.distM,
       nextStructureType: structFields.type,
+      curveZoneIdx: curveFields.idx,
+      distToNextCurveM: curveFields.distM,
+      nextCurveDirection: curveFields.direction,
     );
   }
 
@@ -247,6 +270,32 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       idx: idx,
       distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
       type: _zones[idx].type,
+    );
+  }
+
+  /// snap 세그먼트 기준, 아직 지나지 않은 다음 급커브(curve) 인덱스.
+  /// _curves는 detectSharpCurves 계약에 따라 beginShapeIdx 오름차순 정렬됨.
+  /// 모두 지났거나(또는 비어 있으면) -1.
+  int _nextCurveIdxFor(int seg) {
+    for (int i = 0; i < _curves.length; i++) {
+      if (_curves[i].endShapeIdx > seg) return i;
+    }
+    return -1;
+  }
+
+  /// snap 세그먼트 기준 다음 급커브의 (인덱스, 진입까지 거리, 방향).
+  /// 다음 급커브가 없으면 (-1, ∞, null).
+  ({int idx, double distM, CurveDirection? direction}) _curveFieldsFor(
+      int seg, double traveledM) {
+    final idx = _nextCurveIdxFor(seg);
+    if (idx < 0) return (idx: -1, distM: double.infinity, direction: null);
+    final cumBegin = _cumFromStartM.isEmpty
+        ? 0.0
+        : _cumFromStartM[_clampIdx(_curves[idx].beginShapeIdx)];
+    return (
+      idx: idx,
+      distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
+      direction: _curves[idx].direction,
     );
   }
 

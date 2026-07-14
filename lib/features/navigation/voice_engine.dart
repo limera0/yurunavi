@@ -204,3 +204,71 @@ class StructureVoiceEngine {
     _immediatePoint = null;
   }
 }
+
+/// 교차로가 아닌 곳에서 geometry로 감지된 급커브 진입 음성 안내.
+/// [StructureVoiceEngine]의 tiered "pending points, drain as distance
+/// decreases" 방식을 그대로 따르되 구조물이 아닌 커브 zone 인덱스/거리/방향
+/// 기반으로 동작하며, Valhalla maneuver 기반 sharp_turn_left/right와 동일한
+/// 기존 이벤트/음성 템플릿을 재사용한다.
+class CurveVoiceEngine {
+  final GuidanceProfile profile;
+  CurveVoiceEngine(this.profile);
+
+  int _zoneIdx = -1;
+  List<double> _pendingPoints = [];
+  double? _immediatePoint;
+
+  List<SpeakIntent> onProgress(int zoneIdx, double d, CurveDirection? direction) {
+    if (direction == null || zoneIdx < 0) {
+      // 모든 커브 통과(zoneIdx=-1) 후에도 _zoneIdx를 갱신해두지 않으면,
+      // 재탐색 후 새 경로의 첫 구간이 우연히 같은 인덱스를 재사용할 때
+      // "이미 본 구간"으로 오인해 안내가 조용히 스킵될 수 있다.
+      _zoneIdx = zoneIdx;
+      _pendingPoints = [];
+      _immediatePoint = null;
+      return const [];
+    }
+    final event =
+        direction == CurveDirection.left ? 'sharp_turn_left' : 'sharp_turn_right';
+    final imminentM = profile.imminentForEvent(event);
+    if (zoneIdx != _zoneIdx) {
+      _zoneIdx = zoneIdx;
+      final entryD = d;
+      final tierList = profile.tiersForEvent(event);
+      final tier = tierList.firstWhere(
+        (t) => entryD >= t.minEntryM,
+        orElse: () => tierList.last,
+      );
+      final filtered = {...tier.pointsM, imminentM}
+          .where((p) => p < entryD)
+          .toList()
+        ..sort((a, b) => b.compareTo(a));
+      if (filtered.isEmpty && entryD >= 0) {
+        // 이 커브를 처음 관측한 시점에 이미 imminent 지점까지도 지나쳐
+        // 있는 경우 — 안내가 아예 없는 대신 즉시 1회 안내한다.
+        // VoiceEngine._immediatePoint와 동일한 처리.
+        filtered.add(entryD);
+        _immediatePoint = entryD;
+      } else {
+        _immediatePoint = null;
+      }
+      _pendingPoints = filtered;
+    }
+
+    final out = <SpeakIntent>[];
+    while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
+      final point = _pendingPoints.removeAt(0);
+      if (!profile.isEnabled(event)) continue;
+      final isImminent = point == imminentM || point == _immediatePoint;
+      final phase = isImminent ? 'imminent' : 'approach';
+      out.add(SpeakIntent('${event}_$phase', {'dist': point.toStringAsFixed(0)}));
+    }
+    return out;
+  }
+
+  void reset() {
+    _zoneIdx = -1;
+    _pendingPoints = [];
+    _immediatePoint = null;
+  }
+}
