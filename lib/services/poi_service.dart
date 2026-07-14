@@ -51,6 +51,42 @@ class PoiService {
     'I207', 'I208', 'I209', 'I210', 'I211', 'I212',
   };
 
+  /// 소상공인시장진흥공단 원본 데이터가 업종을 잘못 분류해 넣은 케이스를 걸러내는
+  /// 업소명 키워드 휴리스틱(2026-07-14 실주행 피드백: 카페 소분류에 "할매국물닭발",
+  /// 주유소/카페 소분류에 "OO협동조합" 등이 섞여 나옴 — API 자체 재확인 결과 우리
+  /// 쪽 쿼리 코드는 정확했고 원본 데이터의 오분류로 확인됨). 완벽하게 걸러내진
+  /// 못하는 휴리스틱이지만("아예 안 거르는 것보단 낫다") 명백한 오분류는 줄여준다.
+  ///
+  /// 어떤 카테고리든 실제 소비자 대상 매장이 아닌 행정/사업체성 명칭.
+  /// 감사에서 "'조합'이 '영농조합법인' 같은 정식 법인명에 포함돼 시골 특산물
+  /// 식당까지 걸러낼 수 있다"는 우려가 제기됐으나, 실제로 그런 정식 법인명
+  /// 자체를 간판/상호로 쓰는 식당은 없다는 사용자 확인(2026-07-14)에 따라
+  /// '조합'을 그대로 포함한다. '연구소'는 "OO커피연구소"류 카페 브랜딩에 실제
+  /// 흔히 쓰이는 표현이라 계속 제외.
+  static const List<String> _nonStorefrontKeywords = [
+    '협동조합', '협회', '조합', '컨설팅', '사무소', '재단',
+  ];
+
+  /// 카페(cafe) 소분류에 섞여 들어오는 식당류 업소명 키워드.
+  static const List<String> _cafeRestaurantKeywords = [
+    '닭발', '곱창', '국밥', '삼겹살', '갈비', '냉면', '순대', '족발', '보쌈',
+    '횟집', '참치', '감자탕', '해장국', '추어탕', '매운탕', '닭갈비', '곰탕',
+    '설렁탕', '육개장', '삼계탕', '육회',
+  ];
+
+  /// [name]이 [type] 카테고리로 분류되기엔 업소명상 명백히 어색한지 판정한다.
+  static bool looksMisclassified(String name, PoiType type) {
+    for (final kw in _nonStorefrontKeywords) {
+      if (name.contains(kw)) return true;
+    }
+    if (type == PoiType.cafe) {
+      for (final kw in _cafeRestaurantKeywords) {
+        if (name.contains(kw)) return true;
+      }
+    }
+    return false;
+  }
+
   /// 카테고리 표시 우선순위: 주유소>편의점>카페>대형마트>식당 (요청 원문의 "전통시장"은
   /// 이 API에 대응 카테고리가 없어 스코프 밖 — 식당을 최하위로 대체).
   static const List<PoiType> displayPriority = [
@@ -146,6 +182,7 @@ class PoiService {
     if (id == null) return null;
 
     final name = (item['bizesNm'] as String?) ?? '이름 없음';
+    if (looksMisclassified(name, type)) return null;
     // rdnmAdr가 null이 아니라 빈 문자열로 오는 업소도 있어 isNotEmpty까지 확인해야 지번주소로
     // 정상 폴백한다.
     final rdnmAdr = item['rdnmAdr'] as String?;
