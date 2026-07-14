@@ -141,7 +141,10 @@ class PoiService {
 
     try {
       final resp = await http.get(uri).timeout(const Duration(seconds: 30));
-      if (resp.statusCode != 200) return [];
+      if (resp.statusCode != 200) {
+        debugPrint('YNAV_POI fetch failed type=$type status=${resp.statusCode}');
+        return [];
+      }
 
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
       final header = json['header'] as Map<String, dynamic>?;
