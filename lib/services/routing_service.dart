@@ -69,6 +69,22 @@ class StructureZone {
   });
 }
 
+/// 급커브 방향 (좌/우).
+enum CurveDirection { left, right }
+
+/// Valhalla maneuver가 커버하지 않는(교차로가 아닌) 급커브 구간
+/// (전역 shape 인덱스 기준, ManeuverStep/StructureZone과 동일 좌표계).
+class SharpCurveZone {
+  final CurveDirection direction;
+  final int beginShapeIdx; // 전역 shape 인덱스
+  final int endShapeIdx;   // 전역 shape 인덱스
+  const SharpCurveZone({
+    required this.direction,
+    required this.beginShapeIdx,
+    required this.endShapeIdx,
+  });
+}
+
 /// Valhalla 라우팅 결과 단위.
 class RouteResult {
   final List<LatLng> points;
@@ -532,6 +548,118 @@ class RoutingService {
 
     zones.sort((a, b) => a.beginShapeIdx.compareTo(b.beginShapeIdx));
     return zones;
+  }
+
+  static const _bearingDistance = Distance();
+
+  /// 경로 폴리라인 geometry만으로 급커브 구간을 감지한다.
+  ///
+  /// Valhalla maneuver 목록은 교차로에서만 turn을 발행하므로, 교차로가 아닌
+  /// 곳에서 도로가 그대로 이어지며 크게 휘는 구간은 maneuver가 비어 있다.
+  /// 순수 동기 geometry 계산이며 네트워크 호출이 없다 — [fetchStructureZones]와
+  /// 달리 generation 가드 없이 호출자가 즉시 사용할 수 있다.
+  ///
+  /// 각 인덱스 i에서 앞으로 [windowM] 이내의 최원점 j를 찾아, 세그먼트
+  /// (i, i+1)의 방위각과 세그먼트 (j-1, j)의 방위각 차이가 [thresholdDeg]
+  /// 이상이면 그 인덱스를 커브 안으로 표시한다(감소하는 방위각 = 좌회전).
+  /// 연속된 같은 방향 플래그를 buildStructureZones와 동일한 run-length
+  /// 병합 방식으로 하나의 zone으로 합치고, Valhalla가 이미 회전(turn-family
+  /// maneuver type)을 안내하는 구간과 shape 인덱스 범위가 겹치면 제외한다.
+  /// "직진 유지" 등 필러 maneuver(경로 전체를 빈틈없이 분할함)는 억제 기준에서
+  /// 제외한다 — 아래 turnManeuverTypes 참조.
+  static List<SharpCurveZone> detectSharpCurves(
+    List<LatLng> points,
+    List<ManeuverStep> maneuvers, {
+    double windowM = 100,
+    double thresholdDeg = 45,
+  }) {
+    if (points.length < 3) return [];
+
+    final n = points.length;
+    final cumM = List<double>.filled(n, 0.0);
+    final bearingDeg = List<double>.filled(n - 1, 0.0); // seg i: points[i]→points[i+1]
+    double acc = 0.0;
+    for (int i = 0; i < n - 1; i++) {
+      acc += _bearingDistance(points[i], points[i + 1]);
+      cumM[i + 1] = acc;
+      bearingDeg[i] = (_bearingDistance.bearing(points[i], points[i + 1]) + 360) % 360;
+    }
+
+    // 인덱스 i가 커브 구간 안이면 방향, 아니면 null. 두 포인터로 O(n) 스캔
+    // (cumM이 단조증가하므로 j는 i가 증가해도 뒤로 가지 않는다).
+    final flagged = List<CurveDirection?>.filled(n - 1, null);
+    int j = 0;
+    for (int i = 0; i < n - 1; i++) {
+      if (j < i + 1) j = i + 1;
+      while (j < n - 1 && cumM[j + 1] - cumM[i] <= windowM) {
+        j++;
+      }
+      final segStart = bearingDeg[i];
+      final segEnd = bearingDeg[j - 1];
+      double delta = segEnd - segStart;
+      if (delta > 180) delta -= 360;
+      if (delta <= -180) delta += 360;
+      if (delta.abs() >= thresholdDeg) {
+        flagged[i] = delta < 0 ? CurveDirection.left : CurveDirection.right;
+      }
+    }
+
+    // buildStructureZones의 collect/flush run-length 병합과 동일한 방식.
+    final zones = <SharpCurveZone>[];
+    CurveDirection? runDir;
+    int? runBegin;
+    int runEnd = 0;
+
+    void flush() {
+      if (runBegin != null && runDir != null) {
+        zones.add(SharpCurveZone(
+          direction: runDir!,
+          beginShapeIdx: runBegin!,
+          endShapeIdx: runEnd,
+        ));
+      }
+      runBegin = null;
+      runDir = null;
+    }
+
+    for (int i = 0; i < n - 1; i++) {
+      final dir = flagged[i];
+      if (dir != null && dir == runDir) {
+        runEnd = i;
+      } else {
+        flush();
+        if (dir != null) {
+          runDir = dir;
+          runBegin = i;
+          runEnd = i;
+        }
+      }
+    }
+    flush();
+
+    // Valhalla maneuver 목록은 "직진 유지"류 필러(type 1=출발, 2류 "Drive
+    // east..." 등)를 포함해 경로 전체를 빈틈없이 분할한다 — 실제 회전을
+    // 안내하는 turn-family 타입만 억제 기준으로 써야 한다. 그렇지 않으면
+    // 어떤 급커브든 그 구간을 덮는 필러 maneuver와 겹쳐 항상 억제되어버린다.
+    // voice_engine.dart의 eventForType()에서 turn_left/turn_right/
+    // sharp_turn_left/sharp_turn_right/uturn을 만드는 타입과 동일 — 그쪽이
+    // 바뀌면 여기도 맞춰야 한다.
+    const turnManeuverTypes = {9, 10, 11, 12, 13, 14, 15, 16};
+    final turnManeuvers =
+        maneuvers.where((m) => turnManeuverTypes.contains(m.type));
+
+    // Valhalla가 이미 회전을 안내하는 구간과 겹치는 후보는 제외.
+    final filtered = zones.where((z) {
+      for (final m in turnManeuvers) {
+        if (z.beginShapeIdx <= m.endShapeIdx && m.beginShapeIdx <= z.endShapeIdx) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+
+    filtered.sort((a, b) => a.beginShapeIdx.compareTo(b.beginShapeIdx));
+    return filtered;
   }
 
   /// 경로 좌표 목록으로 Valhalla trace_attributes를 호출해 다리/터널 구간을
