@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:io' show SocketException;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
@@ -701,6 +702,7 @@ class RoutingService {
           name: 'RoutingService',
           level: 900,
         );
+        debugPrint('YNAV_STRUCT_ERR status=${resp.statusCode}');
         return [];
       }
 
@@ -709,6 +711,7 @@ class RoutingService {
       return buildStructureZones(edges);
     } catch (e) {
       dev.log('fetchStructureZones 실패: $e', name: 'RoutingService', level: 900);
+      debugPrint('YNAV_STRUCT_ERR exception=$e');
       return [];
     }
   }
