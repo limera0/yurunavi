@@ -37,5 +37,6 @@ backup_one() {
 backup_one tiles /data/tiles/data
 backup_one valhalla /data/valhalla/custom_files
 backup_one valhalla-src /data/projects/valhalla-src
+backup_one poi /data/poi
 
 echo "[backup] $(date -Iseconds) 완료 — 보관 위치: $DEST_ROOT (최근 ${KEEP}세대 유지)"

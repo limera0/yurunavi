@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | Valhalla 라우팅 (fun-road 커스텀 포크) | `yurunavi-valhalla` | 8002 | `docker/docker-compose.yml` | `/data/valhalla/custom_files` |
 | tileserver-gl (지도 타일) | `yurunavi-tiles` | 8080 | `docker/docker-compose.yml` | `/data/tiles/data`, `/data/tiles/fonts` |
-| navi 백엔드 (fun-road 스코어링 API, Rust) | `yurunavi-navi` | 8003 (host network) | `docker/docker-compose.yml` + `native/Dockerfile` | 없음(stateless) |
+| navi 백엔드 (fun-road 스코어링 + POI API, Rust) | `yurunavi-navi` | 8003 (host network) | `docker/docker-compose.yml` + `native/Dockerfile` | `/data/poi/poi.db`(SQLite, 읽기전용 마운트, 2026-07-15부터) |
 
 세 서비스 모두 `docker compose up -d`로 기동 가능(2026-07-11 기준 compose 관리 편입 완료 —
 `tiles`는 원래 `docker run`으로, `navi`는 원래 systemd로 떠 있던 걸 이 세션에서 전환함,
@@ -83,6 +83,7 @@ uncommitted 상태로만** 존재했다 — `motorcyclecost.cc`(곡률/신호/U�
 | 지도 타일 데이터 | `/data/tiles/data` | `/data/backups/yurunavi/tiles/` | ~3.4GB |
 | Valhalla 그래프/원본 PBF | `/data/valhalla/custom_files` | `/data/backups/yurunavi/valhalla/` | ~11GB |
 | Valhalla 포크 소스(git) | `/data/projects/valhalla-src` | `/data/backups/yurunavi/valhalla-src/` | ~423MB |
+| POI 원본 CSV + SQLite DB | `/data/poi` (raw/ + poi.db) | `/data/backups/yurunavi/poi/` | ~1.6GB |
 
 `/data` 디스크 여유 1.7TB(2026-07-11 기준) — 3세대 유지해도 여유 충분. 백업은 **같은
 물리 서버 안의 다른 경로**일 뿐 오프사이트 백업이 아님 — 디스크 자체가 죽는
@@ -91,7 +92,54 @@ uncommitted 상태로만** 존재했다 — `motorcyclecost.cc`(곡률/신호/U�
 
 복구: `rsync -a /data/backups/yurunavi/<name>/latest/ <원래경로>/`
 
-## 5. 여기서 다루지 않은 것 (범위 밖, 확인만 함)
+## 5. POI 데이터 파이프라인 (2026-07-15 구축)
+
+**배경**: 이전엔 Flutter 클라이언트가 공공데이터포털 실시간 API(`apis.data.go.kr`)를
+서비스키로 직접 호출했다 — 이 방식은 전 사용자가 개발계정 쿼터(10,000건/일) 하나를
+공유하는 구조라 실사용자 몇 명만 늘어도 매일 막히는 근본적 스케일링 결함이었다
+(`loop/HANDOFF_0715_poi_quota.md` 참조, 실제로 개발자 1인 테스트만으로 하루 쿼터 소진
+확인됨). 같은 기관이 같은 데이터를 분기별 무료 CSV로도 배포한다는 걸 확인하고, 이걸
+`navi` 백엔드에 SQLite로 적재해 서빙하는 방식으로 전환했다.
+
+- **원본 데이터**: [소상공인시장진흥공단_상가(상권)정보](https://www.data.go.kr/data/15083033/fileData.do)
+  (data.go.kr, 로그인/키 불필요, 분기 갱신, 이용허락범위 제한없음). 17개 시도별 CSV가
+  담긴 zip, 2026-07-15 기준 약 2.73M행/341MB.
+- **적재**: `native/src/bin/ingest_poi.rs` — CSV를 카테고리 매핑(cafe/convenience_store/
+  gas_station/supermarket/restaurant) + 오분류 필터링(업소명 키워드 휴리스틱, 과거
+  Dart `looksMisclassified`에서 이관) 거쳐 `/data/poi/poi.db`(SQLite + R-tree 공간 인덱스)로
+  전체 재적재한다. 2026-07-15 최초 적재: 696,255행, 153.6MB, 약 12초 소요.
+- **서빙**: `native/src/main.rs`의 `GET /poi/nearby?lat&lon&radius_m&types` — DB를
+  읽기전용으로 서버 시작 시 한 번만 연다. **DB 파일이 없거나 손상돼도 서버 전체가
+  죽지 않는다** — 그 라우트만 503을 반환하고 라우팅/스코어링 등 다른 엔드포인트는
+  정상 동작(`poi_db()` 함수의 `OnceLock<Option<Mutex<Connection>>>` 패턴 참조).
+- **⚠️ 중요 — 갱신 후 반드시 컨테이너 재시작 필요**: 위와 같이 DB를 시작 시 한 번만
+  열기 때문에, `/data/poi/poi.db` 파일을 새로 갈아끼워도 `docker compose restart navi`를
+  하지 않으면 새 데이터가 반영되지 않는다(구 데이터를 계속 서빙).
+
+### 분기 재동기화
+
+`docker/refresh_poi_data.sh` — data.go.kr에서 최신 CSV를 받아 검증 후 raw 디렉터리와
+`poi.db`를 원자적으로 교체하고 `navi` 컨테이너를 재시작한다. 실패 시(다운로드 링크를
+못 찾음, zip이 아님, 행수/DB크기가 예상 범위 밖) 항상 **기존 데이터를 그대로 두고
+비정상 종료** — 부분 갱신으로 데이터가 손상되는 경우는 없다.
+
+```
+/data/projects/yurunavi/docker/refresh_poi_data.sh
+```
+
+**자동 cron 등록은 의도적으로 하지 않았다.** 이유: 다운로드 링크 추출이 data.go.kr
+페이지의 JSON-LD(`contentUrl`) 파싱에 의존하는데, 그 사이트 구조가 바뀌면 새벽 cron에서
+조용히 실패(또는 더 나쁘게는 검증을 다 통과하는 이상한 응답)할 수 있고, 이걸 아무도
+안 보는 채로 다음 분기까지 방치할 위험이 있다고 판단했다. 다음 갱신 예정일은
+**2026-08-01** — 그 무렵 사람이(또는 다음 Claude Code 세션이) 수동으로 스크립트를
+한 번 돌려보고, 문제없이 몇 차례 안정적으로 동작하는 걸 확인한 뒤에 아래 줄을
+`crontab -e`로 직접 추가하는 걸 권장한다(스크립트 자체 주석에도 동일 안내 있음):
+
+```
+0 4 1 8,11,2,5 * /data/projects/yurunavi/docker/refresh_poi_data.sh >> /data/poi/refresh.log 2>&1
+```
+
+## 6. 여기서 다루지 않은 것 (범위 밖, 확인만 함)
 
 - `tools/style-ai-proxy`, `tools/tuning_dashboard` — 내부 개발 도구, 이미 자체
   Dockerfile/compose가 있고 git 추적 중. 프로덕션 서빙 경로가 아니라 12번 스코프 아님.
