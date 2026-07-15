@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show Point, cos, sqrt, asin, min;
+import 'dart:math' show Point, cos, sqrt, asin;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
@@ -147,6 +147,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   Set<PoiType> _lastAmbientFetchTypes = const {};
   // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
   int _ambientFetchGen = 0;
+  // 뷰포트 사각형+타입 조합 단위로 최근 조회 결과를 재사용해 패닝 왕복 시
+  // 불필요한 네트워크 재조회를 막는다. 이 State 인스턴스 전용(전역 아님).
+  final _poiRegionCache = PoiRegionCache();
 
   // 6번: 검색 시트("장소 검색") 전용 백그라운드 프리페치 — ambient 레이어(위)와는
   // 완전히 별개. GPS 위치 갱신 시마다 5종 전체를 미리 받아 캐시해 둬서, 시트를
@@ -538,34 +541,48 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
       (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
     );
-    final radius = min(
-      2000.0,
-      PoiService.haversineMeters(
-        center,
-        LatLng(bounds.northeast.latitude, bounds.northeast.longitude),
-      ),
+    final south = bounds.southwest.latitude;
+    final north = bounds.northeast.latitude;
+    final west = bounds.southwest.longitude;
+    final east = bounds.northeast.longitude;
+
+    final cached = _poiRegionCache.tryGet(
+      south: south,
+      west: west,
+      north: north,
+      east: east,
+      types: targetTypes,
     );
 
-    final pois = await ref.read(poiServiceProvider).fetchPois(
-          center: center,
-          radiusMeters: radius,
-          types: targetTypes.toList(),
-        );
-    if (!mounted || myGen != _ambientFetchGen) return;
+    final List<Poi> pois;
+    if (cached != null) {
+      pois = cached;
+    } else {
+      final fetched = await ref.read(poiServiceProvider).fetchPoisInBounds(
+            south: south,
+            west: west,
+            north: north,
+            east: east,
+            types: targetTypes.toList(),
+          );
+      if (!mounted || myGen != _ambientFetchGen) return;
+      _poiRegionCache.put(
+        south: south,
+        west: west,
+        north: north,
+        east: east,
+        types: targetTypes,
+        pois: fetched,
+      );
+      pois = fetched;
+    }
 
-    final visible = pois
-        .where((p) =>
-            p.location.latitude >= bounds.southwest.latitude &&
-            p.location.latitude <= bounds.northeast.latitude &&
-            p.location.longitude >= bounds.southwest.longitude &&
-            p.location.longitude <= bounds.northeast.longitude)
-        .toList();
     final limited = PoiService.selectForAmbientDisplay(
-      candidates: visible,
-      south: bounds.southwest.latitude,
-      north: bounds.northeast.latitude,
-      west: bounds.southwest.longitude,
-      east: bounds.northeast.longitude,
+      candidates: pois,
+      south: south,
+      north: north,
+      west: west,
+      east: east,
       center: center,
       maxCount: 20,
     );

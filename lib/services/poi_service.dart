@@ -81,6 +81,50 @@ class PoiService {
     }
   }
 
+  /// 뷰포트 사각형(south/west/north/east)에 해당하는 특정 타입들의 POI를 가져온다.
+  ///
+  /// 서버가 정확히 이 사각형 안의 결과만(반경 필터링 없이) 사각형 중심 기준
+  /// 거리순으로 정렬해 응답하므로, 호출부는 반경으로 근사할 필요 없이 실제
+  /// 화면 뷰포트를 그대로 넘기면 된다.
+  Future<List<Poi>> fetchPoisInBounds({
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required List<PoiType> types,
+  }) async {
+    if (types.isEmpty) return [];
+
+    final categories = types.map((t) => _typeToCategory[t]).whereType<String>().toList();
+
+    final query = <String, String>{
+      'south': south.toString(),
+      'west': west.toString(),
+      'north': north.toString(),
+      'east': east.toString(),
+      'types': categories.join(','),
+    };
+
+    final uri = Uri.parse(_poiBaseUrl).replace(queryParameters: query);
+
+    try {
+      final resp = await http.get(uri).timeout(const Duration(seconds: 30));
+      if (resp.statusCode != 200) {
+        debugPrint('YNAV_POI fetchInBounds failed status=${resp.statusCode}');
+        return [];
+      }
+
+      final rawList = jsonDecode(resp.body) as List<dynamic>;
+      return rawList
+          .map((e) => _parseItem(e as Map<String, dynamic>))
+          .whereType<Poi>()
+          .toList();
+    } catch (e) {
+      debugPrint('YNAV_POI fetchInBounds failed error=$e');
+      return [];
+    }
+  }
+
   Poi? _parseItem(Map<String, dynamic> item) {
     final id = item['id'] as String?;
     final name = item['name'] as String?;
@@ -286,4 +330,100 @@ class SnapResult {
     required this.allPois,
     required this.radiusKm,
   });
+}
+
+/// [PoiRegionCache]가 보관하는 단일 조회 결과. "어느 사각형+타입 조합을,
+/// 언제, 어떤 결과로" 가져왔는지를 담는다.
+class _PoiRegionCacheEntry {
+  final double south;
+  final double west;
+  final double north;
+  final double east;
+  final Set<PoiType> types;
+  final DateTime fetchedAt;
+  final List<Poi> pois;
+
+  _PoiRegionCacheEntry({
+    required this.south,
+    required this.west,
+    required this.north,
+    required this.east,
+    required this.types,
+    required this.fetchedAt,
+    required this.pois,
+  });
+}
+
+/// "이 사각형 영역+타입 조합의 POI를 이미 최근에 가져왔는가"를 판단해
+/// 불필요한 네트워크 재조회(뷰포트를 벗어났다가 금방 되돌아오는 패닝 등)를
+/// 막기 위한 화면(State) 소유 캐시. 전역 싱글톤이 아니며, 각 화면이 자신의
+/// 인스턴스를 필드로 들고 있는다.
+///
+/// 캐시 적중 조건: 만료(TTL) 전이고, 저장된 항목의 타입 집합이 요청 타입의
+/// 상위집합(superset)이며, 저장된 항목의 영역이 요청 영역을 완전히 포함할 때.
+/// 적중 시 저장된(더 넓을 수 있는) 결과를 요청 영역/타입으로 다시 필터링해
+/// 반환한다 — 서버가 좁은 요청에 응답했을 결과와 동일한 모양을 보장한다.
+class PoiRegionCache {
+  PoiRegionCache({int capacity = 8, DateTime Function()? now})
+      : _capacity = capacity,
+        _now = now ?? DateTime.now;
+
+  static const Duration ttl = Duration(minutes: 5);
+
+  final int _capacity;
+  final DateTime Function() _now;
+  final List<_PoiRegionCacheEntry> _entries = [];
+
+  List<Poi>? tryGet({
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required Set<PoiType> types,
+  }) {
+    final nowTs = _now();
+    // 가장 최근에 추가된 항목부터 살펴본다 — 여러 항목이 조건을 만족하면
+    // 최신 것을 우선한다(entries는 항상 추가 순 = 시간순으로 쌓인다).
+    for (final entry in _entries.reversed) {
+      if (nowTs.difference(entry.fetchedAt) >= ttl) continue;
+      if (!types.every(entry.types.contains)) continue;
+      final containsRegion = entry.south <= south &&
+          entry.north >= north &&
+          entry.west <= west &&
+          entry.east >= east;
+      if (!containsRegion) continue;
+
+      return entry.pois
+          .where((p) =>
+              types.contains(p.type) &&
+              p.location.latitude >= south &&
+              p.location.latitude <= north &&
+              p.location.longitude >= west &&
+              p.location.longitude <= east)
+          .toList();
+    }
+    return null;
+  }
+
+  void put({
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required Set<PoiType> types,
+    required List<Poi> pois,
+  }) {
+    if (_entries.length >= _capacity) {
+      _entries.removeAt(0); // 가장 오래된(맨 앞) 항목을 제거
+    }
+    _entries.add(_PoiRegionCacheEntry(
+      south: south,
+      west: west,
+      north: north,
+      east: east,
+      types: types,
+      fetchedAt: _now(),
+      pois: pois,
+    ));
+  }
 }

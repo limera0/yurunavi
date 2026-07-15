@@ -119,4 +119,140 @@ void main() {
       ]);
     });
   });
+
+  group('PoiRegionCache', () {
+    test('정확히 같은 영역+타입으로 저장 후 조회하면 적중한다', () {
+      final cache = PoiRegionCache();
+      final pois = [
+        _poi('a', PoiType.cafe, 0.5, 0.5),
+        _poi('b', PoiType.gasStation, 0.6, 0.6),
+      ];
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe, PoiType.gasStation},
+        pois: pois,
+      );
+
+      final result = cache.tryGet(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe, PoiType.gasStation},
+      );
+
+      expect(result, isNotNull);
+      expect(result!.map((p) => p.id).toSet(), {'a', 'b'});
+    });
+
+    test('저장된 더 넓은 영역이 더 좁은 요청 영역을 포함하면 적중하고, 결과는 요청 영역으로 '
+        '필터링된다', () {
+      final cache = PoiRegionCache();
+      final pois = [
+        _poi('inside', PoiType.cafe, 0.5, 0.5),
+        _poi('outside', PoiType.cafe, 5.0, 5.0), // 요청 영역 밖
+      ];
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 10,
+        east: 10,
+        types: {PoiType.cafe},
+        pois: pois,
+      );
+
+      final result = cache.tryGet(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+      );
+
+      expect(result, isNotNull);
+      expect(result!.map((p) => p.id).toList(), ['inside']);
+    });
+
+    test('저장된 타입 집합이 요청 타입의 상위집합이면 적중하고, 결과는 요청 타입으로 '
+        '필터링된다', () {
+      final cache = PoiRegionCache();
+      final pois = [
+        _poi('cafe1', PoiType.cafe, 0.5, 0.5),
+        _poi('gas1', PoiType.gasStation, 0.5, 0.5),
+      ];
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe, PoiType.gasStation, PoiType.restaurant},
+        pois: pois,
+      );
+
+      final result = cache.tryGet(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+      );
+
+      expect(result, isNotNull);
+      expect(result!.map((p) => p.id).toList(), ['cafe1']);
+    });
+
+    test('저장된 영역이 요청 영역을 완전히 포함하지 못하면(더 작거나 겹치지 않으면) '
+        '미스한다', () {
+      final cache = PoiRegionCache();
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+        pois: [_poi('a', PoiType.cafe, 0.5, 0.5)],
+      );
+
+      // 요청 영역이 저장된 영역보다 넓다(포함 관계 역전) → 미스.
+      final result = cache.tryGet(
+        south: -1,
+        west: -1,
+        north: 2,
+        east: 2,
+        types: {PoiType.cafe},
+      );
+
+      expect(result, isNull);
+    });
+
+    test('TTL이 지난 항목은 미스로 취급한다', () {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      final cache = PoiRegionCache(now: () => now);
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+        pois: [_poi('a', PoiType.cafe, 0.5, 0.5)],
+      );
+
+      // TTL(5분) 이내 — 적중.
+      now = now.add(const Duration(minutes: 4, seconds: 59));
+      expect(
+        cache.tryGet(south: 0, west: 0, north: 1, east: 1, types: {PoiType.cafe}),
+        isNotNull,
+      );
+
+      // TTL 경과 — 미스.
+      now = now.add(const Duration(seconds: 2));
+      expect(
+        cache.tryGet(south: 0, west: 0, north: 1, east: 1, types: {PoiType.cafe}),
+        isNull,
+      );
+    });
+  });
 }
