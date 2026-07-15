@@ -1602,6 +1602,33 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             child: Text('10초 후 자동 종료',
                                 style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
                           ),
+                        // 목적지 근처에서 정차만 하면(예: 신호 대기, 헬멧 벗는 중) 곧바로
+                        // _canExit이 열리고 10초 뒤 자동 종료되므로, 라이더가 실제로는
+                        // 계속 안내를 원해도 명시적으로 취소할 버튼이 없었다(2026-07-15
+                        // 밤 라이딩 리포트 — "계속 안내" 버튼 부재 + 대기 없이 바로 종료).
+                        GestureDetector(
+                          onTap: () {
+                            _exitAutoCloseTimer?.cancel();
+                            setState(() {
+                              _arrivalBannerVisible = false;
+                              _canExit = false;
+                            });
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text('계속 안내',
+                                style: TextStyle(
+                                  color: cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                )),
+                          ),
+                        ),
                         GestureDetector(
                           onTap: _canExit
                               ? () {
@@ -1615,7 +1642,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                               color: _canExit ? cs.tertiary : cs.surfaceContainerHigh,
                               borderRadius: BorderRadius.circular(14),
                             ),
-                            child: Text('종료',
+                            child: Text('안내 종료',
                                 style: TextStyle(
                                   color: _canExit ? Colors.white : cs.onSurfaceVariant,
                                   fontWeight: FontWeight.bold,
