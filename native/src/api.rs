@@ -164,7 +164,9 @@ pub fn calc_winding_score(route: Vec<GpsPoint>) -> WindingScore {
     WindingScore { score, road_type: road_type.to_string() }
 }
 
-fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
+/// haversine 거리(미터). `native/src/main.rs`의 `/poi/nearby` 등 다른 모듈에서도
+/// 재사용하므로 `pub`으로 노출한다 (중복 구현 금지).
+pub fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
     const R: f64 = 6_371_000.0;
     let d_lat = (b.lat - a.lat).to_radians();
     let d_lon = (b.lng - a.lng).to_radians();
