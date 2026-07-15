@@ -32,3 +32,7 @@ services:
     container_name: yurunavi-navi
     restart: unless-stopped
     network_mode: host
+    volumes:
+      # POI SQLite DB (native/src/bin/ingest_poi.rs가 분기별로 재적재). 읽기 전용 마운트 —
+      # /poi/nearby가 여는 파일이며 없어도 서버 자체는 뜬다(해당 라우트만 503).
+      - /data/poi:/data/poi:ro
