@@ -254,5 +254,60 @@ void main() {
         isNull,
       );
     });
+
+    test(
+        '서버 응답이 500건 이상(잘렸을 가능성)이면 캐싱하지 않는다 — '
+        '완전하지 않은 결과를 "이 영역의 전체"로 오인해 재사용하면 가장자리 POI가 '
+        '조용히 누락될 수 있기 때문(2026-07-15 감사에서 발견)', () {
+      final cache = PoiRegionCache();
+      final manyPois = List.generate(
+        500,
+        (i) => _poi('p$i', PoiType.cafe, 0.5, 0.5),
+      );
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+        pois: manyPois,
+      );
+
+      // 저장 자체가 스킵됐어야 하므로, 완전히 같은 영역을 다시 조회해도 미스.
+      final result = cache.tryGet(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+      );
+      expect(result, isNull);
+    });
+
+    test('500건 미만 응답은 정상적으로 캐싱된다(회귀 가드)', () {
+      final cache = PoiRegionCache();
+      final fewPois = List.generate(
+        499,
+        (i) => _poi('p$i', PoiType.cafe, 0.5, 0.5),
+      );
+      cache.put(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+        pois: fewPois,
+      );
+
+      final result = cache.tryGet(
+        south: 0,
+        west: 0,
+        north: 1,
+        east: 1,
+        types: {PoiType.cafe},
+      );
+      expect(result, isNotNull);
+      expect(result!.length, 499);
+    });
   });
 }

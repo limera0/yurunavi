@@ -496,6 +496,15 @@ const ALL_POI_CATEGORIES: [&str; 5] = [
 ];
 const MAX_POI_RADIUS_M: f64 = 5000.0;
 
+/// 응답에 담을 최대 POI 개수(거리순 정렬 후 상위 N개만). 클라이언트는 ambient
+/// 레이어에서 최대 20개만 화면에 그리고(`selectForAmbientDisplay`), 검색시트도
+/// 스크롤 리스트일 뿐이라 수천 건을 다 받을 이유가 없다 — 실측(2026-07-15,
+/// 서울 중심가 반경 1500m 전카테고리) 6,125건/1.1MB 응답이 확인됨. 500이면
+/// ambient 레이어의 grid 기반 분산 선택(gridSize=4=16칸)에 칸당 평균 30개
+/// 이상 후보가 남아 다양성엔 지장이 없고, 응답 크기는 최악의 경우에도
+/// 수십 KB대로 줄어든다.
+const MAX_POI_RESULTS: usize = 500;
+
 /// bbox 모드에서 위도/경도 폭 각각의 상한(도). 클라이언트가 국가 전체 같은
 /// 비현실적으로 큰 영역을 한 번에 요청하지 못하도록 막는 가드레일 — 오토바이
 /// 내비 지도 뷰포트는 절대 이 크기에 도달하지 않으므로 실제로는 발동하지 않아야 정상.
@@ -669,7 +678,7 @@ fn query_poi_nearby(
         .collect();
     with_dist.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    Ok(with_dist.into_iter().map(|(_, dto)| dto).collect())
+    Ok(with_dist.into_iter().take(MAX_POI_RESULTS).map(|(_, dto)| dto).collect())
 }
 
 /// bbox 후보 조회 + IN 카테고리 필터 + (중심점 기준) 거리 정렬.
@@ -734,7 +743,7 @@ fn query_poi_in_bbox(
         .collect();
     with_dist.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    Ok(with_dist.into_iter().map(|(_, dto)| dto).collect())
+    Ok(with_dist.into_iter().take(MAX_POI_RESULTS).map(|(_, dto)| dto).collect())
 }
 
 async fn handle_poi_nearby(
@@ -947,6 +956,62 @@ mod tests {
         assert!(results.is_empty(), "서울과 무관한 좌표(0,0)에서는 결과가 없어야 함");
     }
 
+    /// MAX_POI_RESULTS(500)보다 많은 후보를 반경 안에 심어서 응답이 실제로
+    /// 잘리는지, 그리고 잘린 뒤에도 "가장 가까운 것부터" 유지되는지 확인한다.
+    /// (2026-07-15 실측: 서울 중심가 1500m 반경 전카테고리 조회가 6,125건/1.1MB로
+    /// 응답한 게 실제 지연의 상당 부분이었음 — 회귀 방지용 테스트.)
+    #[test]
+    fn query_poi_nearby_caps_results_and_keeps_nearest_first() {
+        let conn = Connection::open_in_memory().expect("in-memory DB 생성 실패");
+        conn.execute_batch(
+            "CREATE TABLE poi (
+                id INTEGER PRIMARY KEY,
+                bizes_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lon REAL NOT NULL,
+                address TEXT
+            );
+            CREATE INDEX idx_poi_category ON poi(category);
+            CREATE VIRTUAL TABLE poi_rtree USING rtree(id, min_lat, max_lat, min_lon, max_lon);",
+        )
+        .expect("스키마 생성 실패");
+
+        // 서울시청 중심으로 600개를 촘촘히 흩뿌린다 — 인덱스가 커질수록 중심에서
+        // 살짝씩 더 멀어지게 해서(0.0001도 ≈ 11m 씩) "가장 가까운 500개"가
+        // id_0..id_499여야 함을 명확히 검증할 수 있게 한다.
+        for i in 0..600 {
+            let lat = 37.5665 + (i as f64) * 0.0001;
+            let lon = 126.9780;
+            let bizes_id = format!("id_{i}");
+            conn.execute(
+                "INSERT INTO poi (bizes_id, name, category, lat, lon, address) VALUES (?1, ?1, 'cafe', ?2, ?3, NULL)",
+                params![bizes_id, lat, lon],
+            )
+            .expect("poi insert 실패");
+            let rowid = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO poi_rtree (id, min_lat, max_lat, min_lon, max_lon) VALUES (?1, ?2, ?2, ?3, ?3)",
+                params![rowid, lat, lon],
+            )
+            .expect("rtree insert 실패");
+        }
+
+        let types = vec!["cafe".to_string()];
+        // 반경을 넉넉히 잡아 600개 전부 반경 안에 들어오게 한다(가장 먼 것도 ~6.6km 미만).
+        let results = query_poi_nearby(&conn, 37.5665, 126.9780, 10_000.0, &types)
+            .expect("쿼리 실패");
+
+        assert_eq!(results.len(), MAX_POI_RESULTS, "MAX_POI_RESULTS로 잘려야 함");
+        assert_eq!(results.first().unwrap().id, "id_0", "가장 가까운 후보가 1번이어야 함");
+        assert_eq!(
+            results.last().unwrap().id,
+            format!("id_{}", MAX_POI_RESULTS - 1),
+            "잘린 뒤 마지막 항목은 501번째로 가까운 후보(인덱스 499)여야 함"
+        );
+    }
+
     // ── bbox 모드: query_poi_in_bbox / bbox_span_valid / resolve_poi_query_mode ──
 
     fn setup_bbox_test_db() -> Connection {
@@ -1021,6 +1086,67 @@ mod tests {
             .expect("쿼리 실패");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "b5");
+    }
+
+    /// bbox 모드도 radius 모드와 동일하게 MAX_POI_RESULTS로 잘려야 한다
+    /// (ambient 레이어가 뷰포트 사각형으로 조회하는 경로라 실제 트래픽에서
+    /// 더 흔히 부딪히는 케이스).
+    #[test]
+    fn query_poi_in_bbox_caps_results_and_keeps_nearest_first() {
+        let conn = Connection::open_in_memory().expect("in-memory DB 생성 실패");
+        conn.execute_batch(
+            "CREATE TABLE poi (
+                id INTEGER PRIMARY KEY,
+                bizes_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lon REAL NOT NULL,
+                address TEXT
+            );
+            CREATE INDEX idx_poi_category ON poi(category);
+            CREATE VIRTUAL TABLE poi_rtree USING rtree(id, min_lat, max_lat, min_lon, max_lon);",
+        )
+        .expect("스키마 생성 실패");
+
+        // bbox(37.0~37.1, 127.0~127.01)의 중심(37.05, 127.005)에서 시작해 북쪽
+        // 한 방향으로만 0.00008도씩 600개를 심는다 — 경도는 고정, 위도만 한
+        // 방향으로 증가하므로 "인덱스가 클수록 중심에서 멀어진다"가 haversine
+        // 거리 기준으로도 엄격히 단조 증가함이 보장된다(이전 버전은 남서쪽
+        // 모서리부터 북쪽 끝까지 쭉 심어서 중심 위도를 가운데서 관통해 거리가
+        // V자로 꺾이는 바람에 "가장 가까운 500개"가 인덱스 순서와 무관해지는
+        // 버그가 있었음 — 감사에서 지적되어 수정).
+        // 600 * 0.00008 = 0.048 < 중심~북쪽 경계 반폭(0.05)이라 전부 bbox 안에 남는다.
+        let center_lat = 37.05;
+        let center_lon = 127.005;
+        for i in 0..600 {
+            let lat = center_lat + (i as f64) * 0.00008;
+            let lon = center_lon;
+            let bizes_id = format!("id_{i}");
+            conn.execute(
+                "INSERT INTO poi (bizes_id, name, category, lat, lon, address) VALUES (?1, ?1, 'cafe', ?2, ?3, NULL)",
+                params![bizes_id, lat, lon],
+            )
+            .expect("poi insert 실패");
+            let rowid = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO poi_rtree (id, min_lat, max_lat, min_lon, max_lon) VALUES (?1, ?2, ?2, ?3, ?3)",
+                params![rowid, lat, lon],
+            )
+            .expect("rtree insert 실패");
+        }
+
+        let types = vec!["cafe".to_string()];
+        let results = query_poi_in_bbox(&conn, 37.0, 127.0, 37.1, 127.01, &types)
+            .expect("쿼리 실패");
+
+        assert_eq!(results.len(), MAX_POI_RESULTS, "MAX_POI_RESULTS로 잘려야 함");
+        assert_eq!(results.first().unwrap().id, "id_0", "중심에 가장 가까운 후보가 1순위여야 함");
+        assert_eq!(
+            results.last().unwrap().id,
+            format!("id_{}", MAX_POI_RESULTS - 1),
+            "잘린 뒤 마지막 항목은 501번째로 가까운 후보(인덱스 499)여야 함"
+        );
     }
 
     #[test]

@@ -363,12 +363,26 @@ class _PoiRegionCacheEntry {
 /// 상위집합(superset)이며, 저장된 항목의 영역이 요청 영역을 완전히 포함할 때.
 /// 적중 시 저장된(더 넓을 수 있는) 결과를 요청 영역/타입으로 다시 필터링해
 /// 반환한다 — 서버가 좁은 요청에 응답했을 결과와 동일한 모양을 보장한다.
+///
+/// ⚠️ 이 "포함 관계면 재사용 가능" 전제는 저장된 응답이 해당 영역의 *전체*
+/// 결과일 때만 성립한다. 서버(`native/src/main.rs`의 `MAX_POI_RESULTS`, 현재
+/// 500)가 거리순 상위 N개로 응답을 자르므로, 잘렸을 가능성이 있는 응답을
+/// 그대로 캐싱해 더 좁은 영역에 재사용하면 원래 영역 중심에서 먼 가장자리
+/// 쪽 POI가 실제로는 있는데도 조용히 빠질 수 있다(2026-07-15 감사에서 발견 —
+/// 서버 응답 개수가 [_serverCapHeuristic] 이상이면 잘렸을 수 있다고 보고 아예
+/// 캐싱하지 않는다: 이 경우 매번 새로 조회하게 되어 캐시 이득은 줄지만
+/// 정확성이 더 중요하다).
 class PoiRegionCache {
   PoiRegionCache({int capacity = 8, DateTime Function()? now})
       : _capacity = capacity,
         _now = now ?? DateTime.now;
 
   static const Duration ttl = Duration(minutes: 5);
+
+  /// 서버 `MAX_POI_RESULTS`(native/src/main.rs)와 반드시 일치시켜야 하는 값.
+  /// 응답 개수가 이 값 이상이면 "거리순 상위 N개로 잘렸을 수 있다"로 간주해
+  /// 캐싱을 건너뛴다(완전한 응답이라는 보장이 없는 걸 재사용하지 않기 위함).
+  static const int _serverCapHeuristic = 500;
 
   final int _capacity;
   final DateTime Function() _now;
@@ -413,6 +427,10 @@ class PoiRegionCache {
     required Set<PoiType> types,
     required List<Poi> pois,
   }) {
+    // 잘렸을 수 있는 응답은 이 영역의 "전체 결과"라고 보장할 수 없으므로
+    // 캐싱하지 않는다 — 다음 요청은 그냥 네트워크로 다시 나간다.
+    if (pois.length >= _serverCapHeuristic) return;
+
     if (_entries.length >= _capacity) {
       _entries.removeAt(0); // 가장 오래된(맨 앞) 항목을 제거
     }
