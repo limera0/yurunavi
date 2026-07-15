@@ -186,6 +186,23 @@ class PoiService {
   /// 골고루 뽑는 방식으로 바꾸되, 각 grid cell 안에서는 카테고리 우선순위(주유소 >
   /// 편의점 > 카페 > 대형마트 > 식당)를 최우선, 거리를 tie-break로 적용해 "우선순위가
   /// 있어 보이면서도 화면 전체에 고르게 분포"하는 두 요구를 동시에 만족시킨다.
+  // 1-2-5 시퀀스 "nice" 스텝 — [rawSizeDeg] 이상인 가장 작은 스텝으로 스냅한다.
+  // 뷰포트 span이 팬으로 미세하게 달라져도(같은 줌 레벨이면 보통 같은 구간
+  // 안에 머무름) 동일한 스텝으로 떨어져 셀 크기가 안정적으로 유지된다.
+  static const List<double> _kCellSizeStepsDeg = [
+    0.0005, 0.001, 0.002, 0.005,
+    0.01, 0.02, 0.05,
+    0.1, 0.2, 0.5,
+    1.0, 2.0, 5.0,
+  ];
+
+  static double _snapCellSizeDeg(double rawSizeDeg) {
+    for (final step in _kCellSizeStepsDeg) {
+      if (rawSizeDeg <= step) return step;
+    }
+    return _kCellSizeStepsDeg.last;
+  }
+
   static List<Poi> selectForAmbientDisplay({
     required List<Poi> candidates,
     required double south,
@@ -219,16 +236,22 @@ class PoiService {
       return sorted.take(maxCount).toList();
     }
 
-    final cells = <int, List<Poi>>{};
+    // 셀 "크기"는 현재 뷰포트 span에서 뽑아 줌 레벨에 맞게 적응시키되, "nice"
+    // 스텝값(1-2-5 시퀀스)으로 스냅해 팬으로 span이 소수점 아래에서 미세하게
+    // 흔들려도(부동소수점 오차 포함) 같은 줌 레벨에서는 항상 동일한 셀
+    // 크기가 나오게 한다. 셀 "경계"도 뷰포트(south/west) 상대가 아니라
+    // 절대 좌표를 셀 크기로 나눈 몫으로 고정한다. 뷰포트 상대 좌표+비스냅
+    // 크기를 쓰면 팬만 해도 매 호출마다 그리드 원점/크기가 같이 흔들려,
+    // 동일한 POI 집합인데도 어느 셀에 속하는지 매번 달라지고 그 결과
+    // 라운드로빈에서 살아남는 POI가 뒤바뀐다 — 팬/줌 시 편의점이 사라지고
+    // 없던 식당이 뜨는 현상으로 리포트됨(2026-07-15 밤 라이딩).
+    final cellLatSize = _snapCellSizeDeg(latSpan / gridSize);
+    final cellLonSize = _snapCellSizeDeg(lonSpan / gridSize);
+    final cells = <(int, int), List<Poi>>{};
     for (final poi in candidates) {
-      final row = ((poi.location.latitude - south) / latSpan * gridSize)
-          .floor()
-          .clamp(0, gridSize - 1);
-      final col = ((poi.location.longitude - west) / lonSpan * gridSize)
-          .floor()
-          .clamp(0, gridSize - 1);
-      final key = row * gridSize + col;
-      (cells[key] ??= []).add(poi);
+      final row = (poi.location.latitude / cellLatSize).floor();
+      final col = (poi.location.longitude / cellLonSize).floor();
+      (cells[(row, col)] ??= []).add(poi);
     }
     for (final cell in cells.values) {
       cell.sort(comparePriorityThenDistance);

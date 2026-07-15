@@ -48,6 +48,39 @@ bool exitGateOpen({
 }) =>
     distanceM <= geofenceM && speedKmh <= speedLimitKmh;
 
+enum WaypointPassageEvent { none, arrived, passed }
+
+/// 경유지 통과/도착 판정 순수 로직 (테스트용으로 분리). 정차 시엔 지오펜스
+/// 진입 즉시 "도착"으로 처리하고, 주행 중 지나치는 경우엔 지오펜스 진입
+/// 즉시가 아니라 지금까지 관측된 최근접 거리([closestDistM])보다
+/// [passedMarginM] 이상 멀어진 뒤에야 "통과"로 판정한다 — 경유지 '주변'
+/// 몇 미터에 들어서기만 해도(아직 도달 전이어도) 바로 통과 처리되던 문제
+/// 수정(2026-07-15 밤 라이딩 회귀). 호출자는 반환된 closestDistM을 다음
+/// 호출의 [closestDistM] 인자로 그대로 넘기고, arrived/passed가 나오면
+/// null로 리셋해 다음 경유지에 대해 새로 추적을 시작해야 한다.
+({WaypointPassageEvent event, double? closestDistM}) waypointPassageEvent({
+  required double distM,
+  required double speedKmh,
+  required double? closestDistM,
+  double arrivalM = 40.0,
+  double stopSpeedKmh = 8.0,
+  double passedMarginM = 10.0,
+}) {
+  if (distM <= arrivalM && speedKmh <= stopSpeedKmh) {
+    return (event: WaypointPassageEvent.arrived, closestDistM: null);
+  }
+  if (distM > arrivalM && closestDistM == null) {
+    return (event: WaypointPassageEvent.none, closestDistM: null);
+  }
+  if (closestDistM == null || distM < closestDistM) {
+    return (event: WaypointPassageEvent.none, closestDistM: distM);
+  }
+  if (distM - closestDistM >= passedMarginM) {
+    return (event: WaypointPassageEvent.passed, closestDistM: null);
+  }
+  return (event: WaypointPassageEvent.none, closestDistM: closestDistM);
+}
+
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
@@ -125,6 +158,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
   int _passedWaypointCount = 0;
   static const _kWaypointArrivalM = 40.0;   // 경유지 통과 판정 지오펜스 반경(m)
   static const _kWaypointStopSpeedKmh = 8.0; // 이 이하면 "정차"로 간주(도착 vs 통과 구분)
+  static const _kWaypointPassedMarginM = 10.0; // 최근접점 대비 이만큼 멀어져야 "통과"
+  // 현재 미통과 경유지에 대해 지금까지 관측된 최근접 거리(m). 지오펜스 진입
+  // 즉시가 아니라 이 최근접점보다 _kWaypointPassedMarginM 이상 멀어졌을 때만
+  // "통과"로 판정한다 — 경유지에 도달하기 전(접근 중)에 통과 이벤트가 먼저
+  // 나가버리는 문제(2026-07-15 밤 라이딩 회귀) 수정. 경유지 인덱스가 바뀌면
+  // (통과 처리 시) null로 리셋.
+  double? _waypointClosestDistM;
 
   // 도착 감지
   bool _arrived = false;
@@ -396,11 +436,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _handleVoice(RouteProgress prog) {
     if (_profile == null) return;
+    // "목적지" vs "경유지" 문구는 실시간 진행 상태(_passedWaypointCount)가
+    // 아니라 이 maneuver가 전체 목록의 마지막 도착 maneuver인지로 정해야
+    // 한다 — Valhalla 다중 레그 경로는 각 레그(경유지별)가 끝날 때마다
+    // type 4/5/6 도착 maneuver를 하나씩 내놓고 _collectManeuvers가 이를
+    // 그대로 이어붙이므로, 목록의 마지막 항목이 항상 실제 최종 목적지다.
+    final isFinalDestination = _maneuvers.isNotEmpty &&
+        prog.activeStepIdx + 1 == _maneuvers.length - 1;
     final intents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
         speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0,
         shapePoints: _routePoints,
-        isFinalDestination: _passedWaypointCount >= widget.waypoints.length);
+        isFinalDestination: isFinalDestination);
     for (final it in intents) {
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
@@ -421,12 +468,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
     final generation = ++_routeGeneration;
+    // 마지막 maneuver만 실제 최종 목적지 — _handleVoice 상단 주석 참조.
+    final lastIdx = maneuvers.length - 1;
     _steps = maneuvers.isNotEmpty
         ? maneuvers
-            .map((m) => _TurnStep.fromManeuver(
-                m,
-                isFinalDestination:
-                    _passedWaypointCount >= widget.waypoints.length))
+            .asMap()
+            .entries
+            .map((e) => _TurnStep.fromManeuver(
+                e.value,
+                isFinalDestination: e.key == lastIdx))
             .toList()
         : const [
             _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
@@ -951,17 +1001,31 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return result;
   }
 
-  /// 현재 위치가 다음 미통과 경유지의 지오펜스 반경 내로 들어오면 통과 처리.
-  /// 정차 여부(속도)로 "도착" vs "통과" 음성을 구분하되, 두 경우 모두
-  /// _passedWaypointCount를 증가시켜 이후 재탐색에서 배제한다.
+  /// 현재 위치로 다음 미통과 경유지에 대한 [waypointPassageEvent] 판정을
+  /// 굴려 도착/통과 이벤트를 처리한다. 두 이벤트 모두 _passedWaypointCount를
+  /// 증가시켜 이후 재탐색에서 배제한다.
   void _checkWaypointProgress(LatLng pos, double speedKmh) {
     if (_passedWaypointCount >= widget.waypoints.length) return;
     final target = widget.waypoints[_passedWaypointCount];
     final distM = PoiService.haversineMeters(pos, target);
-    if (distM <= _kWaypointArrivalM) {
-      final stopped = speedKmh <= _kWaypointStopSpeedKmh;
-      _passedWaypointCount++;
-      _vps?.speak(stopped ? 'waypoint_arrived' : 'waypoint_passed');
+    final result = waypointPassageEvent(
+      distM: distM,
+      speedKmh: speedKmh,
+      closestDistM: _waypointClosestDistM,
+      arrivalM: _kWaypointArrivalM,
+      stopSpeedKmh: _kWaypointStopSpeedKmh,
+      passedMarginM: _kWaypointPassedMarginM,
+    );
+    _waypointClosestDistM = result.closestDistM;
+    switch (result.event) {
+      case WaypointPassageEvent.arrived:
+        _passedWaypointCount++;
+        _vps?.speak('waypoint_arrived');
+      case WaypointPassageEvent.passed:
+        _passedWaypointCount++;
+        _vps?.speak('waypoint_passed');
+      case WaypointPassageEvent.none:
+        break;
     }
   }
 

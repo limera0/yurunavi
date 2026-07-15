@@ -118,6 +118,42 @@ void main() {
         PoiType.cafe,
       ]);
     });
+
+    test(
+        '(f) 동일 후보 집합이면 뷰포트가 살짝 이동(팬)해도 선택 결과가 바뀌지 않는다 '
+        '(2026-07-15 밤 라이딩 회귀 가드 — "편의점이 사라지고 식당이 뜬다")', () {
+      final candidates = <Poi>[];
+      final types = PoiType.values;
+      for (var i = 0; i < 40; i++) {
+        final lat = 37.0 + (i % 8) * 0.01;
+        final lon = 127.0 + (i ~/ 8) * 0.01;
+        candidates.add(_poi('p$i', types[i % types.length], lat, lon));
+      }
+      final before = PoiService.selectForAmbientDisplay(
+        candidates: candidates,
+        south: 36.98,
+        north: 37.10,
+        west: 126.98,
+        east: 127.10,
+        center: const LatLng(37.04, 127.04),
+        maxCount: 20,
+      );
+      // 뷰포트를 아주 조금 팬(같은 span, 원점만 이동) — 그리드가 뷰포트에
+      // 상대적이면 셀 경계가 같이 밀려 선택된 POI 집합이 바뀐다.
+      final after = PoiService.selectForAmbientDisplay(
+        candidates: candidates,
+        south: 36.981,
+        north: 37.101,
+        west: 126.983,
+        east: 127.103,
+        center: const LatLng(37.041, 127.043),
+        maxCount: 20,
+      );
+      expect(
+        before.map((p) => p.id).toSet(),
+        after.map((p) => p.id).toSet(),
+      );
+    });
   });
 
   group('PoiRegionCache', () {

@@ -679,7 +679,14 @@ class RoutingService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'encoded_polyline': encoded,
-              'shape_match': 'edge_walk',
+              // edge_walk는 shape가 그래프 엣지와 정확히 일치하지 않으면(교차로
+              // 밀집 구간, 부동소수점 오차 등) 400으로 실패한다(2026-07-15 밤
+              // 라이딩 로그에서 실측: "edge_walk algorithm failed to find exact
+              // route match" — Valhalla가 직접 walk_or_snap 폴백을 권장함).
+              // walk_or_snap은 가능하면 edge_walk를 쓰고 실패 시 map-matching으로
+              // 자동 폴백해 항상 결과를 반환한다(CPU 비용은 더 들지만 이 호출은
+              // 이미 20초 타임아웃 + 실패 시 빈 리스트로 안전하게 무시됨).
+              'shape_match': 'walk_or_snap',
               'costing': 'motorcycle',
               'filters': {
                 'attributes': [
