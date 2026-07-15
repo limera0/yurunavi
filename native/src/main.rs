@@ -496,13 +496,78 @@ const ALL_POI_CATEGORIES: [&str; 5] = [
 ];
 const MAX_POI_RADIUS_M: f64 = 5000.0;
 
+/// bbox 모드에서 위도/경도 폭 각각의 상한(도). 클라이언트가 국가 전체 같은
+/// 비현실적으로 큰 영역을 한 번에 요청하지 못하도록 막는 가드레일 — 오토바이
+/// 내비 지도 뷰포트는 절대 이 크기에 도달하지 않으므로 실제로는 발동하지 않아야 정상.
+/// 초과 시 자르지 않고 명시적으로 400을 반환한다(자르면 클라이언트가 예상한
+/// 사각형과 다른 모양의 응답을 받게 되어 오히려 헷갈림).
+const MAX_BBOX_SPAN_DEG: f64 = 0.5;
+
+/// `/poi/nearby`는 두 가지 쿼리 모드를 지원한다:
+/// - bbox 모드: south/west/north/east 4개 모두 존재 — 뷰포트 사각형을 그대로 rtree 쿼리에 사용.
+/// - radius 모드: lat/lon/radius_m 모두 존재 — 기존 중심점+반경 모드(변경 없음).
+/// 둘 다 아니거나 bbox 4개 중 일부만 있으면 400 (조용히 추측하지 않는다).
 #[derive(Deserialize)]
 struct PoiNearbyQuery {
-    lat: f64,
-    lon: f64,
-    radius_m: f64,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    radius_m: Option<f64>,
+    south: Option<f64>,
+    west: Option<f64>,
+    north: Option<f64>,
+    east: Option<f64>,
     #[serde(default)]
     types: Option<String>,
+}
+
+/// `PoiNearbyQuery`에서 뽑아낸, 모호함이 없는 쿼리 모드.
+#[derive(Debug, PartialEq)]
+enum PoiQueryMode {
+    Bbox { south: f64, west: f64, north: f64, east: f64 },
+    Radius { lat: f64, lon: f64, radius_m: f64 },
+}
+
+/// 쿼리 파라미터에서 실제로 어떤 모드를 쓸지 결정한다. HTTP/axum 없이 단위
+/// 테스트 가능하도록 순수 함수로 분리했다.
+///
+/// - south/west/north/east 4개 모두 존재 → Bbox
+/// - 4개 중 1~3개만 존재 → Err (부분 bbox는 조용히 추측하지 않고 명시적으로 거부)
+/// - lat/lon/radius_m 모두 존재 → Radius
+/// - 그 외(완전히 비어있거나 radius 필드 일부만 존재) → Err
+fn resolve_poi_query_mode(q: &PoiNearbyQuery) -> Result<PoiQueryMode, ()> {
+    let bbox_present = [q.south, q.west, q.north, q.east]
+        .iter()
+        .filter(|v| v.is_some())
+        .count();
+
+    if bbox_present == 4 {
+        return Ok(PoiQueryMode::Bbox {
+            south: q.south.unwrap(),
+            west: q.west.unwrap(),
+            north: q.north.unwrap(),
+            east: q.east.unwrap(),
+        });
+    }
+    if bbox_present > 0 {
+        return Err(()); // 일부만 지정 — 애매하므로 거부
+    }
+
+    if let (Some(lat), Some(lon), Some(radius_m)) = (q.lat, q.lon, q.radius_m) {
+        return Ok(PoiQueryMode::Radius { lat, lon, radius_m });
+    }
+
+    Err(())
+}
+
+/// bbox 모드의 면적 가드레일. south>=north 또는 west>=east(뒤집힌/퇴화된 bbox)이거나
+/// 위도/경도 폭이 [MAX_BBOX_SPAN_DEG]를 초과하면 false.
+fn bbox_span_valid(south: f64, west: f64, north: f64, east: f64) -> bool {
+    let lat_span = north - south;
+    let lon_span = east - west;
+    lat_span > 0.0
+        && lon_span > 0.0
+        && lat_span <= MAX_BBOX_SPAN_DEG
+        && lon_span <= MAX_BBOX_SPAN_DEG
 }
 
 #[derive(Serialize)]
@@ -598,6 +663,68 @@ fn query_poi_nearby(
     Ok(with_dist.into_iter().map(|(_, dto)| dto).collect())
 }
 
+/// bbox 후보 조회 + IN 카테고리 필터 + (중심점 기준) 거리 정렬.
+///
+/// `query_poi_nearby`와 달리 이 bbox는 이미 정확한 목표 영역 그 자체이므로
+/// haversine 반경 필터를 적용하지 않는다 — bbox 안에 있으면 전부 정답이다.
+/// 정렬만 응답 순서를 기존 radius 모드(가까운 순)와 일관되게 맞추기 위해 수행한다.
+fn query_poi_in_bbox(
+    conn: &Connection,
+    south: f64,
+    west: f64,
+    north: f64,
+    east: f64,
+    types: &[String],
+) -> rusqlite::Result<Vec<PoiDto>> {
+    let placeholders: Vec<String> = (0..types.len()).map(|i| format!("?{}", i + 5)).collect();
+    let sql = format!(
+        "SELECT p.bizes_id, p.name, p.category, p.lat, p.lon, p.address \
+         FROM poi_rtree r JOIN poi p ON p.id = r.id \
+         WHERE r.min_lat <= ?2 AND r.max_lat >= ?1 \
+           AND r.min_lon <= ?4 AND r.max_lon >= ?3 \
+           AND p.category IN ({})",
+        placeholders.join(",")
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&south, &north, &west, &east];
+    for t in types {
+        params.push(t);
+    }
+
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok(PoiDto {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            category: row.get(2)?,
+            lat: row.get(3)?,
+            lon: row.get(4)?,
+            address: row.get(5)?,
+        })
+    })?;
+
+    let mut candidates: Vec<PoiDto> = Vec::new();
+    for row in rows {
+        match row {
+            Ok(dto) => candidates.push(dto),
+            Err(e) => eprintln!("[YuruNavi/Rust] /poi/nearby(bbox) row 파싱 실패(건너뜀): {e}"),
+        }
+    }
+
+    let center = GpsPoint { lat: (south + north) / 2.0, lng: (west + east) / 2.0 };
+    let mut with_dist: Vec<(f64, PoiDto)> = candidates
+        .into_iter()
+        .map(|dto| {
+            let d = haversine_m(&center, &GpsPoint { lat: dto.lat, lng: dto.lon });
+            (d, dto)
+        })
+        .collect();
+    with_dist.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(with_dist.into_iter().map(|(_, dto)| dto).collect())
+}
+
 async fn handle_poi_nearby(
     Query(q): Query<PoiNearbyQuery>,
 ) -> Result<Json<Vec<PoiDto>>, StatusCode> {
@@ -607,7 +734,8 @@ async fn handle_poi_nearby(
     };
     let conn = mutex.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let radius_m = q.radius_m.clamp(0.0, MAX_POI_RADIUS_M);
+    let mode = resolve_poi_query_mode(&q).map_err(|_| StatusCode::BAD_REQUEST)?;
+
     let types: Vec<String> = match q.types.as_deref() {
         Some(s) if !s.trim().is_empty() => s
             .split(',')
@@ -620,7 +748,19 @@ async fn handle_poi_nearby(
         return Ok(Json(Vec::new()));
     }
 
-    let results = query_poi_nearby(&conn, q.lat, q.lon, radius_m, &types).map_err(|e| {
+    let results = match mode {
+        PoiQueryMode::Bbox { south, west, north, east } => {
+            if !bbox_span_valid(south, west, north, east) {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            query_poi_in_bbox(&conn, south, west, north, east, &types)
+        }
+        PoiQueryMode::Radius { lat, lon, radius_m } => {
+            let radius_m = radius_m.clamp(0.0, MAX_POI_RADIUS_M);
+            query_poi_nearby(&conn, lat, lon, radius_m, &types)
+        }
+    }
+    .map_err(|e| {
         eprintln!("[YuruNavi/Rust] /poi/nearby 쿼리 실패: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -793,5 +933,180 @@ mod tests {
         let types: Vec<String> = ALL_POI_CATEGORIES.iter().map(|s| s.to_string()).collect();
         let results = query_poi_nearby(&conn, 0.0, 0.0, 1000.0, &types).expect("쿼리 실패");
         assert!(results.is_empty(), "서울과 무관한 좌표(0,0)에서는 결과가 없어야 함");
+    }
+
+    // ── bbox 모드: query_poi_in_bbox / bbox_span_valid / resolve_poi_query_mode ──
+
+    fn setup_bbox_test_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory DB 생성 실패");
+        conn.execute_batch(
+            "CREATE TABLE poi (
+                id INTEGER PRIMARY KEY,
+                bizes_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lon REAL NOT NULL,
+                address TEXT
+            );
+            CREATE INDEX idx_poi_category ON poi(category);
+            CREATE VIRTUAL TABLE poi_rtree USING rtree(
+                id,
+                min_lat, max_lat,
+                min_lon, max_lon
+            );",
+        )
+        .expect("스키마 생성 실패");
+
+        // 쿼리 bbox: south=37.0, west=127.0, north=37.02, east=127.02 → center=(37.01, 127.01).
+        let seed: &[(&str, &str, &str, f64, f64)] = &[
+            ("b1", "가까운카페", "cafe", 37.01, 127.011), // 중심에서 가장 가까움 (~89m)
+            ("b2", "중간거리편의점", "convenience_store", 37.015, 127.01), // 중간 거리 (~557m)
+            // bbox 모서리 근방 — "중심+반경" 근사였다면 원(circle) 밖으로 잘렸을 후보.
+            // bbox 모드는 반경 필터를 하지 않으므로 사각형 안이면 그대로 포함되어야 한다.
+            ("b3", "모서리카페", "cafe", 37.0199, 127.0199), // (~1411m, 그러나 bbox 안)
+            ("b4", "bbox밖", "cafe", 37.03, 127.03), // north 경계 초과 — 제외
+            ("b5", "카테고리제외", "restaurant", 37.01, 127.012), // types에서 제외 예정
+        ];
+        for (id, name, category, lat, lon) in seed {
+            conn.execute(
+                "INSERT INTO poi (bizes_id, name, category, lat, lon, address) VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                params![id, name, category, lat, lon],
+            )
+            .expect("poi insert 실패");
+            let rowid = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO poi_rtree (id, min_lat, max_lat, min_lon, max_lon) VALUES (?1, ?2, ?2, ?3, ?3)",
+                params![rowid, lat, lon],
+            )
+            .expect("rtree insert 실패");
+        }
+        conn
+    }
+
+    #[test]
+    fn query_poi_in_bbox_includes_corner_excludes_outside_and_sorts_by_center_distance() {
+        let conn = setup_bbox_test_db();
+        let types = vec!["cafe".to_string(), "convenience_store".to_string()];
+        let results = query_poi_in_bbox(&conn, 37.0, 127.0, 37.02, 127.02, &types)
+            .expect("쿼리 실패");
+
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids.len(), 3, "b4(bbox 밖)/b5(카테고리 제외)는 빠져야 함: {ids:?}");
+        assert!(
+            ids.contains(&"b3"),
+            "모서리 후보 b3는 원 반경 필터라면 잘렸겠지만 bbox 모드에선 포함되어야 함: {ids:?}"
+        );
+        assert!(!ids.contains(&"b4"), "bbox 밖 후보 b4는 제외되어야 함: {ids:?}");
+        assert_eq!(ids[0], "b1", "중심(37.01,127.01)에 가장 가까운 b1이 1순위여야 함: {ids:?}");
+    }
+
+    #[test]
+    fn query_poi_in_bbox_category_filter_excludes_other_types() {
+        let conn = setup_bbox_test_db();
+        let types = vec!["restaurant".to_string()];
+        let results = query_poi_in_bbox(&conn, 37.0, 127.0, 37.02, 127.02, &types)
+            .expect("쿼리 실패");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "b5");
+    }
+
+    #[test]
+    fn bbox_span_valid_accepts_small_span() {
+        assert!(bbox_span_valid(37.0, 127.0, 37.02, 127.02));
+    }
+
+    #[test]
+    fn bbox_span_valid_accepts_exactly_at_cap() {
+        assert!(bbox_span_valid(37.0, 127.0, 37.5, 127.5));
+    }
+
+    #[test]
+    fn bbox_span_valid_rejects_oversized_lat_span() {
+        assert!(!bbox_span_valid(37.0, 127.0, 37.6, 127.02), "위도 폭 0.6도 > 0.5도 상한");
+    }
+
+    #[test]
+    fn bbox_span_valid_rejects_oversized_lon_span() {
+        assert!(!bbox_span_valid(37.0, 127.0, 37.02, 127.6), "경도 폭 0.6도 > 0.5도 상한");
+    }
+
+    #[test]
+    fn bbox_span_valid_rejects_inverted_bbox() {
+        // north < south — 뒤집힌/퇴화된 bbox는 조용히 처리하지 않고 거부한다.
+        assert!(!bbox_span_valid(37.02, 127.0, 37.0, 127.02));
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_all_bbox_fields_present_is_bbox() {
+        let q = PoiNearbyQuery {
+            lat: None, lon: None, radius_m: None,
+            south: Some(37.0), west: Some(127.0), north: Some(37.02), east: Some(127.02),
+            types: None,
+        };
+        assert_eq!(
+            resolve_poi_query_mode(&q),
+            Ok(PoiQueryMode::Bbox { south: 37.0, west: 127.0, north: 37.02, east: 127.02 })
+        );
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_radius_fields_present_is_radius() {
+        let q = PoiNearbyQuery {
+            lat: Some(37.5), lon: Some(127.0), radius_m: Some(1000.0),
+            south: None, west: None, north: None, east: None,
+            types: None,
+        };
+        assert_eq!(
+            resolve_poi_query_mode(&q),
+            Ok(PoiQueryMode::Radius { lat: 37.5, lon: 127.0, radius_m: 1000.0 })
+        );
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_partial_bbox_is_rejected() {
+        // south/west만 있고 north/east가 빠짐 — 조용히 추측하지 않고 거부.
+        let q = PoiNearbyQuery {
+            lat: None, lon: None, radius_m: None,
+            south: Some(37.0), west: Some(127.0), north: None, east: None,
+            types: None,
+        };
+        assert_eq!(resolve_poi_query_mode(&q), Err(()));
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_partial_radius_is_rejected() {
+        // lat/lon만 있고 radius_m이 빠짐 — 부분 radius도 거부.
+        let q = PoiNearbyQuery {
+            lat: Some(37.5), lon: Some(127.0), radius_m: None,
+            south: None, west: None, north: None, east: None,
+            types: None,
+        };
+        assert_eq!(resolve_poi_query_mode(&q), Err(()));
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_neither_mode_is_rejected() {
+        // 완전히 빈 쿼리 — 400이어야지 패닉/500이면 안 됨.
+        let q = PoiNearbyQuery {
+            lat: None, lon: None, radius_m: None,
+            south: None, west: None, north: None, east: None,
+            types: None,
+        };
+        assert_eq!(resolve_poi_query_mode(&q), Err(()));
+    }
+
+    #[test]
+    fn resolve_poi_query_mode_both_fully_present_prefers_bbox() {
+        // bbox 4개 + radius 3개가 모두 채워진 경우: bbox 경로를 우선한다.
+        let q = PoiNearbyQuery {
+            lat: Some(37.5), lon: Some(127.0), radius_m: Some(1000.0),
+            south: Some(37.0), west: Some(127.0), north: Some(37.02), east: Some(127.02),
+            types: None,
+        };
+        assert_eq!(
+            resolve_poi_query_mode(&q),
+            Ok(PoiQueryMode::Bbox { south: 37.0, west: 127.0, north: 37.02, east: 127.02 })
+        );
     }
 }
