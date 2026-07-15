@@ -608,10 +608,19 @@ fn query_poi_nearby(
 
     // category IN (...) — 값 개수만큼 바인드 파라미터를 만들고, 값 자체는 절대
     // 문자열로 SQL에 직접 삽입하지 않는다.
+    //
+    // ⚠️ CROSS JOIN 필수(일반 JOIN 아님): SQLite 쿼리 플래너가 category 인덱스를
+    // driving table로 잘못 선택해 poi_rtree를 행마다 SCAN하는 계획을 세우는
+    // 경우가 실측 확인됨(2026-07-15, all-5-categories 조회에서 ~1.1초 — R-tree
+    // 인덱스가 사실상 무용지물이 됨). CROSS JOIN은 SQLite 플래너의 테이블 순서
+    // 재배치를 비활성화해 작성된 순서(rtree 먼저)를 강제한다 — 같은 쿼리가
+    // 33~60배 빨라짐(1150ms → 19~35ms, EXPLAIN QUERY PLAN으로 R-tree 자체
+    // 공간 인덱스가 실제로 쓰이는지 확인 완료). 카테고리 1개짜리 좁은 쿼리도
+    // 동일하게 개선됨(198ms → 9.6ms) — 이 변경으로 손해 보는 케이스는 없었다.
     let placeholders: Vec<String> = (0..types.len()).map(|i| format!("?{}", i + 5)).collect();
     let sql = format!(
         "SELECT p.bizes_id, p.name, p.category, p.lat, p.lon, p.address \
-         FROM poi_rtree r JOIN poi p ON p.id = r.id \
+         FROM poi_rtree r CROSS JOIN poi p ON p.id = r.id \
          WHERE r.min_lat <= ?2 AND r.max_lat >= ?1 \
            AND r.min_lon <= ?4 AND r.max_lon >= ?3 \
            AND p.category IN ({})",
@@ -676,10 +685,13 @@ fn query_poi_in_bbox(
     east: f64,
     types: &[String],
 ) -> rusqlite::Result<Vec<PoiDto>> {
+    // CROSS JOIN 필수 — query_poi_nearby와 동일 이유(위 함수 주석 참조):
+    // 일반 JOIN이면 SQLite 플래너가 category 인덱스를 driving table로 잘못
+    // 선택해 R-tree를 사실상 무용지물로 만든다(실측 33~60배 저하).
     let placeholders: Vec<String> = (0..types.len()).map(|i| format!("?{}", i + 5)).collect();
     let sql = format!(
         "SELECT p.bizes_id, p.name, p.category, p.lat, p.lon, p.address \
-         FROM poi_rtree r JOIN poi p ON p.id = r.id \
+         FROM poi_rtree r CROSS JOIN poi p ON p.id = r.id \
          WHERE r.min_lat <= ?2 AND r.max_lat >= ?1 \
            AND r.min_lon <= ?4 AND r.max_lon >= ?3 \
            AND p.category IN ({})",
