@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 import 'dart:math' show Point, cos, sqrt, asin;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator, rootBundle;
+import 'package:flutter/services.dart'
+    show MethodChannel, SystemNavigator, rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
@@ -130,6 +133,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
   ProviderSubscription<NavigationState?>? _locationSub;
 
+  // 디버그 전용 E2E 자동화 하네스 — kDebugMode에서만 동작, 세션당 1회만 트리거.
+  // 무인 가상 GPS 주행 테스트를 위해 adb intent extra로 목적지를 주입받아
+  // "목적지 설정 → 경로 계산 → 내비 시작"까지 자동 실행한다. 릴리스 빌드에서는
+  // kDebugMode가 컴파일타임 상수라 이 코드 전체가 tree-shake되어 제거된다.
+  bool _e2eHarnessFired = false;
+  static const _e2eHarnessChannel =
+      MethodChannel('com.westinx.yurunavi/e2e_harness');
+
   // 뒤로 연타 종료
   DateTime? _lastBackPress;
 
@@ -231,6 +242,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         );
         _ensureLocationMarker(); // unawaited — B1
         unawaited(_maybeFetchSearchPrefetch(loc));
+        unawaited(_maybeRunE2EHarness());
       }
     } catch (_) {} // 권한 미취득 등 — 무시하고 스트림으로 진행
 
@@ -249,9 +261,61 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         final heading = _resolveHeading(next.speedKmh, next.headingDeg);
         _ensureLocationMarker(heading); // unawaited — B1
         unawaited(_maybeFetchSearchPrefetch(loc));
+        unawaited(_maybeRunE2EHarness());
       },
       fireImmediately: true,
     );
+  }
+
+  // ── E2E 테스트 하네스 (디버그 전용) ──────────────────────────────────────────
+
+  /// GPS 위치(원점)가 처음 확보된 시점에 호출. adb intent extra로 목적지가
+  /// 넘어와 있으면 "목적지 설정 → 경로 계산 대기 → 내비 시작"을 자동 실행한다.
+  /// kDebugMode가 아니거나 이미 이번 세션에 실행했으면 즉시 반환.
+  Future<void> _maybeRunE2EHarness() async {
+    if (!kDebugMode) return;
+    if (_e2eHarnessFired) return;
+    _e2eHarnessFired = true; // 재진입/중복 트리거 방지 — await 전에 즉시 세팅
+
+    Map<Object?, Object?>? dest;
+    try {
+      dest = await _e2eHarnessChannel.invokeMapMethod<Object?, Object?>(
+        'getE2EDestination',
+      );
+    } catch (e) {
+      dev.log('E2E_HARNESS channel error: $e', name: 'E2EHarness');
+      return;
+    }
+    if (dest == null) return;
+    final lat = (dest['lat'] as num?)?.toDouble();
+    final lon = (dest['lon'] as num?)?.toDouble();
+    if (lat == null || lon == null) return;
+
+    dev.log('E2E_HARNESS dest=$lat,$lon start', name: 'E2EHarness');
+    await _applyDestination(LatLng(lat, lon));
+
+    final gotRoutes = await _e2eWaitForRoutes();
+    if (!mounted) return;
+    if (!gotRoutes) {
+      dev.log('E2E_HARNESS timeout waiting for routes', name: 'E2EHarness');
+      return;
+    }
+    _startNavigation();
+    dev.log('E2E_HARNESS navigation started', name: 'E2EHarness');
+  }
+
+  /// _fetchAndStoreAllRoutes()가 비동기로 채우는 _fetchedRoutes를 폴링 대기.
+  /// 라우팅 서비스 자체 타임아웃(20s)과 동일하게 맞춰 그보다 오래 걸리지 않게 한다.
+  Future<bool> _e2eWaitForRoutes() async {
+    const timeout = Duration(seconds: 20);
+    const pollInterval = Duration(milliseconds: 200);
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (!mounted) return false;
+      if (_fetchedRoutes.isNotEmpty) return true;
+      await Future<void>.delayed(pollInterval);
+    }
+    return _fetchedRoutes.isNotEmpty;
   }
 
   /// 정차/저속(3km/h 미만) 시 마지막 방향을 유지 — nav_screen._resolveHeading과 동일 로직.

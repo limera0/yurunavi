@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -73,6 +74,14 @@ final locationStreamProvider = StreamProvider<Position>((ref) async* {
       accuracy: LocationAccuracy.bestForNavigation,
       intervalDuration: const Duration(milliseconds: 1000),
       distanceFilter: 0,
+      // 디버그 빌드에서는 classic LocationManager를 강제해 Play Services
+      // FusedLocationProviderClient를 우회한다 — 가상 GPS(mock test-provider)로
+      // 재생 중에도 FLP가 주기적으로(~60초 간격) 자체 판단의 실측 fix를 섞어
+      // 넣는 게 실측 확인됨(고가/지하차도 안내 회귀 테스트 중 발견 — GPS/NETWORK
+      // 프로바이더 둘 다 모킹해도 발생, snap이 엉뚱한 shape 인덱스로 튀어
+      // 오프루트/오도착을 유발). 릴리스 빌드는 절대 영향 없음(kDebugMode는
+      // release에서 컴파일타임 false로 tree-shake됨).
+      forceLocationManager: kDebugMode,
       foregroundNotificationConfig: const ForegroundNotificationConfig(
         notificationTitle: "유루나비 주행 중",
         notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
