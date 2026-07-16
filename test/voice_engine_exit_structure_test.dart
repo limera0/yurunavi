@@ -71,6 +71,17 @@ void main() {
       expect(intents[0].vars['direction_word'], '왼쪽');
     });
 
+    test('right exit(type 20) + underpass 인접 → structure 키, 지하차도/오른쪽', () {
+      final engine = VoiceEngine(profile,
+          exitStructureByManeuverIdx: {1: StructureType.underpass});
+      final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
+      final intents = drive(engine, 0, [600, 500], steps);
+
+      expect(intents[0].key, 'exit_approach_structure');
+      expect(intents[0].vars['structure'], '지하차도');
+      expect(intents[0].vars['direction_word'], '오른쪽');
+    });
+
     test('exitName이 있으면 structure보다 named가 우선한다', () {
       final engine = VoiceEngine(profile,
           exitStructureByManeuverIdx: {1: StructureType.tunnel});

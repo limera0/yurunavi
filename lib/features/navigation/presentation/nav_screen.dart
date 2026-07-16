@@ -547,9 +547,52 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final zones = await RoutingService.fetchStructureZones(points);
     if (!mounted || generation != _routeGeneration) return;
     debugPrint('YNAV_STRUCT zones=${zones.length}');
-    ref.read(routeProgressProvider.notifier).setStructureZones(zones);
+    final notifier = ref.read(routeProgressProvider.notifier);
+    notifier.setStructureZones(zones);
     // exit(20/21) 카드 라벨이 방금 갱신된 exitStructureByManeuverIdx를 반영할
     // 수 있도록 카드 목록을 다시 만든다 — maneuvers 자체는 그대로다.
+    setState(() {
+      _steps = _buildTurnSteps(_maneuvers);
+    });
+    // 온-루트로 못 찾은 exit만 대상으로 옆길(우회 중인) 구조물을 마저 조회한다
+    // — _loadStructureZones가 채운 exitStructureByManeuverIdx가 필요하므로
+    // 반드시 그 다음에 실행(HANDOFF_0716 §3 참조).
+    unawaited(_loadOffRouteStructures(generation));
+  }
+
+  /// 경로 위(온-루트)에서 구조물을 못 찾은 exit(20/21) maneuver에 한해, 시작점
+  /// 근방(반경 150m)을 Valhalla /locate로 조회해 "옆길로 우회 중인" 구조물을
+  /// 찾는다 — 언더패스/고가도로 옆길 분기에서 미리 차선을 바꾸지 못해 마지막
+  /// 순간 급하게 차선을 가로지르는 사고 위험을 줄이기 위한 안전 기능
+  /// (HANDOFF_0716_structure_bypass_exit.md §0). 실패해도 예외를 던지지 않는
+  /// 부가 기능 — 조회가 느리거나 실패해도 내비게이션 본편은 정상 진행된다.
+  Future<void> _loadOffRouteStructures(int generation) async {
+    final notifier = ref.read(routeProgressProvider.notifier);
+    final onRoute = notifier.exitStructureByManeuverIdx;
+    final candidates = <int, LatLng>{};
+    for (int i = 0; i < _maneuvers.length; i++) {
+      final m = _maneuvers[i];
+      if ((m.type != 20 && m.type != 21) || onRoute.containsKey(i)) continue;
+      if (m.beginShapeIdx < 0 || m.beginShapeIdx >= _routePoints.length) {
+        continue;
+      }
+      candidates[i] = _routePoints[m.beginShapeIdx];
+    }
+    if (candidates.isEmpty) return;
+
+    final results = await Future.wait(candidates.entries.map((e) async {
+      final type = await RoutingService.fetchOffRouteStructureNear(e.value);
+      return MapEntry(e.key, type);
+    }));
+    if (!mounted || generation != _routeGeneration) return;
+
+    final map = <int, StructureType>{
+      for (final r in results)
+        if (r.value != null) r.key: r.value!,
+    };
+    if (map.isEmpty) return;
+    debugPrint('YNAV_OFFROUTE_STRUCT found=${map.length}');
+    notifier.setOffRouteStructures(map);
     setState(() {
       _steps = _buildTurnSteps(_maneuvers);
     });
@@ -2137,11 +2180,11 @@ class _TurnStep {
       case 19: return '램프 좌측';
       case 20:
         return nearbyStructure != null
-            ? '${nearbyStructure == StructureType.bridge ? '고가도로' : '터널'} 우측 옆길'
+            ? '${nearbyStructure.labelKo} 우측 옆길'
             : '우측 출구';
       case 21:
         return nearbyStructure != null
-            ? '${nearbyStructure == StructureType.bridge ? '고가도로' : '터널'} 좌측 옆길'
+            ? '${nearbyStructure.labelKo} 좌측 옆길'
             : '좌측 출구';
       case 23: return '우측 유지';
       case 24: return '좌측 유지';

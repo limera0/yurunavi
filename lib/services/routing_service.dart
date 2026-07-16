@@ -55,8 +55,18 @@ class ManeuverStep {
   });
 }
 
-/// 고가도로/터널 등 구조물 종류.
-enum StructureType { bridge, tunnel }
+/// 고가도로/터널/지하차도 등 구조물 종류.
+enum StructureType { bridge, tunnel, underpass }
+
+/// 구조물 타입 → 한국어 안내 라벨. 카드 라벨(nav_screen)과 TTS(voice_engine)
+/// 양쪽에서 공유해 중복 판정 로직을 피한다.
+extension StructureTypeLabel on StructureType {
+  String get labelKo => switch (this) {
+        StructureType.bridge => '고가도로',
+        StructureType.tunnel => '터널',
+        StructureType.underpass => '지하차도',
+      };
+}
 
 /// 경로 상의 다리/터널 구간 (전역 shape 인덱스 기준).
 class StructureZone {
@@ -757,6 +767,97 @@ class RoutingService {
       debugPrint('YNAV_STRUCT_ERR exception=$e');
       return [];
     }
+  }
+
+  /// 경로에는 없지만(우회 중인) 근처의 다리/터널을 감지한다. [fetchStructureZones]가
+  /// trace_attributes로 "실제로 밟는 도로"만 보는 것과 달리, Valhalla /locate로
+  /// [point] 반경 [radiusM] 내 모든 엣지를 조회해 "옆길로 우회 중인 구조물"을
+  /// 잡는다 — 언더패스/고가도로 옆길 분기에서 차선변경 타이밍을 놓치지 않게
+  /// 하는 안전 기능(§0 HANDOFF_0716 참조)이라 radiusM 기본값은 실측(99.3m)보다
+  /// 여유 있게 150m로 잡는다. 부가 기능이므로 실패 시 예외 없이 null.
+  static Future<StructureType?> fetchOffRouteStructureNear(
+    LatLng point, {
+    double radiusM = 150,
+  }) async {
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$_valhallaBase/locate'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'locations': [
+                {
+                  'lat': point.latitude,
+                  'lon': point.longitude,
+                  'radius': radiusM.round(),
+                }
+              ],
+              'costing': 'motorcycle',
+              'verbose': true,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode != 200) {
+        dev.log(
+          'locate ${resp.statusCode}: '
+          '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
+          name: 'RoutingService',
+          level: 900,
+        );
+        debugPrint('YNAV_OFFROUTE_ERR status=${resp.statusCode}');
+        return null;
+      }
+
+      final data = jsonDecode(resp.body) as List;
+      if (data.isEmpty) return null;
+      final edges = (data.first as Map)['edges'] as List? ?? [];
+      return classifyOffRouteEdges(edges);
+    } catch (e) {
+      dev.log('fetchOffRouteStructureNear 실패: $e',
+          name: 'RoutingService', level: 900);
+      debugPrint('YNAV_OFFROUTE_ERR exception=$e');
+      return null;
+    }
+  }
+
+  /// /locate 응답의 edges 배열(한 location 분)에서 가장 가까운 다리/터널
+  /// 엣지를 골라 타입을 판정한다. bridge는 이름과 무관하게 항상 고가도로로
+  /// 확정(모호함 없음). tunnel은 way 이름에 "지하차도"/"터널"이 있으면 그
+  /// 라벨을 그대로 쓰고, 이름 정보가 없으면 터널로 통칭(폴백 — 실제 지하차도/
+  /// 터널 사례를 더 모아 길이 기반 임계값을 정할 때까지는 이 단순 폴백을
+  /// 유지한다, HANDOFF_0716 §3-4 참조).
+  static StructureType? classifyOffRouteEdges(List<dynamic> edges) {
+    StructureType? best;
+    double bestDistM = double.infinity;
+    for (final e in edges) {
+      final edge = e as Map;
+      final inner = edge['edge'] as Map? ?? const {};
+      final isBridge = (inner['bridge'] as bool?) ?? false;
+      final isTunnel = (inner['tunnel'] as bool?) ?? false;
+      if (!isBridge && !isTunnel) continue;
+
+      // distance 필드가 없는 경우는 실제 Valhalla 응답에선 안 나오는 방어적
+      // 케이스라, 후보에서 밀리지 않도록 "가장 가깝다"(0.0)로 취급한다.
+      final distM = (edge['distance'] as num?)?.toDouble() ?? 0.0;
+      if (distM >= bestDistM) continue;
+
+      StructureType type;
+      if (isBridge) {
+        type = StructureType.bridge;
+      } else {
+        final names = ((edge['edge_info'] as Map?)?['names'] as List? ?? [])
+            .whereType<String>();
+        if (names.any((n) => n.contains('지하차도'))) {
+          type = StructureType.underpass;
+        } else {
+          type = StructureType.tunnel; // 이름 무관("터널" 포함이든 없든) 통칭 폴백
+        }
+      }
+      bestDistM = distM;
+      best = type;
+    }
+    return best;
   }
 
   /// Valhalla encoded polyline 인코더 (precision 6) — [_decodePolyline6]의 역연산.

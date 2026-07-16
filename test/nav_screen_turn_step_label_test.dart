@@ -40,6 +40,20 @@ void main() {
       );
     });
 
+    test('type 20 + underpass 인접 → "지하차도 우측 옆길"', () {
+      expect(
+        turnStepLabelForType(20, nearbyStructure: StructureType.underpass),
+        '지하차도 우측 옆길',
+      );
+    });
+
+    test('type 21 + underpass 인접 → "지하차도 좌측 옆길"', () {
+      expect(
+        turnStepLabelForType(21, nearbyStructure: StructureType.underpass),
+        '지하차도 좌측 옆길',
+      );
+    });
+
     test('다른 maneuver 타입은 구조물 인접 여부와 무관하게 영향받지 않는다', () {
       expect(
         turnStepLabelForType(10, nearbyStructure: StructureType.tunnel),

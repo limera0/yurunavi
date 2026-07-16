@@ -57,6 +57,12 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // _zones 자신처럼 per-tick RouteProgress state에는 포함하지 않는다.
   Map<int, StructureType> _exitStructureByManeuverIdx = const {};
 
+  // 온-루트(trace_attributes/_zones)로는 못 찾은 exit maneuver에 한해, 그
+  // 시작점 근방을 Valhalla /locate로 조회해 "옆길로 우회 중인" 구조물을 찾은
+  // 결과(setOffRouteStructures로 주입). _recomputeExitStructureMap에서
+  // 온-루트 결과가 없을 때만 폴백으로 사용된다 — 온-루트가 항상 우선.
+  Map<int, StructureType> _offRouteStructureByManeuverIdx = const {};
+
   /// [_exitStructureByManeuverIdx]의 읽기 전용 노출.
   Map<int, StructureType> get exitStructureByManeuverIdx =>
       _exitStructureByManeuverIdx;
@@ -92,6 +98,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _pts = points;
     _maneuvers = maneuvers;
     _zones = const []; // 구조물 구간은 setStructureZones로 비동기 별도 주입
+    _offRouteStructureByManeuverIdx = const {}; // 새 경로엔 이전 옆길 조회 결과가 무의미
     // 급커브는 순수 geometry 계산이라 fetchStructureZones처럼 비동기 HTTP
     // 응답을 기다릴 필요가 없다 — setRoute 시점에 바로 계산해 반영한다.
     _curves = RoutingService.detectSharpCurves(points, maneuvers);
@@ -166,6 +173,18 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       distToNextCurveM: current.distToNextCurveM,
       nextCurveDirection: current.nextCurveDirection,
     );
+  }
+
+  /// 온-루트(trace_attributes/_zones)로 못 찾은 exit maneuver에 한해, 그
+  /// 시작점 근방 /locate 조회로 찾은 "옆길로 우회 중인" 구조물 결과를
+  /// 주입한다(호출자는 nav_screen — HANDOFF_0716 §3 참조). RouteProgress
+  /// state의 다른 필드(온-루트 zone 관련)는 건드리지 않으므로 재emit하지
+  /// 않는다 — exitStructureByManeuverIdx는 getter로 직접 조회되는 파생
+  /// 데이터라 호출자가 필요하면 직접 UI를 다시 그린다(setStructureZones와
+  /// 동일 패턴, nav_screen._loadOffRouteStructures 참조).
+  void setOffRouteStructures(Map<int, StructureType> byManeuverIdx) {
+    _offRouteStructureByManeuverIdx = byManeuverIdx;
+    _recomputeExitStructureMap();
   }
 
   /// 점 pos를 [_snapIdx, _snapIdx+window] 범위 세그먼트에 스냅(단조).
@@ -262,16 +281,20 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
   /// _maneuvers/_zones/_cumFromStartM 기준으로 exit(type 20/21) maneuver별
   /// 인접 구조물 타입을 재계산해 [_exitStructureByManeuverIdx]에 캐싱한다.
-  /// setRoute()(새 경로 주입)와 setStructureZones()(zone 비동기 도착) 양쪽에서
-  /// 호출된다 — 둘 중 하나만으로는 maneuvers/zones가 모두 준비된 시점을
-  /// 보장할 수 없다.
+  /// setRoute()(새 경로 주입), setStructureZones()(zone 비동기 도착),
+  /// setOffRouteStructures()(옆길 /locate 비동기 도착) 세 곳 모두에서
+  /// 호출된다 — 어느 하나만으로는 이 셋이 모두 준비된 시점을 보장할 수 없다.
+  /// 온-루트(structureNearExit) 결과가 항상 우선이고, 그게 null일 때만
+  /// _offRouteStructureByManeuverIdx로 폴백한다 — 실제로 그 구조물을 타는
+  /// 경로라면 옆길 조회 결과와 무관하게 정확한 온-루트 판정을 써야 한다.
   void _recomputeExitStructureMap() {
     final map = <int, StructureType>{};
     for (int i = 0; i < _maneuvers.length; i++) {
       final m = _maneuvers[i];
       if (m.type != 20 && m.type != 21) continue;
-      final type =
+      final onRoute =
           RoutingService.structureNearExit(m, _zones, _cumFromStartM);
+      final type = onRoute ?? _offRouteStructureByManeuverIdx[i];
       if (type != null) map[i] = type;
     }
     _exitStructureByManeuverIdx = map;

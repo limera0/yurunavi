@@ -136,8 +136,7 @@ class VoiceEngine {
           } else if (event == 'exit' && nearbyStructure != null) {
             // 구조물 인접 맥락이 일반 랜드마크 폴백보다 라이더에게 더
             // 유용하므로 우선한다.
-            vars['structure'] =
-                nearbyStructure == StructureType.bridge ? '고가도로' : '터널';
+            vars['structure'] = nearbyStructure.labelKo;
             vars['direction_word'] = steps[turnIdx].type == 21 ? '왼쪽' : '오른쪽';
             key = 'exit_${phase}_structure$suffix';
           } else if (event == 'exit' && _landmarkForStep != null) {

@@ -119,4 +119,57 @@ void main() {
     rp.setRoute(points: points, maneuvers: maneuvers, destination: points.last);
     expect(rp.exitStructureByManeuverIdx, isEmpty);
   });
+
+  test('온-루트로 못 찾은 exit는 setOffRouteStructures(옆길 /locate 결과)로 채워진다', () {
+    container.read(routeProgressProvider);
+    final rp = container.read(routeProgressProvider.notifier);
+    final maneuvers = [
+      const ManeuverStep(
+          type: 21, instruction: '', distanceKm: 0, beginShapeIdx: 50, endShapeIdx: 52),
+    ];
+
+    rp.setRoute(points: points, maneuvers: maneuvers, destination: points.last);
+    rp.setStructureZones(const []); // trace_attributes: 온-루트 구조물 없음
+    expect(rp.exitStructureByManeuverIdx, isEmpty);
+
+    rp.setOffRouteStructures({0: StructureType.underpass});
+
+    expect(rp.exitStructureByManeuverIdx, {0: StructureType.underpass});
+  });
+
+  test('온-루트 구조물이 있으면 옆길 조회 결과보다 항상 우선한다', () {
+    container.read(routeProgressProvider);
+    final rp = container.read(routeProgressProvider.notifier);
+    final maneuvers = [
+      const ManeuverStep(
+          type: 20, instruction: '', distanceKm: 0, beginShapeIdx: 12, endShapeIdx: 14),
+    ];
+    const zones = [
+      StructureZone(type: StructureType.tunnel, beginShapeIdx: 10, endShapeIdx: 13),
+    ];
+
+    rp.setRoute(points: points, maneuvers: maneuvers, destination: points.last);
+    rp.setStructureZones(zones);
+    // 같은 maneuver 인덱스(0)에 (잘못된) 옆길 결과가 도착해도 온-루트가 이긴다.
+    rp.setOffRouteStructures({0: StructureType.bridge});
+
+    expect(rp.exitStructureByManeuverIdx, {0: StructureType.tunnel});
+  });
+
+  test('재탐색(setRoute 재호출)은 이전 경로의 옆길 조회 결과도 지운다', () {
+    container.read(routeProgressProvider);
+    final rp = container.read(routeProgressProvider.notifier);
+    final maneuvers = [
+      const ManeuverStep(
+          type: 21, instruction: '', distanceKm: 0, beginShapeIdx: 50, endShapeIdx: 52),
+    ];
+
+    rp.setRoute(points: points, maneuvers: maneuvers, destination: points.last);
+    rp.setStructureZones(const []);
+    rp.setOffRouteStructures({0: StructureType.underpass});
+    expect(rp.exitStructureByManeuverIdx, {0: StructureType.underpass});
+
+    rp.setRoute(points: points, maneuvers: maneuvers, destination: points.last);
+    expect(rp.exitStructureByManeuverIdx, isEmpty);
+  });
 }
