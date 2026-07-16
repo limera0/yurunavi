@@ -37,7 +37,14 @@ String _profileEventKey(String event) =>
 class VoiceEngine {
   final GuidanceProfile profile;
   final ExitLandmarkService? landmarkService;
-  VoiceEngine(this.profile, {this.landmarkService});
+  /// exit(type 20/21) maneuver 인덱스(steps 상의 인덱스, 즉 turnIdx) → 인접
+  /// 구조물 타입. RouteProgressNotifier.exitStructureByManeuverIdx를 그대로
+  /// 참조받아 조회한다. 경로가 바뀌거나(재탐색) trace_attributes 응답이
+  /// 뒤늦게 도착할 때마다 값이 갱신되므로 final이 아닌 settable 필드 —
+  /// 호출자가 매 onProgress 호출 전 최신 값으로 갱신해야 한다.
+  Map<int, StructureType>? exitStructureByManeuverIdx;
+  VoiceEngine(this.profile,
+      {this.landmarkService, this.exitStructureByManeuverIdx});
 
   int _voiceStepIdx = -1;
   List<double> _pendingPoints = [];
@@ -119,9 +126,20 @@ class VoiceEngine {
         }
         if (event == 'ramp' || event == 'exit') {
           final exitName = steps[turnIdx].exitName;
+          StructureType? nearbyStructure;
+          if (event == 'exit') {
+            nearbyStructure = exitStructureByManeuverIdx?[turnIdx];
+          }
           if (exitName != null && exitName.isNotEmpty) {
             vars['exit_name'] = exitName;
             key = '${event}_${phase}_named$suffix';
+          } else if (event == 'exit' && nearbyStructure != null) {
+            // 구조물 인접 맥락이 일반 랜드마크 폴백보다 라이더에게 더
+            // 유용하므로 우선한다.
+            vars['structure'] =
+                nearbyStructure == StructureType.bridge ? '고가도로' : '터널';
+            vars['direction_word'] = steps[turnIdx].type == 21 ? '왼쪽' : '오른쪽';
+            key = 'exit_${phase}_structure$suffix';
           } else if (event == 'exit' && _landmarkForStep != null) {
             vars['landmark'] = _landmarkForStep!;
             vars['direction'] = steps[turnIdx].type == 21 ? '좌' : '우';

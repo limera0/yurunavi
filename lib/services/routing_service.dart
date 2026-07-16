@@ -551,6 +551,42 @@ class RoutingService {
     return zones;
   }
 
+  /// exit(type 20/21) maneuver가 구조물 zone과 겹치거나, zone 종료 지점으로부터
+  /// [bufferM] 이내에서 시작하면 그 구조물 타입을 반환한다. overlap이 항상 가장
+  /// 강한 신호이므로 발견 즉시 반환하고, 그렇지 않으면 exit maneuver 시작
+  /// 이전에 끝난 zone 중 가장 가까운 것을 buffer 이내에서 찾는다.
+  ///
+  /// 실측(2026-07-16 가상 GPS 테스트, 터널 코너)으로 검증된 값 — 실제 사례에서
+  /// exit maneuver 자신의 shape 범위 안에 tunnel 태그 엣지가 포함돼 있었고,
+  /// 다른 사례는 zone 종료 shape 인덱스가 exit maneuver 시작 3칸 전이었다.
+  /// 300m면 이 두 경우를 다 잡으면서 이후의 무관한 회전까지 잘못 잡을 만큼
+  /// 넓지는 않다.
+  static StructureType? structureNearExit(
+    ManeuverStep exitManeuver,
+    List<StructureZone> zones,
+    List<double> cumFromStartM, {
+    double bufferM = 300,
+  }) {
+    if (cumFromStartM.isEmpty) return null;
+    StructureType? best;
+    double bestGapM = double.infinity;
+    final exitBeginM = cumFromStartM[
+        exitManeuver.beginShapeIdx.clamp(0, cumFromStartM.length - 1)];
+    for (final z in zones) {
+      final overlaps = z.beginShapeIdx <= exitManeuver.endShapeIdx &&
+          exitManeuver.beginShapeIdx <= z.endShapeIdx;
+      if (overlaps) return z.type; // overlap은 즉시 확정
+      final zEndM =
+          cumFromStartM[z.endShapeIdx.clamp(0, cumFromStartM.length - 1)];
+      final gap = exitBeginM - zEndM;
+      if (gap >= 0 && gap <= bufferM && gap < bestGapM) {
+        bestGapM = gap;
+        best = z.type;
+      }
+    }
+    return best;
+  }
+
   static const _bearingDistance = Distance();
 
   /// 경로 폴리라인 geometry만으로 급커브 구간을 감지한다.

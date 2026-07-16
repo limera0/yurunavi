@@ -33,6 +33,8 @@
     "exit_imminent_named":      "{exit_name} 진출입니다",
     "exit_approach_landmark":   "{dist}미터 앞 {landmark} 방면 {direction}측 출구",
     "exit_imminent_landmark":   "{landmark} 방면 {direction}측 출구입니다",
+    "exit_approach_structure":  "{dist}미터 앞 {structure} {direction_word} 옆길",
+    "exit_imminent_structure":  "{structure} {direction_word} 옆길입니다",
     "keep_approach":            "{dist}미터 앞 차선 유지",
     "keep_imminent":            "차선 유지",
     "keep_right_approach":      "{dist}미터 앞 오른쪽 차선 유지",

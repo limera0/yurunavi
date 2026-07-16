@@ -81,6 +81,19 @@ enum WaypointPassageEvent { none, arrived, passed }
   return (event: WaypointPassageEvent.none, closestDistM: closestDistM);
 }
 
+/// exit(type 20/21) 카드 라벨 선택 순수 로직 (테스트용으로 분리, exitGateOpen/
+/// waypointPassageEvent와 동일한 패턴). [_TurnStep._labelForType]에 그대로
+/// 위임 — 구조물(다리/터널)이 인접해 있으면 그 종류를 반영한 라벨로,
+/// 없으면 기존 일반 "우측/좌측 출구" 라벨로 폴백한다.
+String turnStepLabelForType(
+  int type, {
+  int? roundaboutExitCount,
+  bool isFinalDestination = true,
+  StructureType? nearbyStructure,
+}) =>
+    _TurnStep._labelForType(
+        type, roundaboutExitCount, isFinalDestination, nearbyStructure);
+
 class NavScreen extends ConsumerStatefulWidget {
   final LatLng? destination;
   final List<LatLng> waypoints;
@@ -443,6 +456,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 그대로 이어붙이므로, 목록의 마지막 항목이 항상 실제 최종 목적지다.
     final isFinalDestination = _maneuvers.isNotEmpty &&
         prog.activeStepIdx + 1 == _maneuvers.length - 1;
+    // exitStructureByManeuverIdx는 setRoute/setStructureZones마다 갱신되는
+    // 파생 데이터라 VoiceEngine 생성 시점의 스냅샷이 아니라 매 틱 최신값으로
+    // 갱신해 전달한다.
+    _voiceEngine!.exitStructureByManeuverIdx =
+        ref.read(routeProgressProvider.notifier).exitStructureByManeuverIdx;
     final intents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
         speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0,
@@ -466,23 +484,36 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
-    final generation = ++_routeGeneration;
+  /// maneuvers로부터 카드 목록을 만든다. exit(20/21) maneuver는
+  /// routeProgressProvider의 exitStructureByManeuverIdx(다리/터널 인접 여부)를
+  /// 반영한다 — trace_attributes 응답이 비동기로 도착하므로 초기 호출 시점엔
+  /// 비어 있을 수 있고, [_loadStructureZones]에서 도착 후 다시 호출해 갱신한다.
+  List<_TurnStep> _buildTurnSteps(List<ManeuverStep> maneuvers) {
+    if (maneuvers.isEmpty) {
+      return const [
+        _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
+        _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
+        _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
+      ];
+    }
     // 마지막 maneuver만 실제 최종 목적지 — _handleVoice 상단 주석 참조.
     final lastIdx = maneuvers.length - 1;
-    _steps = maneuvers.isNotEmpty
-        ? maneuvers
-            .asMap()
-            .entries
-            .map((e) => _TurnStep.fromManeuver(
-                e.value,
-                isFinalDestination: e.key == lastIdx))
-            .toList()
-        : const [
-            _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
-            _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
-            _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
-          ];
+    final structureMap =
+        ref.read(routeProgressProvider.notifier).exitStructureByManeuverIdx;
+    return maneuvers
+        .asMap()
+        .entries
+        .map((e) => _TurnStep.fromManeuver(
+              e.value,
+              isFinalDestination: e.key == lastIdx,
+              nearbyStructure: structureMap[e.key],
+            ))
+        .toList();
+  }
+
+  void _applyRouteGuidance(List<ManeuverStep> maneuvers) {
+    final generation = ++_routeGeneration;
+    _steps = _buildTurnSteps(maneuvers);
     _maneuvers = maneuvers;
     _stepIdx = 0;
     _cardRemainingM = 0.0;
@@ -517,6 +548,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (!mounted || generation != _routeGeneration) return;
     debugPrint('YNAV_STRUCT zones=${zones.length}');
     ref.read(routeProgressProvider.notifier).setStructureZones(zones);
+    // exit(20/21) 카드 라벨이 방금 갱신된 exitStructureByManeuverIdx를 반영할
+    // 수 있도록 카드 목록을 다시 만든다 — maneuvers 자체는 그대로다.
+    setState(() {
+      _steps = _buildTurnSteps(_maneuvers);
+    });
   }
 
   void _triggerReroute() {
@@ -2051,10 +2087,12 @@ class _TurnStep {
   final int type;
   const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0]);
 
-  factory _TurnStep.fromManeuver(ManeuverStep m, {bool isFinalDestination = true}) {
+  factory _TurnStep.fromManeuver(ManeuverStep m,
+      {bool isFinalDestination = true, StructureType? nearbyStructure}) {
     return _TurnStep(
       _iconForType(m.type),
-      _labelForType(m.type, m.roundaboutExitCount, isFinalDestination),
+      _labelForType(
+          m.type, m.roundaboutExitCount, isFinalDestination, nearbyStructure),
       _formatDist(m.distanceKm),
       m.distanceKm,
       m.type,
@@ -2079,7 +2117,9 @@ class _TurnStep {
   }
 
   static String _labelForType(int type,
-      [int? roundaboutExitCount, bool isFinalDestination = true]) {
+      [int? roundaboutExitCount,
+      bool isFinalDestination = true,
+      StructureType? nearbyStructure]) {
     switch (type) {
       case 1: case 2: case 3: return '출발';
       case 4: case 5: case 6: return isFinalDestination ? '목적지 도착' : '경유지 도착';
@@ -2095,8 +2135,14 @@ class _TurnStep {
       case 17: return '램프 직진';
       case 18: return '램프 우측';
       case 19: return '램프 좌측';
-      case 20: return '우측 출구';
-      case 21: return '좌측 출구';
+      case 20:
+        return nearbyStructure != null
+            ? '${nearbyStructure == StructureType.bridge ? '고가도로' : '터널'} 우측 옆길'
+            : '우측 출구';
+      case 21:
+        return nearbyStructure != null
+            ? '${nearbyStructure == StructureType.bridge ? '고가도로' : '터널'} 좌측 옆길'
+            : '좌측 출구';
       case 23: return '우측 유지';
       case 24: return '좌측 유지';
       case 25: return '합류';

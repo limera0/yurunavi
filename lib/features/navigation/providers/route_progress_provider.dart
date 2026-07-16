@@ -52,6 +52,15 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   List<double> _cumFromStartM = const []; // _pts[0]→_pts[i] 누적
   double _totalM = 0.0;
 
+  // exit(type 20/21) maneuver 인덱스 → 인접 구조물 타입. setRoute()/
+  // setStructureZones() 호출 시마다 재계산되는 정적 파생 데이터라 _maneuvers/
+  // _zones 자신처럼 per-tick RouteProgress state에는 포함하지 않는다.
+  Map<int, StructureType> _exitStructureByManeuverIdx = const {};
+
+  /// [_exitStructureByManeuverIdx]의 읽기 전용 노출.
+  Map<int, StructureType> get exitStructureByManeuverIdx =>
+      _exitStructureByManeuverIdx;
+
   // ── 진행 상태 ──
   int _snapIdx = 0;
   double _traveledM = 0.0; // snap 세그먼트 내 실제 진행거리 포함, 폴리라인 시작 기준 누적거리
@@ -104,6 +113,12 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _cumFromStartM = cum;
     _totalM = acc;
 
+    // 재탐색 등으로 _zones가 위에서 이미 비워졌으므로(직전 route의 zone은 새
+    // maneuver의 shape 인덱스와 무관), 여기서도 재계산해 stale 매핑이 남지
+    // 않게 한다. trace_attributes 응답이 도착하면 setStructureZones()가 다시
+    // 갱신한다.
+    _recomputeExitStructureMap();
+
     if (maneuvers.isNotEmpty) {
       debugPrint('YNAV_ROUTE steps=${maneuvers.length} pts=${points.length} lastBegin=${maneuvers.last.beginShapeIdx} lastEnd=${maneuvers.last.endShapeIdx}');
     }
@@ -131,6 +146,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   /// _snapIdx 기준으로 즉시 재계산해 state를 다시 emit한다.
   void setStructureZones(List<StructureZone> zones) {
     _zones = zones;
+    _recomputeExitStructureMap();
     final current = state;
     if (current == null) return; // 아직 경로 없음 — 다음 setRoute에서 반영
     final structFields = _structureFieldsFor(_snapIdx, _traveledM);
@@ -242,6 +258,23 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     if (s >= _maneuvers.length) return _pts.length - 1;
     // 다음 턴 지점 = 현재 active maneuver의 종료 shape(그 지점에서 회전)
     return _clampIdx(_maneuvers[s].endShapeIdx);
+  }
+
+  /// _maneuvers/_zones/_cumFromStartM 기준으로 exit(type 20/21) maneuver별
+  /// 인접 구조물 타입을 재계산해 [_exitStructureByManeuverIdx]에 캐싱한다.
+  /// setRoute()(새 경로 주입)와 setStructureZones()(zone 비동기 도착) 양쪽에서
+  /// 호출된다 — 둘 중 하나만으로는 maneuvers/zones가 모두 준비된 시점을
+  /// 보장할 수 없다.
+  void _recomputeExitStructureMap() {
+    final map = <int, StructureType>{};
+    for (int i = 0; i < _maneuvers.length; i++) {
+      final m = _maneuvers[i];
+      if (m.type != 20 && m.type != 21) continue;
+      final type =
+          RoutingService.structureNearExit(m, _zones, _cumFromStartM);
+      if (type != null) map[i] = type;
+    }
+    _exitStructureByManeuverIdx = map;
   }
 
   /// snap 세그먼트 기준, 아직 지나지 않은 다음 구조물(zone) 인덱스.
