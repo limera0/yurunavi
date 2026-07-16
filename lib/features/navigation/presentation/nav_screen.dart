@@ -560,29 +560,35 @@ class _NavScreenState extends ConsumerState<NavScreen>
     unawaited(_loadOffRouteStructures(generation));
   }
 
-  /// 경로 위(온-루트)에서 구조물을 못 찾은 exit(20/21) maneuver에 한해, 시작점
-  /// 근방(반경 150m)을 Valhalla /locate로 조회해 "옆길로 우회 중인" 구조물을
+  /// 경로 위(온-루트)에서 구조물을 못 찾은 exit(20/21) maneuver에 한해, 시작점과
+  /// 끝점 근방(반경 150m)을 Valhalla /locate로 조회해 "옆길로 우회 중인" 구조물을
   /// 찾는다 — 언더패스/고가도로 옆길 분기에서 미리 차선을 바꾸지 못해 마지막
   /// 순간 급하게 차선을 가로지르는 사고 위험을 줄이기 위한 안전 기능
-  /// (HANDOFF_0716_structure_bypass_exit.md §0). 실패해도 예외를 던지지 않는
-  /// 부가 기능 — 조회가 느리거나 실패해도 내비게이션 본편은 정상 진행된다.
+  /// (HANDOFF_0716_structure_bypass_exit.md §0). 두 지점을 모두 보는 이유는
+  /// 실측(2026-07-17 가상 GPS)으로 확인됨 — 구조물 way 이름이 시작점이 아니라
+  /// 끝점(목적지 방향) 근처 엣지에 붙어있는 경우가 있어 시작점만 보면 "지하차도"
+  /// 대신 이름 없는 "터널"로 과소 특정된다(RoutingService.mergeOffRouteStructures
+  /// 참조). 실패해도 예외를 던지지 않는 부가 기능 — 조회가 느리거나 실패해도
+  /// 내비게이션 본편은 정상 진행된다.
   Future<void> _loadOffRouteStructures(int generation) async {
     final notifier = ref.read(routeProgressProvider.notifier);
     final onRoute = notifier.exitStructureByManeuverIdx;
-    final candidates = <int, LatLng>{};
+    final candidates = <int, List<LatLng>>{};
     for (int i = 0; i < _maneuvers.length; i++) {
       final m = _maneuvers[i];
       if ((m.type != 20 && m.type != 21) || onRoute.containsKey(i)) continue;
-      if (m.beginShapeIdx < 0 || m.beginShapeIdx >= _routePoints.length) {
-        continue;
+      final pts = <LatLng>[];
+      for (final idx in {m.beginShapeIdx, m.endShapeIdx}) {
+        if (idx >= 0 && idx < _routePoints.length) pts.add(_routePoints[idx]);
       }
-      candidates[i] = _routePoints[m.beginShapeIdx];
+      if (pts.isNotEmpty) candidates[i] = pts;
     }
     if (candidates.isEmpty) return;
 
     final results = await Future.wait(candidates.entries.map((e) async {
-      final type = await RoutingService.fetchOffRouteStructureNear(e.value);
-      return MapEntry(e.key, type);
+      final types = await Future.wait(
+          e.value.map(RoutingService.fetchOffRouteStructureNear));
+      return MapEntry(e.key, RoutingService.mergeOffRouteStructures(types));
     }));
     if (!mounted || generation != _routeGeneration) return;
 

@@ -81,6 +81,43 @@ void main() {
     });
   });
 
+  group('F — mergeOffRouteStructures (begin/end 두 지점 병합)', () {
+    test('underpass가 하나라도 있으면 즉시 채택(가장 구체적)', () {
+      expect(
+        RoutingService.mergeOffRouteStructures(
+            [StructureType.tunnel, StructureType.underpass]),
+        StructureType.underpass,
+      );
+    });
+
+    test('tunnel(폴백)만 있다가 나중에 bridge가 나오면 bridge로 대체', () {
+      expect(
+        RoutingService.mergeOffRouteStructures(
+            [StructureType.tunnel, StructureType.bridge]),
+        StructureType.bridge,
+      );
+    });
+
+    test('bridge 먼저, tunnel 나중이어도 bridge 유지(tunnel이 더 구체적이지 않음)', () {
+      expect(
+        RoutingService.mergeOffRouteStructures(
+            [StructureType.bridge, StructureType.tunnel]),
+        StructureType.bridge,
+      );
+    });
+
+    test('전부 null이면 null', () {
+      expect(RoutingService.mergeOffRouteStructures([null, null]), isNull);
+    });
+
+    test('tunnel 하나뿐이면 tunnel', () {
+      expect(
+        RoutingService.mergeOffRouteStructures([null, StructureType.tunnel]),
+        StructureType.tunnel,
+      );
+    });
+  });
+
   group('E — 결측/null 필드 방어 처리', () {
     test('edge/edge_info/distance 필드가 없어도 크래시 없이 처리', () {
       final edges = <dynamic>[

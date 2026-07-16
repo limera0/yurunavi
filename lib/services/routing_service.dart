@@ -860,6 +860,25 @@ class RoutingService {
     return best;
   }
 
+  /// 같은 exit maneuver에 대해 여러 지점(예: begin/endShapeIdx)에서 조회한
+  /// [fetchOffRouteStructureNear] 결과를 하나로 합친다. 실측(2026-07-17 가상
+  /// GPS)으로 확인된 이유: 구조물 way 이름("고덕지하차도")이 실제로는 exit
+  /// maneuver의 시작점이 아니라 끝점(목적지 방향) 근처 엣지에 붙어있는
+  /// 경우가 있어, 시작점만 조회하면 이름 없는 tunnel 플래그만 잡혀 "터널"로
+  /// 과도하게 통칭된다. underpass(이름 매칭 성공)가 하나라도 있으면 그게
+  /// 가장 구체적인 정보이므로 즉시 채택하고, 그 다음은 bridge(이름 무관
+  /// 확정), tunnel(이름 없는 폴백)은 최후순위로 다른 결과가 있으면 대체된다.
+  static StructureType? mergeOffRouteStructures(
+      Iterable<StructureType?> results) {
+    StructureType? best;
+    for (final t in results) {
+      if (t == null) continue;
+      if (t == StructureType.underpass) return t;
+      if (best == null || best == StructureType.tunnel) best = t;
+    }
+    return best;
+  }
+
   /// Valhalla encoded polyline 인코더 (precision 6) — [_decodePolyline6]의 역연산.
   static String _encodePolyline6(List<LatLng> points) {
     final buffer = StringBuffer();
