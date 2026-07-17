@@ -1,8 +1,10 @@
 package com.westinx.yurunavi
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.core.content.ContextCompat
+import com.thesparks.android_pip.PipCallbackHelper
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,14 +20,43 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val e2eHarnessChannel = "com.westinx.yurunavi/e2e_harness"
     private val navServiceChannel = "com.westinx.yurunavi/nav_service"
+    private val pipHintChannel = "com.westinx.yurunavi/nav_pip_hint"
+
+    // enterPictureInPictureMode() only succeeds while the activity is still visible, so PiP
+    // entry must be triggered from onUserLeaveHint() (fires before onPause/onStop) rather than
+    // from Flutter's AppLifecycleState.paused (maps to onStop, already too late — confirmed by
+    // device testing: mLastReportedPictureInPictureMode stayed false when triggered from there).
+    private var pipHintMethodChannel: MethodChannel? = null
+
+    // android_pip's onPipEntered/onPipExited/onPipMaximised Dart callbacks only fire if the
+    // host Activity forwards onPictureInPictureModeChanged to this helper ("Callback helper"
+    // wiring from the package README — the alternative "Activity wrapper" approach would mean
+    // extending com.thesparks.android_pip.PipCallbackHelperActivityWrapper instead of
+    // FlutterActivity, which we avoid here to keep this class's existing hierarchy untouched).
+    private val pipCallbackHelper = PipCallbackHelper()
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
     }
 
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration?
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipCallbackHelper.onPictureInPictureModeChanged(isInPictureInPictureMode, this)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        pipHintMethodChannel?.invokeMethod("onUserLeaveHint", null)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        pipCallbackHelper.configureFlutterEngine(flutterEngine)
+        pipHintMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, pipHintChannel)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, e2eHarnessChannel)
             .setMethodCallHandler { call, result ->

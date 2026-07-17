@@ -33,6 +33,7 @@ dependencies:
   maplibre_gl: ^0.26.1
   firebase_core: ^4.11.0
   firebase_crashlytics: ^5.2.4
+  android_pip: ^2.0.2
 
 dev_dependencies:
   flutter_test:
