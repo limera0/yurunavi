@@ -20,6 +20,7 @@ import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
 import '../../../services/native_engine.dart';
+import '../../../services/nav_foreground_service.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
 import '../../../services/voice_pack_service.dart';
@@ -261,6 +262,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
+  String? _lastForegroundText; // FGS 알림에 마지막으로 보낸 텍스트 — 중복 채널 호출 방지
   // 구조물(다리/터널) zone 비동기 페치 stale-response 가드 — _applyRouteGuidance
   // 호출마다 증가시켜, 이전 세대의 fetchStructureZones 응답이 늦게 도착해도
   // 최신 경로에 잘못 반영되지 않게 한다.
@@ -316,6 +318,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       return;
     }
     _startLocation();
+    unawaited(NavForegroundService.start('경로 안내 중'));
     _loadRawStyle();
   }
 
@@ -341,6 +344,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _progressSub?.close();
     _pulseCtrl.dispose();
     _tts?.stop();
+    unawaited(NavForegroundService.stop());
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
   }
@@ -389,6 +393,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _cardRemainingM = prog.distToNextTurnM;
           _stepIdx = prog.activeStepIdx.clamp(0, _steps.length - 1);
         });
+        // 온스크린 카드(build()의 `upcoming`, 약 1539번째 줄)와 동일하게 "다음" 턴 라벨을
+        // 써야 _cardRemainingM(다음 턴까지 거리)과 짝이 맞는다 — 현재 스텝 라벨을 쓰면
+        // 라벨과 거리가 서로 다른 턴을 가리키게 된다.
+        final upcomingLabel = _stepIdx + 1 < _steps.length
+            ? _steps[_stepIdx + 1].label
+            : _steps[_stepIdx].label;
+        final fgText =
+            '$upcomingLabel · ${_TurnStep._formatDist(_cardRemainingM / 1000.0)}';
+        if (fgText != _lastForegroundText) {
+          _lastForegroundText = fgText;
+          unawaited(NavForegroundService.update(fgText));
+        }
         _updateRouteSplit(prog.snapIdx);
         _handleVoice(prog);
         if (prog.arrived && !_arrived && _passedWaypointCount >= widget.waypoints.length) {
