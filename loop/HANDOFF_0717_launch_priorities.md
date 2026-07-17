@@ -117,7 +117,14 @@
 
 ## 낮은 우선순위 / 후순위 결정 필요
 
-- 로그인/회원가입 — 게이팅할 기능 없어서 보류 (투어요약에서 클라우드 동기화 필요해지면 재평가).
+- ~~로그인/회원가입~~ — **DONE(Google 로그인만, 2026-07-17)**. 사용자가 "투어 요약/프로필
+  페이지를 제대로 만들려면 계정이 먼저 필요하다"고 판단해 보류 방침을 해제하고 이번 세션에서
+  착수. `lib/services/auth_service.dart`/`lib/features/auth/providers/auth_providers.dart`
+  (신규) + `profile_screen.dart`에 "계정" 섹션 추가, 앱 시작 게이트 없음(설정→프로필 편집이
+  유일 진입점). 로컬 프로필 데이터 연동/투어요약 클라우드 동기화는 포함 안 함(다음 세션 과제).
+  code-auditor PASS(medium 지적 1건 즉시 수정), `flutter analyze`/`test`/`build apk --debug`
+  전부 통과. **실기기 로그인 흐름 자체는 미검증** — 상세는 `RELEASE_ROADMAP.md` 13-6 참조,
+  커밋 `990e22b`/`22c2f69`.
 - 설계 판단 대기: 주행 중 실시간 POI, 주유소 우선탐색, 검색시트 칩 탭 로딩 UX.
 - 일본 확장/다국어 — MVP 이후.
 

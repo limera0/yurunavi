@@ -89,7 +89,7 @@
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
-| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3부터 진행 |
+| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-3부터 진행 |
 | 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | TODO — 2026-07-13 발견 계기, 배포 전 필수 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 
@@ -353,7 +353,7 @@ Phase2" 순서는 최초 트리아지 세션에서의 단순 나열이었지 우
 | 13-3 | 투어 요약(주행 이력) 로컬 MVP | 로그인 불필요, 데이터모델부터 신규 구축 | TODO |
 | 13-4 | 설정: 도로 선호도 / 내비뷰 설정 | 착수 시 Valhalla costing 옵션 재조사 필요 | TODO |
 | 13-5 | 백그라운드/오버레이 내비게이션 | 네이티브 포그라운드 서비스+알림, 리스크 최고. **`loop/` 야간루프 트랙의 §3.6과 동일 항목** — 그쪽도 "가장 무거움, 단독 세션 권장"으로 이미 표시돼 있음(`MORNING_REPORT_0711_night2.md`). 착수 시 두 트랙 다 여기 하나로 처리하고 양쪽에 완료 기록할 것, 중복 작업 금지 | **DONE(Android만, 2026-07-17)** — iOS는 별도 과제(아래 상세). 커밋 `d4b50e1`/`b883ee5`/`e2f1db9`(Phase A)/`1e99528`/`059eea4`(Phase B) |
-| 13-6 | 로그인/회원가입 | 게이팅할 기능 없음 — 13-3 이후 "클라우드 동기화 필요" 시점에 재평가 | TODO |
+| 13-6 | 로그인/회원가입 | 게이팅할 기능 없음 — 13-3 이후 "클라우드 동기화 필요" 시점에 재평가 | **DONE(Google 로그인만, 2026-07-17)** — 아래 상세. 커밋 `990e22b`/`22c2f69` |
 | 13-7 | 설정: 다크모드 | 11번(팔레트 확정 후 토큰 리팩터)과 병합 권장, 여기서 별도로 안 함 | DEFERRED → 11번에 흡수 |
 | 13-8 | 설정: 지도 다운로드(오프라인 지도) | 타일 저장/용량 관리 — 12번(인프라) 성격에 더 가까움 | DEFERRED → 12번 후속 과제로 재분류 검토 |
 
@@ -461,6 +461,34 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   정상 렌더·복귀, 서비스/알림 정상 정리(크래시 없음) 전부 스크린샷+`dumpsys`로 확인.
 - `flutter analyze` 0 issues, `flutter test` 217/217, `flutter build apk --debug` 빌드
   성공 매 단계 확인.
+
+**13-6 실행 결과 — Google 로그인만, 데이터 연동은 별도 과제 (2026-07-17)**:
+`HANDOFF_0717_launch_priorities.md` 사용자 요청 착수분 — 투어 요약(13-3)/프로필 페이지를
+제대로 만들려면 계정 시스템이 먼저 필요하다는 판단으로 "게이팅할 기능 없음" 보류 방침을
+해제하고 로그인 자체만 먼저 구현. **이번 스코프는 로그인/로그아웃뿐**이고, 로컬
+`UserProfile`(닉네임/바이크) 데이터와의 연동·마이그레이션이나 투어 요약 클라우드 동기화는
+포함하지 않음(다음 세션 과제).
+
+- **선행 조건**: `android/app/google-services.json`의 `oauth_client`가 원래 빈 배열이라
+  Firebase 콘솔에서 Google 제공자를 켜고 디버그+릴리즈 SHA-1 지문을 등록하지 않으면 코드가
+  맞아도 로그인이 동작할 수 없는 상태였음 — 이 세션 착수 시점에 이미 사용자가 콘솔 작업을
+  끝내고 재발급받은 파일이 워킹트리에 반영돼 있었음(커밋 `990e22b`로 체크포인트).
+- **구현(커밋 `22c2f69`)**: `lib/services/auth_service.dart`(신규) — `google_sign_in` v7의
+  실제 API(`GoogleSignIn.instance.initialize()`→`authenticate()`, `GoogleSignInException`의
+  `canceled` 코드는 에러 아닌 `null` 반환)로 `GoogleAuthProvider.credential(idToken:)` →
+  `FirebaseAuth.signInWithCredential`. `lib/features/auth/providers/auth_providers.dart`(신규)
+  — 기존 `map_providers.dart`의 수동 Provider 패턴(코드젠 없음) 그대로 `authServiceProvider`/
+  `authStateProvider`. `profile_screen.dart`에 "계정" 섹션만 추가 — 앱 시작 시 강제 로그인
+  게이트는 만들지 않음(설정→프로필 편집이 유일한 진입점).
+- **감사(code-auditor, PASS)**: 로그인 취소가 조용히 무시되는지, idToken이 로그/저장소에
+  안 남는지, `google-services.json`에 실제로 `serverClientId` 없이도 되는 web `client_type: 3`
+  항목이 있는지까지 패키지 소스로 직접 검증. medium 지적 1건(로그아웃 경로에 로그인과 달리
+  try/catch 없어 실패해도 스낵바 안내가 안 됨) → 즉시 수정 후 재확인.
+- `flutter analyze` 0 issues, `flutter test` 217/217, `flutter build apk --debug` 빌드 성공.
+  **실기기 로그인 흐름(계정 선택 다이얼로그→로그인→로그아웃) 자체는 이번 세션에서 미검증**
+  — 다음 세션에서 M32F에 설치해 확인 필요.
+- iOS는 스코프 밖(`GoogleService-Info.plist`/URL scheme 미설정, 이 서버는 헤드리스 Linux라
+  Xcode 빌드 불가) — 13-5와 동일한 패턴으로 별도 과제.
 
 ### 14. Crashlytics fatal 오분류 전수 감사 — TODO (배포 전 필수)
 
