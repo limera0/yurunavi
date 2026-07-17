@@ -485,8 +485,12 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   항목이 있는지까지 패키지 소스로 직접 검증. medium 지적 1건(로그아웃 경로에 로그인과 달리
   try/catch 없어 실패해도 스낵바 안내가 안 됨) → 즉시 수정 후 재확인.
 - `flutter analyze` 0 issues, `flutter test` 217/217, `flutter build apk --debug` 빌드 성공.
-  **실기기 로그인 흐름(계정 선택 다이얼로그→로그인→로그아웃) 자체는 이번 세션에서 미검증**
-  — 다음 세션에서 M32F에 설치해 확인 필요.
+- **실기기 검증 완료(같은 날, M32F)**: adb로 설치 → 프로필 화면 "Google로 로그인" 탭 →
+  실제 Android 계정 선택 다이얼로그(`SignInCredentialChooserActivity`)로 기기에 등록된
+  계정(`limera0@gmail.com`) 표시 → 선택 → "Google을 통해 yurunavi에 로그인하도록 허용" 동의
+  화면 → 동의 후 프로필 사진/이름/이메일이 계정 섹션에 정상 표시. "로그아웃" 탭 → 다시
+  "Google로 로그인" 버튼 상태로 정상 복귀. 이 과정에서 닉네임/바이크 입력란은 계속 비어있는
+  채 유지됨(로컬 프로필과 계정 상태가 실제로 분리돼 있음을 실기기에서 재확인).
 - iOS는 스코프 밖(`GoogleService-Info.plist`/URL scheme 미설정, 이 서버는 헤드리스 Linux라
   Xcode 빌드 불가) — 13-5와 동일한 패턴으로 별도 과제.
 
