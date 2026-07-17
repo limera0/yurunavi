@@ -1,9 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../models/bike_profile.dart';
 import '../../../models/user_profile.dart';
 import '../../../providers/app_providers.dart';
+import '../../auth/providers/auth_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -117,6 +119,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 28),
+
+          // ── 계정 (Google 로그인) ──────────────────────────
+          const _AccountSection(),
           const SizedBox(height: 28),
 
           // ── 닉네임/인스타 ─────────────────────────────────
@@ -375,6 +381,160 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
           child: const Text('추가'),
         ),
       ],
+    );
+  }
+}
+
+// ── 계정 섹션 (Google 로그인) ─────────────────────────────────
+// 로컬 닉네임/바이크(userProfileProvider)와는 완전히 독립적인 블록.
+
+class _AccountSection extends ConsumerStatefulWidget {
+  const _AccountSection();
+
+  @override
+  ConsumerState<_AccountSection> createState() => _AccountSectionState();
+}
+
+class _AccountSectionState extends ConsumerState<_AccountSection> {
+  bool _signingIn = false;
+
+  Future<void> _signIn() async {
+    setState(() => _signingIn = true);
+    try {
+      await ref.read(authServiceProvider).signInWithGoogle();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그인에 실패했습니다: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _signingIn = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await ref.read(authServiceProvider).signOut();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그아웃에 실패했습니다: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authStateProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle(title: '계정'),
+        const SizedBox(height: 12),
+        authState.when(
+          data: (user) =>
+              user == null ? _buildSignedOut() : _buildSignedIn(user),
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+          error: (_, _) => _buildSignedOut(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSignedOut() {
+    return OutlinedButton(
+      onPressed: _signingIn ? null : _signIn,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF333333),
+        side: BorderSide(color: Colors.grey.shade300),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: _signingIn
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.g_mobiledata,
+                    size: 26, color: Color(0xFF4285F4)),
+                SizedBox(width: 6),
+                Text('Google로 로그인'),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildSignedIn(User user) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: const Color(0xFF008080),
+            backgroundImage:
+                user.photoURL != null ? NetworkImage(user.photoURL!) : null,
+            child: user.photoURL == null
+                ? const Icon(Icons.person, color: Colors.white)
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.displayName ?? '이름 없음',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Color(0xFF222222),
+                  ),
+                ),
+                if (user.email != null)
+                  Text(
+                    user.email!,
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _signOut,
+            child: const Text('로그아웃'),
+          ),
+        ],
+      ),
     );
   }
 }
