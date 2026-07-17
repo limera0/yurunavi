@@ -37,9 +37,12 @@
   하나 분량" 가설과 정확히 일치. 30m 미만(표본 21개)은 전부 이름 없는
   edge(박스컬버트·진입로 추정)라 그대로 필터링 유지. `flutter analyze` 0
   issues, `flutter test` 217개 전부 통과(신규 회귀 테스트 1개 포함,
-  `test/routing_service_structure_zones_test.dart` 그룹 B2). 가상 GPS 실주행
-  재검증은 아직 — 다음 세션 §7 참조(구조물 진입 TTS가 실제로 더 자주 발화되는지
-  확인 필요, 회귀 위험은 낮다고 판단하나 미검증인 채로 남김).
+  `test/routing_service_structure_zones_test.dart` 그룹 B2). **가상 GPS
+  실주행 재검증도 완료(같은 날)** — 사용자가 지정한 실측 짧은 구조물 3곳
+  (고덕좌교로 51m·고덕국제2로 71m·고덕갈평4로 37m, 각 70km/h 1회)에서
+  `bridge_approach`/`bridge_imminent` TTS가 전부 정상 발화 확인. 상세는
+  `loop/feedback/VGPS_STRUCTURE_MINLENGTH_0717.md` 참조(37m 구간에서 겪은
+  테스트 인프라 타이밍 함정도 기록해둠 — 코드 버그 아님).
 - 오늘 고친 옆길 구조물 기능(커밋 `fdc0132`)의 실주행/가상GPS 재검증.
 - 실제 release build 1회 검증 (RELEASE_ROADMAP #10) — 서명/난독화는 되어있으나 최종 설치·동작 확인 아직.
 
