@@ -352,7 +352,7 @@ Phase2" 순서는 최초 트리아지 세션에서의 단순 나열이었지 우
 | 13-2 | 설정: 약관/오픈소스 라이선스 화면 | 완전 독립, 정적 화면, 스토어 컴플라이언스 | **DONE** (`9393af3`, 2026-07-13) — `docs/terms_of_service.md` 초안(법률 검토 전, 배포 전 변호사 검토 필요) 작성 + `TermsScreen`(설정>이용약관) + `showLicensePage`(설정>오픈소스 라이선스, Flutter 내장 API) |
 | 13-3 | 투어 요약(주행 이력) 로컬 MVP | 로그인 불필요, 데이터모델부터 신규 구축 | TODO |
 | 13-4 | 설정: 도로 선호도 / 내비뷰 설정 | 착수 시 Valhalla costing 옵션 재조사 필요 | TODO |
-| 13-5 | 백그라운드/오버레이 내비게이션 | 네이티브 포그라운드 서비스+알림, 리스크 최고. **`loop/` 야간루프 트랙의 §3.6과 동일 항목** — 그쪽도 "가장 무거움, 단독 세션 권장"으로 이미 표시돼 있음(`MORNING_REPORT_0711_night2.md`). 착수 시 두 트랙 다 여기 하나로 처리하고 양쪽에 완료 기록할 것, 중복 작업 금지 | TODO |
+| 13-5 | 백그라운드/오버레이 내비게이션 | 네이티브 포그라운드 서비스+알림, 리스크 최고. **`loop/` 야간루프 트랙의 §3.6과 동일 항목** — 그쪽도 "가장 무거움, 단독 세션 권장"으로 이미 표시돼 있음(`MORNING_REPORT_0711_night2.md`). 착수 시 두 트랙 다 여기 하나로 처리하고 양쪽에 완료 기록할 것, 중복 작업 금지 | **DONE(Android만, 2026-07-17)** — iOS는 별도 과제(아래 상세). 커밋 `d4b50e1`/`b883ee5`/`e2f1db9`(Phase A)/`1e99528`/`059eea4`(Phase B) |
 | 13-6 | 로그인/회원가입 | 게이팅할 기능 없음 — 13-3 이후 "클라우드 동기화 필요" 시점에 재평가 | TODO |
 | 13-7 | 설정: 다크모드 | 11번(팔레트 확정 후 토큰 리팩터)과 병합 권장, 여기서 별도로 안 함 | DEFERRED → 11번에 흡수 |
 | 13-8 | 설정: 지도 다운로드(오프라인 지도) | 타일 저장/용량 관리 — 12번(인프라) 성격에 더 가까움 | DEFERRED → 12번 후속 과제로 재분류 검토 |
@@ -433,6 +433,34 @@ MapLibre CircleLayer 렌더링)은 재사용 가능성 높음 — 데이터 소�
   세션 시작점" 섹션이 최신 소스.
 - ~~다음 세션: 13-2(설정: 약관/오픈소스 라이선스 화면)부터 이어가면 됨.~~ → 피드백 버그픽스
   (`BUGFIX_progress.md`)가 먼저 끝나야 함.
+
+**13-5 실행 결과 — Android 완료, iOS 별도 과제 (2026-07-17)**:
+`HANDOFF_0717_launch_priorities.md` 3순위 착수분. 착수 전 레퍼런스 조사 결과 두 가지가
+당초 가정과 달랐음: (1) 유튜브의 "다른 앱 위 배경 표시"는 `SYSTEM_ALERT_WINDOW`가 아니라
+Android **Picture-in-Picture(PiP)** API였고, Google도 오버레이 대신 PiP/Bubbles를
+공식 권장 중, (2) iOS는 서드파티 앱의 "다른 앱 위에 그리기" 자체가 애초에 불가능(공개
+API 없음, 애플 멀티태스킹 모델 제약) — iOS 대응은 `UIBackgroundModes`+ActivityKit Live
+Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프에서 제외.
+
+- **Phase A(포그라운드 서비스, 커밋 `d4b50e1`/`b883ee5`)**: 신규
+  `android/app/src/main/kotlin/com/westinx/yurunavi/NavForegroundService.kt`(Intent
+  기반, `foregroundServiceType="location"`) + `nav_service` MethodChannel +
+  `lib/services/nav_foreground_service.dart`. `nav_screen.dart`에서 안내 시작/턴 갱신/
+  종료 시점에 연동, 알림 텍스트는 온스크린 카드와 동일한 "다음 턴" 인덱스 로직 재사용.
+  code-auditor가 `stopSelf()`→`stopSelf(startId)`(재시작 경쟁상태), null Intent 방어
+  누락 2건 발견 → 즉시 수정.
+- **Phase B(PiP 미니창, 커밋 `1e99528`)**: `android_pip` 패키지로 실제 OS PiP 사용(유튜브와
+  동일 메커니즘, `SYSTEM_ALERT_WINDOW` 버블 방식 아님 — 후보였던 `flutter_overlay_window`는
+  15개월 미업데이트로 기각). **구현 중 실기기 검증으로 타이밍 버그 발견**: 최초 구현이
+  Flutter `didChangeAppLifecycleState(paused)`에서 PiP 진입을 시도했는데, `paused`는
+  Android `onStop()` 대응이라 액티비티가 이미 안 보이는 시점 — `enterPictureInPictureMode()`가
+  조용히 실패함(`dumpsys activity activities`로 확인). 네이티브 `onUserLeaveHint()`(아직
+  화면 보이는 시점)를 새 채널로 Dart에 포워딩하는 방식으로 교체 후 재검증 통과.
+- **가상 GPS + 실기기 검증**: `loop/feedback/VGPS_BGNAV_PHASE_A_0717.md`,
+  `VGPS_BGNAV_PHASE_B_0717.md` 참조 — 백그라운드 전환 중 TTS/진행판정 지속, PiP 창
+  정상 렌더·복귀, 서비스/알림 정상 정리(크래시 없음) 전부 스크린샷+`dumpsys`로 확인.
+- `flutter analyze` 0 issues, `flutter test` 217/217, `flutter build apk --debug` 빌드
+  성공 매 단계 확인.
 
 ### 14. Crashlytics fatal 오분류 전수 감사 — TODO (배포 전 필수)
 
