@@ -3,27 +3,28 @@
 출처: RECON_startup_accuracy.md, RECON_guidance_redesign.md, RECON_direction.md  
 갱신: 2026-06-16
 
+**⚠️ 2026-07-17 확인**: 이 파일은 자주 stale함(메모리 `project_yurunavi.md` 경고와 일치).
+아래 T1/T2는 실제로는 이미 코드에 반영되어 DONE인데 이 파일만 갱신이 안 돼 있었음(현재
+`_announceStep`은 `lib/features/navigation/presentation/nav_screen.dart:707` 부근, 재탐색
+분기는 `:659` 부근 — 줄번호가 원래 기록과 다른 건 그 사이 파일이 많이 자라서). 현재 릴리스
+준비 작업의 단일 소스는 `loop/RELEASE_ROADMAP.md`이니 이 파일 대신 그쪽을 우선 참조할 것.
+
 ---
 
 ## READY
 
-### T1 [S] 출발 TTS 발화 개선
+### T1 [S] 출발 TTS 발화 개선 — **DONE** (2026-07-17 코드 확인, 커밋 시점 미상)
 **증상**: 내비 시작 시 "2.3km 앞 출발" 발화 — 거리 접두사가 어색함.  
-**원인**: `_announceStep(idx)` 에 출발 maneuver(type 1~3, label='출발') 전용 분기 없음.  
-**수정**: `step.label == '출발'` 조건 시 '안내를 시작합니다' 발화 (거리 생략).  
-**위치**: `lib/features/navigation/presentation/nav_screen.dart:521` `_announceStep`  
-**출처**: RECON_startup_accuracy.md §C.2  
-**branch**: `fix/tts-departure`
+**확인**: `_announceStep`이 `step.label == '출발'`일 때 거리 없이 `'departure'` 발화하는
+분기가 이미 존재(`nav_screen.dart:712`).
 
 ---
 
-### T2 [S] 재탐색 TTS 맥락 구분
+### T2 [S] 재탐색 TTS 맥락 구분 — **DONE** (2026-07-17 코드 확인, 커밋 시점 미상)
 **증상**: 경로 이탈 후 재탐색 완료 시에도 "안내를 시작합니다" 발화 — T1 수정 후에도 맥락 불일치.  
-**원인**: `_reroute(:499)` 에서 `_announceStep(0)` 호출 → 재탐색 맥락 전달 없음.  
-**수정**: `_reroute` 내 `_announceStep(0)` 를 '경로를 재탐색했습니다' 직접 발화로 교체, `_lastAnnouncedIdx=0` 수동 설정.  
-**위치**: `lib/features/navigation/presentation/nav_screen.dart:499` `_reroute`  
-**출처**: RECON_guidance_redesign.md §TTS 발화 지점  
-**branch**: `fix/tts-reroute`
+**확인**: 재탐색 경로에서 `_announceStep(0)` 대신 재탐색 전용 발화로 분기하고
+`_lastAnnouncedIdx = 0`을 수동 설정하는 코드가 이미 존재(`nav_screen.dart:659` 부근 주석
+"재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화").
 
 ---
 

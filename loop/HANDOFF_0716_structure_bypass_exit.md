@@ -162,3 +162,31 @@ curl -s -X POST http://localhost:8002/locate -H "Content-Type: application/json"
 - `loop/feedback/VGPS_STRUCTURE_EXIT_0716.md` — 60회 가상 GPS 테스트 원본 결과.
 - 메모리 `project_vgps_testing.md` — 가상 GPS 테스트 인프라 + FUSED_PROVIDER 함정.
 - 커밋 `8f88669`(E2E 하네스), `ec1044f`(터널/교량 구조물 인접 출구 안내).
+
+---
+
+## 7. 완료 (2026-07-16 밤 ~ 2026-07-17)
+
+**핵심 기능(§2~§4 과제) DONE**, 커밋 `952ef64`(옆길 구조물 감지 최초 구현) →
+`a437894`(begin+end 양쪽 지점 병합으로 라벨 정확도 수정, 언더패스 옆길 테스트에서
+"고덕지하차도"가 exit maneuver의 endShapeIdx 쪽에 붙어있음을 실측 확인) 순으로 진행.
+가상 GPS로 §3의 두 타겟 경로(언더패스 옆길/고가도로 옆길) 모두 재검증 완료 —
+`exit_approach_structure`/`exit_imminent_structure`로 정상 전환됨(스크래치패드
+`verify_underpass_bypass_60.log`/`verify_overpass_bypass_60.log`, 세션 간 미보존).
+
+**후속 하드닝(2026-07-17, 커밋 `fdc0132`)**: 사용자가 "반경 150m 하나로 크게 잡으면
+옆길/뒤쪽의 무관한 구조물까지 오탐할 수 있다"고 지적 → `RoutingService.forwardSamplePoints()`
+신설, exit maneuver의 `beginShapeIdx`부터 **경로를 따라 전방으로만** 150m 간격으로
+500m까지 샘플링 후 각 지점을 기존 150m 반경으로 조회·병합하는 방식으로 교체
+(`lib/features/navigation/presentation/nav_screen.dart` `_loadOffRouteStructures`).
+분류 로직(`classifyOffRouteEdges`/`mergeOffRouteStructures`)은 변경 없음 — 어느 지점을
+조회할지만 바뀜. `flutter analyze` 0 issues, 관련 테스트 전부 통과(신규
+`test/routing_service_forward_sample_test.dart` 포함).
+
+**⚠️ 남은 것**: 이 forward-sampling 교체 자체는 아직 가상 GPS로 재검증 안 함(분류
+로직은 안 바꿨고 begin 지점은 forward sample 0m로 그대로 포함되니 회귀 가능성은
+낮다고 판단하지만, 실측 확인 전까지는 추측). 다음 세션/실주행에서 §3의 두 타겟 경로를
+한 번씩 더 돌려 라벨이 여전히 정확히 나오는지 확인 권장. `minLengthM=100`(§5 체크리스트,
+`RIDE_RESULTS_0716.md` "6-잔여" 항목)은 이번 세션과 무관한 별개 이슈로 여전히 미해결.
+
+push는 여전히 보류(`verify/ride-0711`은 origin 대비 181커밋 앞선 로컬 전용 브랜치).
