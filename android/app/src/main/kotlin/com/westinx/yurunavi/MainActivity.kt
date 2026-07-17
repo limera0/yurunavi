@@ -2,6 +2,7 @@ package com.westinx.yurunavi
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -16,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
  */
 class MainActivity : FlutterActivity() {
     private val e2eHarnessChannel = "com.westinx.yurunavi/e2e_harness"
+    private val navServiceChannel = "com.westinx.yurunavi/nav_service"
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -33,6 +35,35 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, navServiceChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        sendNavServiceIntent(NavForegroundService.ACTION_START, call.argument("text"))
+                        result.success(null)
+                    }
+                    "update" -> {
+                        sendNavServiceIntent(NavForegroundService.ACTION_UPDATE, call.argument("text"))
+                        result.success(null)
+                    }
+                    "stop" -> {
+                        startService(Intent(this, NavForegroundService::class.java).apply {
+                            action = NavForegroundService.ACTION_STOP
+                        })
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun sendNavServiceIntent(action: String, text: String?) {
+        val intent = Intent(this, NavForegroundService::class.java).apply {
+            this.action = action
+            putExtra(NavForegroundService.EXTRA_TEXT, text)
+        }
+        ContextCompat.startForegroundService(this, intent)
     }
 
     private fun readE2EDestinationExtras(): Map<String, Double>? {
