@@ -560,16 +560,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
     unawaited(_loadOffRouteStructures(generation));
   }
 
-  /// 경로 위(온-루트)에서 구조물을 못 찾은 exit(20/21) maneuver에 한해, 시작점과
-  /// 끝점 근방(반경 150m)을 Valhalla /locate로 조회해 "옆길로 우회 중인" 구조물을
-  /// 찾는다 — 언더패스/고가도로 옆길 분기에서 미리 차선을 바꾸지 못해 마지막
-  /// 순간 급하게 차선을 가로지르는 사고 위험을 줄이기 위한 안전 기능
-  /// (HANDOFF_0716_structure_bypass_exit.md §0). 두 지점을 모두 보는 이유는
-  /// 실측(2026-07-17 가상 GPS)으로 확인됨 — 구조물 way 이름이 시작점이 아니라
-  /// 끝점(목적지 방향) 근처 엣지에 붙어있는 경우가 있어 시작점만 보면 "지하차도"
-  /// 대신 이름 없는 "터널"로 과소 특정된다(RoutingService.mergeOffRouteStructures
-  /// 참조). 실패해도 예외를 던지지 않는 부가 기능 — 조회가 느리거나 실패해도
-  /// 내비게이션 본편은 정상 진행된다.
+  /// 경로 위(온-루트)에서 구조물을 못 찾은 exit(20/21) maneuver에 한해, 그
+  /// 시작점부터 "주행 경로를 따라 전방으로만" 500m까지를 Valhalla /locate로
+  /// 조회해 "옆길로 우회 중인" 구조물을 찾는다 — 언더패스/고가도로 옆길
+  /// 분기에서 미리 차선을 바꾸지 못해 마지막 순간 급하게 차선을 가로지르는
+  /// 사고 위험을 줄이기 위한 안전 기능(HANDOFF_0716_structure_bypass_exit.md
+  /// §0). 내 위치 중심 원형 하나로 크게 잡으면 옆 도로나 뒤쪽의 무관한
+  /// 구조물까지 오탐할 수 있다는 지적(2026-07-17)에 따라, 큰 반경 하나 대신
+  /// [RoutingService.forwardSamplePoints]로 경로를 따라 전방으로만 나열한
+  /// 여러 지점을 각각 작은 반경(150m)으로 조회해 병합한다
+  /// (RoutingService.mergeOffRouteStructures) — 뒤쪽/역방향은 애초에 샘플
+  /// 대상에 들지 않고, 인접 샘플 원이 겹쳐 경로 전방 600m까지 빈틈없이
+  /// 커버된다. 실패해도 예외를 던지지 않는 부가 기능 — 조회가 느리거나
+  /// 실패해도 내비게이션 본편은 정상 진행된다.
   Future<void> _loadOffRouteStructures(int generation) async {
     final notifier = ref.read(routeProgressProvider.notifier);
     final onRoute = notifier.exitStructureByManeuverIdx;
@@ -577,10 +580,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
     for (int i = 0; i < _maneuvers.length; i++) {
       final m = _maneuvers[i];
       if ((m.type != 20 && m.type != 21) || onRoute.containsKey(i)) continue;
-      final pts = <LatLng>[];
-      for (final idx in {m.beginShapeIdx, m.endShapeIdx}) {
-        if (idx >= 0 && idx < _routePoints.length) pts.add(_routePoints[idx]);
-      }
+      final pts = RoutingService.forwardSamplePoints(
+          _routePoints, m.beginShapeIdx);
       if (pts.isNotEmpty) candidates[i] = pts;
     }
     if (candidates.isEmpty) return;
@@ -597,7 +598,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (r.value != null) r.key: r.value!,
     };
     if (map.isEmpty) return;
-    debugPrint('YNAV_OFFROUTE_STRUCT found=${map.length}');
+    debugPrint('YNAV_OFFROUTE_STRUCT found=${map.length} detail=$map');
     notifier.setOffRouteStructures(map);
     setState(() {
       _steps = _buildTurnSteps(_maneuvers);

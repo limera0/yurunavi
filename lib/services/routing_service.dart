@@ -769,12 +769,54 @@ class RoutingService {
     }
   }
 
+  /// 폴리라인 [points]의 [fromIdx] 지점부터, 인덱스가 증가하는 방향(=경로
+  /// 진행 방향, 라이더가 실제로 이동할 방향)으로만 [stepM] 간격 좌표를
+  /// [maxForwardM]까지 샘플링한다. fromIdx 자신(0m 지점)을 항상 포함.
+  ///
+  /// [fetchOffRouteStructureNear]를 "내 위치 중심 원형" 대신 "주행 경로를
+  /// 따라 전방으로만" 조회하기 위한 헬퍼(2026-07-17 사용자 피드백 — 반경을
+  /// 그냥 키우면 옆길/뒤쪽의 무관한 구조물까지 잘못 잡을 위험이 있다는 지적).
+  /// 각 샘플 지점을 [fetchOffRouteStructureNear]의 기본 반경(150m)으로 조회하면
+  /// 인접 샘플 간 원이 겹쳐 경로를 따라 빈틈없이 커버되면서도, 뒤쪽이나 경로에서
+  /// 먼 옆쪽은 애초에 샘플 대상에 들지 않는다.
+  static List<LatLng> forwardSamplePoints(
+    List<LatLng> points,
+    int fromIdx, {
+    double maxForwardM = 500,
+    double stepM = 150,
+  }) {
+    if (points.isEmpty || fromIdx < 0 || fromIdx >= points.length) {
+      return const [];
+    }
+    final samples = <LatLng>[points[fromIdx]];
+    double traveled = 0.0;
+    double nextSampleAt = stepM;
+    for (int i = fromIdx; i < points.length - 1 && traveled < maxForwardM; i++) {
+      final a = points[i];
+      final b = points[i + 1];
+      final segLen = _bearingDistance(a, b);
+      final segEndTraveled = traveled + segLen;
+      while (nextSampleAt <= segEndTraveled && nextSampleAt <= maxForwardM) {
+        final t = segLen > 0 ? (nextSampleAt - traveled) / segLen : 0.0;
+        samples.add(LatLng(
+          a.latitude + (b.latitude - a.latitude) * t,
+          a.longitude + (b.longitude - a.longitude) * t,
+        ));
+        nextSampleAt += stepM;
+      }
+      traveled = segEndTraveled;
+    }
+    return samples;
+  }
+
   /// 경로에는 없지만(우회 중인) 근처의 다리/터널을 감지한다. [fetchStructureZones]가
   /// trace_attributes로 "실제로 밟는 도로"만 보는 것과 달리, Valhalla /locate로
   /// [point] 반경 [radiusM] 내 모든 엣지를 조회해 "옆길로 우회 중인 구조물"을
   /// 잡는다 — 언더패스/고가도로 옆길 분기에서 차선변경 타이밍을 놓치지 않게
   /// 하는 안전 기능(§0 HANDOFF_0716 참조)이라 radiusM 기본값은 실측(99.3m)보다
-  /// 여유 있게 150m로 잡는다. 부가 기능이므로 실패 시 예외 없이 null.
+  /// 여유 있게 150m로 잡는다. 호출자는 보통 [forwardSamplePoints]로 얻은 여러
+  /// 지점에 대해 이 함수를 병렬 호출해 경로 전방을 커버한다. 부가 기능이므로
+  /// 실패 시 예외 없이 null.
   static Future<StructureType?> fetchOffRouteStructureNear(
     LatLng point, {
     double radiusM = 150,
