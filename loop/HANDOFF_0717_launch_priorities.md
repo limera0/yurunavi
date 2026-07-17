@@ -26,7 +26,20 @@
 
 **기존**:
 - Crashlytics fatal 오분류 전수 감사 (RELEASE_ROADMAP #14) — release 빌드 재현 여부부터 확인.
-- 구조물 안내 임계값 미해결 (`minLengthM=100m` 미만 무시, RIDE_RESULTS_0716 "6-잔여").
+- ~~구조물 안내 임계값 미해결~~ — **DONE(2026-07-17)**. `buildStructureZones()`의
+  `minLengthM` 100→30m로 완화(`lib/services/routing_service.dart`). 근거: Naver
+  지도/Organic Maps 양쪽 다 정확한 임계값을 공개하지 않아(Organic Maps는 애초에
+  구조물 진입 전용 음성 안내 자체가 없음 — turn-by-turn maneuver 기반만 존재)
+  실측 데이터로 대체 — 서비스 지역(고덕/송탄) 격자 좌표를 Valhalla `/locate`로
+  샘플링해 bridge/tunnel edge 49개의 실제 길이 분포를 뽑아보니 73%(36개)가
+  100m 미만이었고, 그중 "고덕좌교로"(51m)·"고덕국제2로"(71m)·"고덕갈평4로"(37m)
+  등 **이름 붙은 실재 도심 고가/지하차도**가 다수 — RIDE_RESULTS_0716의 "교차로
+  하나 분량" 가설과 정확히 일치. 30m 미만(표본 21개)은 전부 이름 없는
+  edge(박스컬버트·진입로 추정)라 그대로 필터링 유지. `flutter analyze` 0
+  issues, `flutter test` 217개 전부 통과(신규 회귀 테스트 1개 포함,
+  `test/routing_service_structure_zones_test.dart` 그룹 B2). 가상 GPS 실주행
+  재검증은 아직 — 다음 세션 §7 참조(구조물 진입 TTS가 실제로 더 자주 발화되는지
+  확인 필요, 회귀 위험은 낮다고 판단하나 미검증인 채로 남김).
 - 오늘 고친 옆길 구조물 기능(커밋 `fdc0132`)의 실주행/가상GPS 재검증.
 - 실제 release build 1회 검증 (RELEASE_ROADMAP #10) — 서명/난독화는 되어있으나 최종 설치·동작 확인 아직.
 

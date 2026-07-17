@@ -515,9 +515,21 @@ class RoutingService {
   /// bridge/tunnel을 각각 독립적으로 추적해 배열 순서상 연속된(run-adjacent)
   /// edge들을 하나의 구간으로 묶는다. 합산 길이가 [minLengthM] 미만인 구간은
   /// 버린다. 반환값은 beginShapeIdx 오름차순 정렬(타입 무관하게 shape 순서).
+  ///
+  /// [minLengthM] 기본값 근거(2026-07-17, RIDE_RESULTS_0716 "6-잔여" 수정):
+  /// 원래 100m였으나, 실제 서비스 지역(고덕/송탄, `yurunavi-valhalla`)에서
+  /// Valhalla `/locate`로 격자 샘플링한 실측 bridge/tunnel edge 49개 중
+  /// 36개(73%)가 100m 미만이었고, 그중 "고덕좌교로"(51m)·"고덕국제2로"(71m)·
+  /// "고덕갈평4로"(37m)처럼 **이름이 붙은, 실제로 라이더가 인지해야 할 도심
+  /// 고가/지하차도**도 다수 포함돼 있었다(도심 고가/지하차도는 교차로 하나
+  /// 분량인 경우가 흔하다는 RIDE_RESULTS_0716의 가설과 일치). 반면 30m 미만
+  /// 구간(9~29m, 표본 21개)은 전부 이름 없는 edge — 배수로 박스컬버트·진입로
+  /// 수준의 트리비얼한 구조물로 추정되어 여전히 걸러낸다. 안내 누락(안전
+  /// 문제)과 트리비얼 구조물 오탐(UX 소음)의 절충점으로 30m을 택함 — 자세한
+  /// 원본 표본은 세션 기록 참조(파일로 남기지 않음).
   static List<StructureZone> buildStructureZones(
     List<dynamic> edges, {
-    double minLengthM = 100,
+    double minLengthM = 30,
   }) {
     final zones = <StructureZone>[];
 
