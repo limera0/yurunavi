@@ -124,6 +124,11 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const double _kWpIconSize = 1.05; // nav_screen과 동일 배율
   static const String _kArrowIcon = 'nav_arrow';
   static const double _kArrowIconSize = 1.0; // nav_screen과 동일
+  // 검색 결과(상호명/주소 공통) 탭 시 확인시트가 뜨는 동안 위치를 보여주는 임시
+  // 초록 점 — 목적지/경유지 드롭릿 핀과 달리 POI 아이콘과 같은 크기의 단순 점.
+  ml.Symbol? _searchPreviewMarker;
+  static const String _kSearchPreviewIcon = 'search-preview-dot';
+  static const double _kSearchPreviewIconSize = 0.4; // POI 아이콘 SymbolLayer와 동일 배율
 
   double? _lastHeadingDeg; // 정차/저속 시 최근 방향 유지용
 
@@ -730,6 +735,34 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _destMarker = null;
   }
 
+  /// 검색 결과(상호명/주소) 탭 시 확인시트가 뜨는 동안만 보이는 임시 초록 점.
+  /// `_ensureDestMarker`와 달리 텍스트 라벨이 없고, 핀처럼 좌표를 "가리키지"
+  /// 않으므로 `iconAnchor: 'center'`로 좌표에 정중앙 배치한다.
+  Future<void> _ensureSearchPreviewMarker(LatLng loc) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final options = ml.SymbolOptions(
+      geometry: _toMl(loc),
+      iconImage: _kSearchPreviewIcon,
+      iconSize: _kSearchPreviewIconSize,
+      iconAnchor: 'center',
+      zIndex: 6, // 경유지(5) 위, 목적지(10) 아래
+    );
+    if (_searchPreviewMarker == null) {
+      _searchPreviewMarker = await c.addSymbol(options);
+    } else {
+      await c.updateSymbol(_searchPreviewMarker!, options);
+    }
+  }
+
+  Future<void> _removeSearchPreviewMarker() async {
+    final c = _mlCtrl;
+    if (c != null && _searchPreviewMarker != null) {
+      await c.removeSymbol(_searchPreviewMarker!);
+    }
+    _searchPreviewMarker = null;
+  }
+
   Future<void> _syncWaypointMarkers(
       List<LatLng> waypoints, List<String?> names) async {
     final c = _mlCtrl;
@@ -971,6 +1004,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     _mlCtrl?.animateCamera(
       ml.CameraUpdate.newLatLngZoom(_toMl(location), 16.0),
     );
+    // 확인시트가 떠 있는 동안 정확히 어디를 검색했는지 보여주는 임시 초록 점 —
+    // await해서 확인시트가 뜨기 전에 실제로 존재하게 한다(카메라 팬은 fire-and-forget
+    // 이라도 되지만 이 마커는 그럴 필요가 없어 그냥 기다린다).
+    await _ensureSearchPreviewMarker(location);
 
     final hasRoute = _showCourseSheet;
     final act = await _showTapConfirmSheet(
@@ -979,6 +1016,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       hasRoute,
     );
     if (!mounted) return;
+    // 확인시트 결과(목적지 확정/경유지 추가/닫기)와 무관하게 임시 점은 여기서
+    // 무조건 지운다 — 실제 결과(빨간 목적지 핀/노란 경유지 핀 또는 아무것도 없음)가
+    // _applyTapAction에서 반영되기 직전에 지워야 같은 좌표에 두 마커가 겹쳐
+    // 보이는 순간이 없다.
+    await _removeSearchPreviewMarker();
     await _applyTapAction(act, location, origin, preResolvedName: name);
   }
 
@@ -1476,6 +1518,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               // Dart 레퍼런스를 초기화해 재생성 경로를 타도록 한다.
               _destMarker = null;
               _waypointMarkers = <ml.Symbol>[];
+              _searchPreviewMarker = null;
               _locLayerReady = false;
               await _initRouteLayer();
               // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
@@ -1519,6 +1562,12 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 );
                 await _mlCtrl!.addImage('poi-icon-${type.name}', bytes);
               }
+              // 검색 결과 탭 시 보여주는 임시 초록 점 — POI 아이콘과 같은 이유로
+              // 스타일 재주입마다 다시 등록해야 한다.
+              await _mlCtrl!.addImage(
+                _kSearchPreviewIcon,
+                await renderPlainDotPng(AppColors.mapOrigin),
+              );
               // 13-1: POI 탐색 결과 원형 레이어
               await _initPoiLayer();
               final pois = ref.read(poiListProvider);
