@@ -15,6 +15,7 @@ import '../../../models/tour_log.dart';
 import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
+import '../providers/tour_log_providers.dart';
 import '../tour_log_format.dart';
 
 /// 완료된 투어 한 건의 상세 화면 — 상단 통계 헤더 + 배경 전체를 채우는
@@ -41,11 +42,61 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
   bool _styleLoaded = false;
   bool _drawn = false; // addGeoJsonSource 등은 한 번만 실행되도록 가드
 
+  // ── 메모 ──────────────────────────────────────────────────────
+  // widget.tourLog는 화면 진입 시점의 스냅샷이라 저장 후에도 자동으로
+  // 갱신되지 않는다. 저장 직후 UI가 즉시 반영되도록 로컬 상태로 따로 든다.
+  late final TextEditingController _memoCtrl;
+  String? _currentMemo;
+  bool _memoExpanded = false;
+  bool _savingMemo = false;
+
   @override
   void initState() {
     super.initState();
+    _currentMemo = widget.tourLog.memo;
+    _memoCtrl = TextEditingController(text: _currentMemo ?? '');
     unawaited(_loadStyle());
     unawaited(_loadTrack());
+  }
+
+  @override
+  void dispose() {
+    _memoCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleMemoPanel() {
+    setState(() {
+      if (!_memoExpanded) {
+        // 펼칠 때마다 현재 저장된 메모 값으로 초기화한다 — 이전에
+        // 저장하지 않고 닫았던 입력은 버려진다.
+        _memoCtrl.text = _currentMemo ?? '';
+      }
+      _memoExpanded = !_memoExpanded;
+    });
+  }
+
+  Future<void> _saveMemo() async {
+    final newMemo = normalizeTourMemo(_memoCtrl.text);
+    setState(() => _savingMemo = true);
+    try {
+      await ref
+          .read(tourLogListProvider.notifier)
+          .updateMemo(widget.tourLog.id, newMemo);
+      if (!mounted) return;
+      setState(() {
+        _currentMemo = newMemo;
+        _memoExpanded = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // 저장 실패 시 패널은 열어둔 채로 유지해 입력한 텍스트를 잃지 않는다.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('메모 저장에 실패했어요')),
+      );
+    } finally {
+      if (mounted) setState(() => _savingMemo = false);
+    }
   }
 
   Future<void> _loadStyle() async {
@@ -259,6 +310,17 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                             ),
                           ),
                         ),
+                        GestureDetector(
+                          onTap: _toggleMemoPanel,
+                          child: Icon(
+                            (_currentMemo?.isNotEmpty ?? false)
+                                ? Icons.edit_note
+                                : Icons.edit_note_outlined,
+                            color: (_currentMemo?.isNotEmpty ?? false)
+                                ? cs.primary
+                                : cs.onSurface,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -273,6 +335,71 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                 ),
               ),
             ),
+          ),
+
+          // ── 메모 입력 영역 (하단, 지도 위 오버레이) ─────────────────
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeInOut,
+                alignment: Alignment.bottomCenter,
+                child: _memoExpanded ? _buildMemoPanel(cs) : const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemoPanel(ColorScheme cs) {
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _memoCtrl,
+              maxLines: 5,
+              minLines: 1,
+              textInputAction: TextInputAction.newline,
+              style: TextStyle(color: cs.onSurface),
+              decoration: InputDecoration(
+                hintText: '이 투어에 대한 메모를 남겨보세요',
+                hintStyle: TextStyle(color: cs.onSurfaceVariant),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: _savingMemo ? null : _saveMemo,
+            icon: _savingMemo
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: cs.primary),
+                  )
+                : Icon(Icons.check, color: cs.primary),
           ),
         ],
       ),

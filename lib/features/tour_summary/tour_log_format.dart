@@ -18,6 +18,14 @@ String formatTourDuration(int durationS) {
   return '$minutes분';
 }
 
+/// 메모 입력창의 원본 텍스트를 저장용 값으로 정규화한다.
+/// 앞뒤 공백을 트림하고, 트림 결과가 빈 문자열이면 `null`을 반환해
+/// "메모 없음" 상태로 되돌린다(빈 문자열을 그대로 저장하지 않음).
+String? normalizeTourMemo(String raw) {
+  final trimmed = raw.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 /// [logs]를 startedAt의 캘린더 day(연-월-일) 기준으로 그룹화한다.
 /// 입력 순서를 그대로 보존하므로(TourLogService.loadAll()이 이미 최신순
 /// 정렬해서 넘겨준다는 전제), 결과도 최신 day가 먼저 온다.

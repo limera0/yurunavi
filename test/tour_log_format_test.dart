@@ -54,6 +54,22 @@ void main() {
     });
   });
 
+  group('normalizeTourMemo', () {
+    test('앞뒤 공백을 트림한다', () {
+      expect(normalizeTourMemo('  좋은 라이딩이었다  '), '좋은 라이딩이었다');
+    });
+
+    test('빈 문자열이나 공백만 있으면 null을 반환한다', () {
+      expect(normalizeTourMemo(''), isNull);
+      expect(normalizeTourMemo('   '), isNull);
+      expect(normalizeTourMemo('\n\t '), isNull);
+    });
+
+    test('내부 개행/공백은 보존한다', () {
+      expect(normalizeTourMemo('첫 줄\n둘째 줄'), '첫 줄\n둘째 줄');
+    });
+  });
+
   group('groupTourLogsByDay', () {
     test('같은 날짜(연-월-일)의 투어를 하나의 그룹으로 묶는다', () {
       final logs = [
