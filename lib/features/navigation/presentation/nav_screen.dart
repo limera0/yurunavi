@@ -885,6 +885,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     final finalLog = tourLog.copyWith(startAddress: results[0], endAddress: results[1]);
     await TourLogService().add(finalLog);
+    debugPrint('YNAV_TOUR saved id=${finalLog.id} '
+        'distanceM=${finalLog.distanceM.toStringAsFixed(0)} '
+        'durationS=${finalLog.durationS} '
+        'avgKmh=${finalLog.avgSpeedKmh.toStringAsFixed(1)} '
+        'maxKmh=${finalLog.maxSpeedKmh.toStringAsFixed(1)} '
+        'track=${finalLog.trackFilePath}');
   }
 
   /// 내비 화면의 유일한 "실제 종료" 경로 — 투어 기록 마무리+저장을 트리거한 뒤
