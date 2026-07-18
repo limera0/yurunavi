@@ -7,6 +7,11 @@ use api::{
 
 const VALHALLA_URL: &str = "http://localhost:8002/route";
 
+// V-World(국토교통부 브이월드) 지오코더 — 도로명/지번 주소 → 좌표 변환. `/geocode/search`가
+// 프록시하는 대상. 자체 호스팅 주소 DB(정부 데이터 신청 승인 후, Phase 2)로 교체되기 전까지의
+// 임시 프록시다. VALHALLA_URL과 동일하게 하드코딩 관례를 따른다.
+const VWORLD_GEOCODE_URL: &str = "https://api.vworld.kr/req/address";
+
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(reqwest::Client::new)
@@ -789,6 +794,157 @@ async fn handle_poi_nearby(
     Ok(Json(results))
 }
 
+// ── /geocode/search ───────────────────────────────────────────
+
+/// V-World API 키. `.env`(native/.env, docker-compose가 `env_file`로 컨테이너에 주입)를
+/// 통해 설정된 `VWORLD_API_KEY` 환경변수를 한 번만 읽는다. `None`이면(환경변수 없음)
+/// 서버 전체를 죽이지 않고 `/geocode/search`만 503을 반환한다(다른 엔드포인트는 정상
+/// 동작) — `poi_db()`와 동일한 degrade-gracefully 패턴.
+static VWORLD_API_KEY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn vworld_api_key() -> &'static Option<String> {
+    VWORLD_API_KEY.get_or_init(|| match std::env::var("VWORLD_API_KEY") {
+        Ok(key) if !key.trim().is_empty() => Some(key),
+        _ => {
+            eprintln!(
+                "[YuruNavi/Rust] 경고: VWORLD_API_KEY 환경변수 없음 \
+                 — /geocode/search 는 503을 반환합니다 (다른 엔드포인트는 정상 동작)"
+            );
+            None
+        }
+    })
+}
+
+#[derive(Deserialize)]
+struct GeocodeSearchQuery {
+    q: Option<String>,
+}
+
+/// 클라이언트(Flutter)에 돌려주는 자체 DTO — V-World 원본 응답 포맷을 그대로 노출하지
+/// 않는다. 오늘은 0~1개만 담기지만, 배열로 둬서 나중에 다중 후보를 얹어도 클라이언트
+/// 계약이 안 깨지게 한다(기존 `/poi/nearby`의 배열-of-DTO 관례와 동일).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+struct GeocodeResultDto {
+    address: String,
+    lat: f64,
+    lon: f64,
+}
+
+/// V-World geocoder 응답(`serde_json::Value`) 하나를 파싱해 지오코딩 결과를 뽑아낸다.
+/// axum/reqwest 타입이 시그니처에 없는 순수 함수라 네트워크 없이 고정 픽스처로
+/// 단위 테스트할 수 있다(아래 tests 모듈의 OK/ROAD, OK/PARCEL, NOT_FOUND, ERROR 4종).
+///
+/// - `status == "OK"`: `refined.text`를 주소로(사용자 원문 대신 V-World가 정규화/보정한
+///   텍스트를 우선한다), `result.point.x`/`.y`를 각각 lon/lat으로 사용해 `Some(...)`.
+/// - `status == "NOT_FOUND"` / `"ERROR"` / 그 외(필드 누락 등 예상 밖 형태): `None`.
+///   `ERROR`일 때의 code/text는 이 함수가 아니라 [`vworld_error_info`]로 별도 추출해
+///   호출부가 서버 로그에 남기게 한다(클라이언트에는 V-World 원본 에러를 노출하지 않음).
+fn parse_vworld_geocode(resp: &serde_json::Value) -> Option<GeocodeResultDto> {
+    let response = &resp["response"];
+    if response["status"].as_str() != Some("OK") {
+        return None;
+    }
+    let address = response["refined"]["text"].as_str()?.to_string();
+    let lon: f64 = response["result"]["point"]["x"].as_str()?.parse().ok()?;
+    let lat: f64 = response["result"]["point"]["y"].as_str()?.parse().ok()?;
+    Some(GeocodeResultDto { address, lat, lon })
+}
+
+/// `status == "ERROR"`일 때 V-World가 돌려준 원인 코드/메시지를 뽑아낸다(서버 로그 전용 —
+/// 클라이언트 응답에는 절대 그대로 노출하지 않는다). ERROR가 아니면 `None`.
+fn vworld_error_info(resp: &serde_json::Value) -> Option<(String, String)> {
+    let response = &resp["response"];
+    if response["status"].as_str() != Some("ERROR") {
+        return None;
+    }
+    let code = response["error"]["code"].as_str().unwrap_or("UNKNOWN").to_string();
+    let text = response["error"]["text"].as_str().unwrap_or("").to_string();
+    Some((code, text))
+}
+
+/// V-World `getCoord` 엔드포인트를 한 번 호출한다(`addr_type`은 "ROAD" 또는 "PARCEL").
+/// 5초 타임아웃. 준수사항: V-World 응답을 디스크/SQLite/TTL 캐시 등 어디에도 저장하지
+/// 않는다(서비스 약관상 실시간 pass-through만 허용) — 이 함수는 매 호출마다 그대로 새
+/// 요청을 보낼 뿐 아무것도 캐시하지 않는다.
+async fn fetch_vworld_geocode(
+    client: &reqwest::Client,
+    api_key: &str,
+    address: &str,
+    addr_type: &str,
+) -> Result<serde_json::Value, StatusCode> {
+    let resp = client
+        .get(VWORLD_GEOCODE_URL)
+        .query(&[
+            ("service", "address"),
+            ("request", "getCoord"),
+            ("version", "2.0"),
+            ("crs", "EPSG:4326"),
+            ("type", addr_type),
+            ("refine", "true"),
+            ("simple", "false"),
+            ("format", "json"),
+            ("key", api_key),
+            ("address", address),
+        ])
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| {
+            // ⚠️ `{e}`로 그대로 찍으면 안 됨: reqwest::Error의 Display는 실패한 요청의
+            // URL을 포함하는데, 그 URL은 `.query()`로 실은 `key=<VWORLD_API_KEY>`까지
+            // 그대로 담고 있다 — DNS/연결/TLS 실패 시 실키가 stderr에 평문으로 남는다.
+            // `.without_url()`로 URL을 떼어낸 뒤에만 로그로 남긴다.
+            eprintln!(
+                "[YuruNavi/Rust] /geocode/search V-World 요청 실패(type={addr_type}): {}",
+                e.without_url()
+            );
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    resp.json::<serde_json::Value>().await.map_err(|e| {
+        eprintln!("[YuruNavi/Rust] /geocode/search V-World 응답 파싱 실패(type={addr_type}): {e}");
+        StatusCode::BAD_GATEWAY
+    })
+}
+
+async fn handle_geocode_search(
+    Query(q): Query<GeocodeSearchQuery>,
+) -> Result<Json<Vec<GeocodeResultDto>>, StatusCode> {
+    let query_text = q.q.unwrap_or_default();
+    let query_text = query_text.trim();
+    if query_text.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+
+    let api_key = match vworld_api_key() {
+        Some(k) => k.as_str(),
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let client = http_client();
+
+    // 도로명(ROAD) 우선 조회 — NOT_FOUND(결과 0건)일 때만 지번(PARCEL)으로 한 번 더
+    // 시도한다(사용자가 지번 주소를 입력했을 가능성 대비). ROAD가 OK면 PARCEL은 시도하지
+    // 않는다. ERROR(예: 키 오류)는 재시도 대상이 아니라 즉시 502로 종료한다.
+    for addr_type in ["ROAD", "PARCEL"] {
+        let resp = fetch_vworld_geocode(client, api_key, query_text, addr_type).await?;
+
+        if let Some((code, text)) = vworld_error_info(&resp) {
+            eprintln!(
+                "[YuruNavi/Rust] /geocode/search V-World 오류 응답(type={addr_type}): {code} - {text}"
+            );
+            return Err(StatusCode::BAD_GATEWAY);
+        }
+
+        if let Some(result) = parse_vworld_geocode(&resp) {
+            return Ok(Json(vec![result]));
+        }
+        // NOT_FOUND(또는 예상 밖 OK 형태) → 다음 addr_type으로 재시도, PARCEL 차례면 그대로 루프 종료.
+    }
+
+    Ok(Json(Vec::new()))
+}
+
 // ── /health ────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -804,9 +960,10 @@ async fn handle_health() -> Json<HealthResp> {
 
 #[tokio::main]
 async fn main() {
-    // POI DB는 여기서 한 번 열어둔다(OnceLock 초기화). 실패해도 서버는 계속 뜨고
-    // /poi/nearby만 503을 반환한다 — poi_db() 내부에서 로그로 알린다.
+    // POI DB / V-World API 키는 여기서 한 번씩 초기화한다(OnceLock). 실패해도 서버는
+    // 계속 뜨고 해당 엔드포인트만 503을 반환한다 — 각 함수 내부에서 로그로 알린다.
     poi_db();
+    vworld_api_key();
 
     let app = Router::new()
         .route("/health", get(handle_health))
@@ -817,7 +974,8 @@ async fn main() {
         .route("/check_gps_accuracy", post(handle_gps_accuracy))
         .route("/is_off_route", post(handle_off_route))
         .route("/check_destination_reachable", post(handle_reachability))
-        .route("/poi/nearby", get(handle_poi_nearby));
+        .route("/poi/nearby", get(handle_poi_nearby))
+        .route("/geocode/search", get(handle_geocode_search));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8003")
         .await
@@ -1246,5 +1404,61 @@ mod tests {
             resolve_poi_query_mode(&q),
             Ok(PoiQueryMode::Bbox { south: 37.0, west: 127.0, north: 37.02, east: 127.02 })
         );
+    }
+
+    // ── /geocode/search: parse_vworld_geocode / vworld_error_info ──
+    //
+    // 실제 V-World API를 라이브로 호출해 확인한 응답 4종(OK/ROAD, OK/PARCEL, NOT_FOUND,
+    // ERROR)을 그대로 픽스처로 사용한다 — 네트워크 없이 순수 함수만 검증.
+
+    const VWORLD_FIXTURE_OK_PARCEL: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "13(ms)"}, "status" : "OK", "input" : {"type" : "PARCEL", "address" : "서울특별시 중구 태평로1가 31"}, "refined" : {"text" : "서울특별시 중구 태평로1가 31", "structure" : {}}, "result" : {"crs" : "EPSG:4326", "point" : {"x" : "126.9782290751147", "y" : "37.56657117348658"}}}}"#;
+
+    const VWORLD_FIXTURE_OK_ROAD: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "12(ms)"}, "status" : "OK", "input" : {"type" : "ROAD", "address" : "세종대로 110"}, "refined" : {"text" : "서울특별시 중구 세종대로 110 (태평로1가)", "structure" : {}}, "result" : {"crs" : "EPSG:4326", "point" : {"x" : "126.9779183412472", "y" : "37.566370785810435"}}}}"#;
+
+    const VWORLD_FIXTURE_NOT_FOUND: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "16(ms)"}, "status" : "NOT_FOUND", "record" : {"total" : "0", "current" : "0"}, "page" : {}}}"#;
+
+    const VWORLD_FIXTURE_ERROR: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "3(ms)"}, "status" : "ERROR", "error" : {"level" : "2", "code" : "INVALID_KEY", "text" : "등록되지 않은 인증키입니다."}}}"#;
+
+    #[test]
+    fn parse_vworld_geocode_ok_road_extracts_refined_text_and_lon_lat() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_OK_ROAD).unwrap();
+        let result = parse_vworld_geocode(&v).expect("OK/ROAD 응답은 Some이어야 함");
+        assert_eq!(result.address, "서울특별시 중구 세종대로 110 (태평로1가)");
+        assert!((result.lon - 126.9779183412472).abs() < 1e-9, "x=lon 이어야 함: {}", result.lon);
+        assert!((result.lat - 37.566370785810435).abs() < 1e-9, "y=lat 이어야 함: {}", result.lat);
+        assert_eq!(vworld_error_info(&v), None);
+    }
+
+    #[test]
+    fn parse_vworld_geocode_ok_parcel_extracts_refined_text_and_lon_lat() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_OK_PARCEL).unwrap();
+        let result = parse_vworld_geocode(&v).expect("OK/PARCEL 응답은 Some이어야 함");
+        assert_eq!(result.address, "서울특별시 중구 태평로1가 31");
+        assert!((result.lon - 126.9782290751147).abs() < 1e-9);
+        assert!((result.lat - 37.56657117348658).abs() < 1e-9);
+        assert_eq!(vworld_error_info(&v), None);
+    }
+
+    #[test]
+    fn parse_vworld_geocode_not_found_returns_none_and_no_error_info() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_NOT_FOUND).unwrap();
+        assert_eq!(parse_vworld_geocode(&v), None);
+        assert_eq!(vworld_error_info(&v), None, "NOT_FOUND는 ERROR가 아니므로 error info가 없어야 함");
+    }
+
+    #[test]
+    fn parse_vworld_geocode_error_returns_none_and_extracts_error_info() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_ERROR).unwrap();
+        assert_eq!(parse_vworld_geocode(&v), None);
+        let (code, text) = vworld_error_info(&v).expect("ERROR 응답은 error info가 있어야 함");
+        assert_eq!(code, "INVALID_KEY");
+        assert_eq!(text, "등록되지 않은 인증키입니다.");
+    }
+
+    #[test]
+    fn parse_vworld_geocode_malformed_json_does_not_panic() {
+        // status만 있고 refined/result가 없는 경우(스키마 밖 형태) — panic 없이 None.
+        let v: serde_json::Value = serde_json::json!({"response": {"status": "OK"}});
+        assert_eq!(parse_vworld_geocode(&v), None);
     }
 }
