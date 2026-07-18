@@ -49,24 +49,23 @@ void main() {
   }
 
   group('D — exit landmark fallback guidance', () {
-    test('right exit (type 20), no exitName, landmark within radius → landmark + 우', () {
+    test('right exit (type 20), no exitName, landmark within radius → exit_right landmark key', () {
       final engine = VoiceEngine(profile, landmarkService: withLandmark);
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
       expect(intents.length, 1);
-      expect(intents[0].key, 'exit_approach_landmark');
+      expect(intents[0].key, 'exit_right_approach_landmark');
       expect(intents[0].vars['landmark'], '읍내리');
-      expect(intents[0].vars['direction'], '우');
     });
 
-    test('left exit (type 21) → direction 좌', () {
+    test('left exit (type 21) → exit_left landmark key', () {
       final engine = VoiceEngine(profile, landmarkService: withLandmark);
       final steps = [step(), step(type: 21, beginShapeIdx: 0), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
-      expect(intents[0].key, 'exit_approach_landmark');
-      expect(intents[0].vars['direction'], '좌');
+      expect(intents[0].key, 'exit_left_approach_landmark');
+      expect(intents[0].vars['landmark'], '읍내리');
     });
 
     test('exitName present takes precedence over landmark', () {
@@ -78,21 +77,21 @@ void main() {
       ];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
-      expect(intents[0].key, 'exit_approach_named');
+      expect(intents[0].key, 'exit_right_approach_named');
       expect(intents[0].vars['exit_name'], '천호대교 북단');
       expect(intents[0].vars.containsKey('landmark'), isFalse);
     });
 
-    test('no landmark within radius → falls back to plain exit template', () {
+    test('no landmark within radius → falls back to plain exit_right template', () {
       final engine = VoiceEngine(profile, landmarkService: empty);
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
-      expect(intents[0].key, 'exit_approach');
+      expect(intents[0].key, 'exit_right_approach');
       expect(intents[0].vars.containsKey('landmark'), isFalse);
     });
 
-    test('landmarkService null → falls back to plain exit template, no crash', () {
+    test('landmarkService null → falls back to plain exit_right template, no crash', () {
       final engine = VoiceEngine(profile);
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
@@ -100,15 +99,15 @@ void main() {
       expect(() {
         intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
       }, returnsNormally);
-      expect(intents[0].key, 'exit_approach');
+      expect(intents[0].key, 'exit_right_approach');
     });
 
-    test('beginShapeIdx out of range → falls back to plain exit template', () {
+    test('beginShapeIdx out of range → falls back to plain exit_right template', () {
       final engine = VoiceEngine(profile, landmarkService: withLandmark);
       final steps = [step(), step(type: 20, beginShapeIdx: 99), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
-      expect(intents[0].key, 'exit_approach');
+      expect(intents[0].key, 'exit_right_approach');
     });
 
     test('ramp event does not use landmark fallback (scoped to exit only)', () {
@@ -116,7 +115,7 @@ void main() {
       final steps = [step(), step(type: 17, beginShapeIdx: 0), step(type: 4)];
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
-      expect(intents[0].key, 'ramp_approach');
+      expect(intents[0].key, 'ramp_straight_approach');
       expect(intents[0].vars.containsKey('landmark'), isFalse);
     });
   });

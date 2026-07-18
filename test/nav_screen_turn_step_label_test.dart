@@ -4,12 +4,12 @@ import 'package:yurunavi/services/routing_service.dart';
 
 void main() {
   group('turnStepLabelForType — exit(20/21) 카드 라벨', () {
-    test('구조물 없음 → 기존 일반 라벨 유지 (우측 출구)', () {
-      expect(turnStepLabelForType(20), '우측 출구');
+    test('구조물 없음 → 기존 일반 라벨 유지 (우측으로 진출)', () {
+      expect(turnStepLabelForType(20), '우측으로 진출');
     });
 
-    test('구조물 없음 → 기존 일반 라벨 유지 (좌측 출구)', () {
-      expect(turnStepLabelForType(21), '좌측 출구');
+    test('구조물 없음 → 기존 일반 라벨 유지 (좌측으로 진출)', () {
+      expect(turnStepLabelForType(21), '좌측으로 진출');
     });
 
     test('type 20 + tunnel 인접 → "터널 우측 옆길"', () {

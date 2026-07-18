@@ -40,7 +40,7 @@ void main() {
         'turn_right_approach',
         'turn_right_approach',
         'turn_right_approach',
-        'turn_right_imminent_fast',
+        'turn_right_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50', '5']);
     });
@@ -54,7 +54,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['300', '50', '5']);
     });
@@ -67,7 +67,7 @@ void main() {
       final intents = drive(engine, 0, [200, 50, 5], steps);
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
     });
@@ -81,7 +81,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['100', '50', '5']);
     });
@@ -94,7 +94,7 @@ void main() {
       final intents = drive(engine, 0, [80, 50, 5], steps);
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
     });
@@ -106,7 +106,7 @@ void main() {
       final steps = [step0(), step0(type: 10), step0(type: 4)];
       final intents = drive(engine, 0, [25, 5], steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_right_imminent_fast');
+      expect(intents[0].key, 'turn_right_imminent');
       expect(intents[0].vars['dist'], '5');
     });
   });
@@ -175,14 +175,14 @@ void main() {
       eventImminentM: {'turn_left': 50, 'turn_right': 50},
     );
 
-    test('turn_left 600→500→300→50 emits approach, approach, then unconditional _fast at 50 (speedKmh=0)', () {
+    test('turn_left 600→500→300→50 emits approach, approach, then imminent ("곧~") at 50 (speedKmh=0)', () {
       final engine = VoiceEngine(prodShapeProfile);
       final steps = [step0(), step0(type: 15), step0(type: 4)];
       final intents = drive(engine, 0, [600, 500, 300, 50], steps);
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
     });
@@ -194,7 +194,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
     });
   });
@@ -236,7 +236,7 @@ void main() {
       final steps = [step0(), step0(type: 15), step0(type: 4)];
       final intents = engine.onProgress(0, 40, steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].key, 'turn_left_imminent');
       expect(intents[0].vars['dist'], '40');
     });
 
@@ -245,7 +245,7 @@ void main() {
       final steps = [step0(), step0(type: 15), step0(type: 4)];
       final intents = engine.onProgress(0, 0, steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].key, 'turn_left_imminent');
       expect(intents[0].vars['dist'], '0');
     });
 
@@ -254,7 +254,7 @@ void main() {
       final steps = [step0(), step0(type: 10), step0(type: 4)];
       final intents = drive(engine, 0, [45, 30, 5], steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_right_imminent_fast');
+      expect(intents[0].key, 'turn_right_imminent');
       expect(intents[0].vars['dist'], '45');
     });
 
@@ -265,7 +265,7 @@ void main() {
       expect(intents.map((i) => i.key).toList(), [
         'turn_left_approach',
         'turn_left_approach',
-        'turn_left_imminent_fast',
+        'turn_left_imminent',
       ]);
       expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
     });
@@ -282,7 +282,7 @@ void main() {
       final steps = [step0(), step0(type: 15), step0(type: 4)];
       final intents = drive(engine, 0, [60, 50], steps);
       expect(intents.length, 1);
-      expect(intents[0].key, 'turn_left_imminent_fast');
+      expect(intents[0].key, 'turn_left_imminent');
       expect(intents[0].vars['dist'], '50');
     });
   });

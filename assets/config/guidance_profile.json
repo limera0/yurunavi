@@ -66,6 +66,7 @@
     "continue":    { "enabled": true },
     "destination": { "enabled": true, "imminent_m": 50 },
     "bridge": { "enabled": true },
-    "tunnel": { "enabled": true }
+    "tunnel": { "enabled": true },
+    "underpass": { "enabled": true }
   }
 }

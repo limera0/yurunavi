@@ -1,6 +1,6 @@
 services:
   valhalla:
-    image: valhalla-fork:patch3-uturn
+    image: valhalla-fork:patch4-turnangles
     container_name: yurunavi-valhalla
     restart: unless-stopped
     ports:

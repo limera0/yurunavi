@@ -78,7 +78,7 @@ void main() {
   });
 
   group('D — 회전교차로 진출', () {
-    test('emits roundabout_exit_*', () {
+    test('emits roundabout_exit_* (직전 enter step에 출구번호 없으면 plain imminent)', () {
       final engine = VoiceEngine(profile);
       final steps = [step0(), step0(type: 27), step0(type: 4)];
       final intents = drive(engine, 0, [200, 50, 5], steps);
@@ -86,6 +86,28 @@ void main() {
         'roundabout_exit_approach',
         'roundabout_exit_imminent',
       ]);
+      expect(intents[1].vars.containsKey('exit'), isFalse);
+    });
+  });
+
+  group('E — 회전교차로 진출 시 직전 enter maneuver의 출구번호를 이어받는다', () {
+    test('approach는 exit var 없이, imminent만 roundabout_exit_imminent_named + exit var', () {
+      final engine = VoiceEngine(profile);
+      // steps[1]=enter(출구번호 3) → steps[2]=exit. stepIdx=1로 주행하면
+      // turnIdx=2(exit maneuver), turnIdx-1=1(enter maneuver)에서 출구번호를 읽는다.
+      final steps = [
+        step0(),
+        ManeuverStep(type: 26, instruction: '', distanceKm: 0, roundaboutExitCount: 3),
+        step0(type: 27),
+        step0(type: 4),
+      ];
+      final intents = drive(engine, 1, [200, 50, 5], steps);
+      expect(intents.map((i) => i.key).toList(), [
+        'roundabout_exit_approach',
+        'roundabout_exit_imminent_named',
+      ]);
+      expect(intents[0].vars.containsKey('exit'), isFalse);
+      expect(intents[1].vars['exit'], '3');
     });
   });
 }

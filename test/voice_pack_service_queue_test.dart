@@ -49,7 +49,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
     expect(pending.length, 1);
-    expect(events, ['start:출발합니다']);
+    expect(events, ['start:경로안내를 시작합니다']);
 
     // Resolve the first native call — only now should the second be issued.
     pending[0].complete();
@@ -58,14 +58,14 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(pending.length, 2);
-    expect(events, ['start:출발합니다', 'end:출발합니다', 'start:목적지에 도착했습니다']);
+    expect(events, ['start:경로안내를 시작합니다', 'end:경로안내를 시작합니다', 'start:목적지에 도착했습니다']);
 
     pending[1].complete();
     await f2;
 
     expect(events, [
-      'start:출발합니다',
-      'end:출발합니다',
+      'start:경로안내를 시작합니다',
+      'end:경로안내를 시작합니다',
       'start:목적지에 도착했습니다',
       'end:목적지에 도착했습니다',
     ]);

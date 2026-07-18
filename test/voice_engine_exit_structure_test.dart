@@ -48,38 +48,35 @@ void main() {
   }
 
   group('E — exit 구조물(다리/터널) 인접 안내', () {
-    test('right exit(type 20) + tunnel 인접 → structure 키, 터널/오른쪽', () {
+    test('right exit(type 20) + tunnel 인접 → exit_right structure 키, 터널', () {
       final engine = VoiceEngine(profile,
           exitStructureByManeuverIdx: {1: StructureType.tunnel});
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 
       expect(intents.length, 1);
-      expect(intents[0].key, 'exit_approach_structure');
+      expect(intents[0].key, 'exit_right_approach_structure');
       expect(intents[0].vars['structure'], '터널');
-      expect(intents[0].vars['direction_word'], '오른쪽');
     });
 
-    test('left exit(type 21) + bridge 인접 → structure 키, 고가도로/왼쪽', () {
+    test('left exit(type 21) + bridge 인접 → exit_left structure 키, 고가도로', () {
       final engine = VoiceEngine(profile,
           exitStructureByManeuverIdx: {1: StructureType.bridge});
       final steps = [step(), step(type: 21, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 
-      expect(intents[0].key, 'exit_approach_structure');
+      expect(intents[0].key, 'exit_left_approach_structure');
       expect(intents[0].vars['structure'], '고가도로');
-      expect(intents[0].vars['direction_word'], '왼쪽');
     });
 
-    test('right exit(type 20) + underpass 인접 → structure 키, 지하차도/오른쪽', () {
+    test('right exit(type 20) + underpass 인접 → exit_right structure 키, 지하차도', () {
       final engine = VoiceEngine(profile,
           exitStructureByManeuverIdx: {1: StructureType.underpass});
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 
-      expect(intents[0].key, 'exit_approach_structure');
+      expect(intents[0].key, 'exit_right_approach_structure');
       expect(intents[0].vars['structure'], '지하차도');
-      expect(intents[0].vars['direction_word'], '오른쪽');
     });
 
     test('exitName이 있으면 structure보다 named가 우선한다', () {
@@ -92,7 +89,7 @@ void main() {
       ];
       final intents = drive(engine, 0, [600, 500], steps);
 
-      expect(intents[0].key, 'exit_approach_named');
+      expect(intents[0].key, 'exit_right_approach_named');
       expect(intents[0].vars['exit_name'], '천호대교 북단');
       expect(intents[0].vars.containsKey('structure'), isFalse);
     });
@@ -105,7 +102,7 @@ void main() {
       final pts = [const LatLng(37.5, 127.0)];
       final intents = drive(engine, 0, [600, 500], steps, shapePoints: pts);
 
-      expect(intents[0].key, 'exit_approach_structure');
+      expect(intents[0].key, 'exit_right_approach_structure');
       expect(intents[0].vars.containsKey('landmark'), isFalse);
     });
 
@@ -115,7 +112,7 @@ void main() {
       final steps = [step(), step(type: 20, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 
-      expect(intents[0].key, 'exit_approach');
+      expect(intents[0].key, 'exit_right_approach');
       expect(intents[0].vars.containsKey('structure'), isFalse);
     });
 
@@ -126,7 +123,7 @@ void main() {
       expect(() {
         intents = drive(engine, 0, [600, 500], steps);
       }, returnsNormally);
-      expect(intents[0].key, 'exit_approach');
+      expect(intents[0].key, 'exit_right_approach');
     });
 
     test('ramp 이벤트는 structure 폴백을 쓰지 않는다(exit 전용)', () {
@@ -135,7 +132,7 @@ void main() {
       final steps = [step(), step(type: 17, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 
-      expect(intents[0].key, 'ramp_approach');
+      expect(intents[0].key, 'ramp_straight_approach');
       expect(intents[0].vars.containsKey('structure'), isFalse);
     });
 
@@ -146,9 +143,8 @@ void main() {
       final intents = drive(engine, 0, [600, 500, 300, 50, 5], steps);
 
       final imminent =
-          intents.firstWhere((i) => i.key == 'exit_imminent_structure');
+          intents.firstWhere((i) => i.key == 'exit_right_imminent_structure');
       expect(imminent.vars['structure'], '터널');
-      expect(imminent.vars['direction_word'], '오른쪽');
     });
   });
 }

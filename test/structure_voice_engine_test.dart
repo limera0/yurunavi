@@ -15,7 +15,7 @@ void main() {
       GuidanceTier(minEntryM: 30, pointsM: [100, 50]),
       GuidanceTier(minEntryM: 0, pointsM: []),
     ],
-    enabledEvents: {'bridge', 'tunnel'},
+    enabledEvents: {'bridge', 'tunnel', 'underpass'},
   );
 
   List<SpeakIntent> drive(
@@ -49,6 +49,19 @@ void main() {
         'tunnel_approach',
         'tunnel_approach',
         'tunnel_imminent',
+      ]);
+    });
+  });
+
+  group('A2 — 지하차도(underpass), tunnel과 별개 이벤트로 분리되는지 회귀 가드', () {
+    test('zoneIdx 0을 [600,500,300,50,5]로 접근: underpass_* (tunnel_*로 새지 않음)', () {
+      final engine = StructureVoiceEngine(profile);
+      final intents = drive(engine, 0, [600, 500, 300, 50, 5], StructureType.underpass);
+      expect(intents.map((i) => i.key).toList(), [
+        'underpass_approach',
+        'underpass_approach',
+        'underpass_approach',
+        'underpass_imminent',
       ]);
     });
   });

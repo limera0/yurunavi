@@ -90,7 +90,7 @@ enum WaypointPassageEvent { none, arrived, passed }
 /// exit(type 20/21) 카드 라벨 선택 순수 로직 (테스트용으로 분리, exitGateOpen/
 /// waypointPassageEvent와 동일한 패턴). [_TurnStep._labelForType]에 그대로
 /// 위임 — 구조물(다리/터널)이 인접해 있으면 그 종류를 반영한 라벨로,
-/// 없으면 기존 일반 "우측/좌측 출구" 라벨로 폴백한다.
+/// 없으면 기존 일반 "우측/좌측으로 진출" 라벨로 폴백한다.
 String turnStepLabelForType(
   int type, {
   int? roundaboutExitCount,
@@ -549,7 +549,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         ref.read(routeProgressProvider.notifier).exitStructureByManeuverIdx;
     final intents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
-        speedKmh: ref.read(navStateProvider)?.speedKmh ?? 0,
         shapePoints: _routePoints,
         isFinalDestination: isFinalDestination);
     for (final it in intents) {
@@ -1818,7 +1817,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         Icon(Icons.flag_rounded, color: cs.tertiary),
                         const SizedBox(width: 8),
                         const Expanded(
-                          child: Text('목적지에 도착했습니다',
+                          child: Text('목적지 도착',
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                         ),
                         GestureDetector(
@@ -2352,27 +2351,27 @@ class _TurnStep {
       case 4: case 5: case 6: return isFinalDestination ? '목적지 도착' : '경유지 도착';
       case 7: return '도로명 변경';
       case 8: case 22: return '직진';
-      case 9: return '약간 우회전';
+      case 9: return '완만한 우회전';
       case 10: return '우회전';
-      case 11: return '급우회전';
+      case 11: return '급한 우회전';
       case 12: case 13: return '유턴';
-      case 14: return '급좌회전';
+      case 14: return '급한 좌회전';
       case 15: return '좌회전';
-      case 16: return '약간 좌회전';
-      case 17: return '램프 직진';
-      case 18: return '램프 우측';
-      case 19: return '램프 좌측';
+      case 16: return '완만한 좌회전';
+      case 17: return '직진';
+      case 18: return '우측으로 진입';
+      case 19: return '좌측으로 진입';
       case 20:
         return nearbyStructure != null
             ? '${nearbyStructure.labelKo} 우측 옆길'
-            : '우측 출구';
+            : '우측으로 진출';
       case 21:
         return nearbyStructure != null
             ? '${nearbyStructure.labelKo} 좌측 옆길'
-            : '좌측 출구';
-      case 23: return '우측 유지';
-      case 24: return '좌측 유지';
-      case 25: return '합류';
+            : '좌측으로 진출';
+      case 23: return '우측 차선';
+      case 24: return '좌측 차선';
+      case 25: return '합류구간';
       case 26: return roundaboutExitCount != null ? '회전교차로 $roundaboutExitCount번째 출구' : '회전교차로 진입';
       case 27: return '회전교차로 진출';
       case 28: return '도선 탑승';

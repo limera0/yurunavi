@@ -79,7 +79,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent_fast');
+      expect(intents.last.key, 'turn_right_imminent');
     });
 
     test('type 10 (right) still resolves to turn_right_* (not continue_*)', () {
@@ -89,7 +89,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent_fast');
+      expect(intents.last.key, 'turn_right_imminent');
     });
 
     test('type 15 (left) still resolves to turn_left_* (not continue_*)', () {
@@ -99,7 +99,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent_fast');
+      expect(intents.last.key, 'turn_left_imminent');
     });
 
     test('type 16 (slight left) still resolves to turn_left_* (not continue_*)', () {
@@ -109,7 +109,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent_fast');
+      expect(intents.last.key, 'turn_left_imminent');
     });
   });
 

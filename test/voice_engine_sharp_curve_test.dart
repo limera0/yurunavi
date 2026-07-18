@@ -71,7 +71,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent_fast');
+      expect(intents.last.key, 'turn_right_imminent');
     });
 
     test('type 10 (right) still resolves to turn_right_*', () {
@@ -81,7 +81,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_right_'));
       }
-      expect(intents.last.key, 'turn_right_imminent_fast');
+      expect(intents.last.key, 'turn_right_imminent');
     });
   });
 
@@ -93,7 +93,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent_fast');
+      expect(intents.last.key, 'turn_left_imminent');
     });
 
     test('type 16 (slight left) still resolves to turn_left_*', () {
@@ -103,37 +103,7 @@ void main() {
       for (final i in intents) {
         expect(i.key, startsWith('turn_left_'));
       }
-      expect(intents.last.key, 'turn_left_imminent_fast');
-    });
-  });
-
-  group('E — 급커브는 _fast 축약 대상 제외', () {
-    // Profile matching production values after C1 (imminentM=10).
-    // Entry distance 15m → falls into minEntryM=0 tier (pointsM=[]) → only
-    // imminentM=10 pending — mirrors voice_engine_speed_test.dart's fixture.
-    final speedProfile = GuidanceProfile(
-      imminentM: 10,
-      tiers: const [
-        GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
-        GuidanceTier(minEntryM: 150, pointsM: [300, 50]),
-        GuidanceTier(minEntryM: 30, pointsM: [100, 50]),
-        GuidanceTier(minEntryM: 0, pointsM: []),
-      ],
-      enabledEvents: {
-        'turn_left', 'turn_right', 'sharp_turn_left', 'sharp_turn_right',
-        'uturn', 'ramp', 'exit', 'keep', 'merge', 'roundabout', 'destination',
-      },
-    );
-
-    test('speedKmh=30 on type-11 (sharp_turn_right) imminent does NOT append _fast', () {
-      final engine = VoiceEngine(speedProfile);
-      final steps = [step0(), step0(type: 11), step0(type: 4)];
-      final out = <SpeakIntent>[];
-      out.addAll(engine.onProgress(0, 15, steps, speedKmh: 30));
-      out.addAll(engine.onProgress(0, 10, steps, speedKmh: 30));
-      expect(out.length, 1);
-      expect(out[0].key, 'sharp_turn_right_imminent');
-      expect(out[0].key, isNot(contains('_fast')));
+      expect(intents.last.key, 'turn_left_imminent');
     });
   });
 }

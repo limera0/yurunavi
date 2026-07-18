@@ -17,13 +17,10 @@ class VoicePackService {
     return VoicePackService._(templates, tts);
   }
 
-  // Returns resolved template text with _fast → base-key fallback for pack compat.
+  // Returns resolved template text with _named → base-key fallback for pack compat.
   static String? resolveTemplate(Map<String, String> templates, String key) {
     final t = templates[key];
     if (t != null) return t;
-    if (key.endsWith('_fast')) {
-      return templates[key.substring(0, key.length - 5)];
-    }
     if (key.endsWith('_named')) {
       return templates[key.substring(0, key.length - 6)];
     }

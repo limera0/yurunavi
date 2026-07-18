@@ -17,8 +17,11 @@ String? eventForType(int type) {
     case 9:  case 10:          return 'turn_right';
     case 11:                   return 'sharp_turn_right';
     case 12: case 13:          return 'uturn';
-    case 17: case 18: case 19: return 'ramp';
-    case 20: case 21:          return 'exit';
+    case 17:                   return 'ramp_straight';
+    case 18:                   return 'ramp_right';
+    case 19:                   return 'ramp_left';
+    case 20:                   return 'exit_right';
+    case 21:                   return 'exit_left';
     case 22:                   return 'keep';
     case 23:                   return 'keep_right';
     case 24:                   return 'keep_left';
@@ -31,8 +34,15 @@ String? eventForType(int type) {
   }
 }
 
-String _profileEventKey(String event) =>
-    event.startsWith('roundabout_') ? 'roundabout' : event;
+/// 가이던스 프로필(거리 티어/imminent 거리/on-off)은 방향별로 나뉘지 않고
+/// ramp/exit 하나로 공유한다 — 세분화된 이벤트 키(ramp_right 등)는 TTS 문구
+/// 선택에만 쓰이고, 접근 타이밍 설정은 기존 'ramp'/'exit' 항목을 그대로 참조.
+String _profileEventKey(String event) {
+  if (event.startsWith('roundabout_')) return 'roundabout';
+  if (event.startsWith('ramp_')) return 'ramp';
+  if (event.startsWith('exit_')) return 'exit';
+  return event;
+}
 
 class VoiceEngine {
   final GuidanceProfile profile;
@@ -55,7 +65,6 @@ class VoiceEngine {
     int step,
     double d,
     List<ManeuverStep> steps, {
-    double speedKmh = 0,
     List<LatLng> shapePoints = const [],
     bool isFinalDestination = true,
   }) {
@@ -93,7 +102,7 @@ class VoiceEngine {
       _landmarkForStep = null;
       final exitName = steps[turnIdx].exitName;
       final begin = steps[turnIdx].beginShapeIdx;
-      if (event == 'exit' &&
+      if (event.startsWith('exit_') &&
           (exitName == null || exitName.isEmpty) &&
           landmarkService != null &&
           begin >= 0 &&
@@ -108,41 +117,48 @@ class VoiceEngine {
       final isImminent = point == imminentM || point == _immediatePoint;
       if (profile.isEnabled(_profileEventKey(event))) {
         final phase = isImminent ? 'imminent' : 'approach';
-        final suffix = isImminent && (event == 'turn_left' || event == 'turn_right')
-            ? '_fast'
-            : '';
         final vars = {'dist': point.toStringAsFixed(0)};
         if (event == 'destination') {
           vars['dest_word'] = isFinalDestination ? '목적지' : '경유지';
         }
-        var key = '${event}_$phase$suffix';
+        var key = '${event}_$phase';
         if (event == 'roundabout_enter') {
           final exitCount = steps[turnIdx].roundaboutExitCount;
           if (exitCount != null) {
             vars['exit'] = exitCount.toString();
           } else {
-            key = 'roundabout_$phase$suffix';
+            key = 'roundabout_$phase';
           }
         }
-        if (event == 'ramp' || event == 'exit') {
+        if (event == 'roundabout_exit' && isImminent) {
+          // 진출 maneuver 자체엔 출구 번호가 없음 — 항상 바로 앞(enter)
+          // maneuver가 그 번호를 갖고 있으므로 그걸 이어받는다.
+          final enterIdx = turnIdx - 1;
+          final exitCount = (enterIdx >= 0 && enterIdx < steps.length)
+              ? steps[enterIdx].roundaboutExitCount
+              : null;
+          if (exitCount != null) {
+            vars['exit'] = exitCount.toString();
+            key = 'roundabout_exit_imminent_named';
+          }
+        }
+        if (event.startsWith('ramp_') || event.startsWith('exit_')) {
           final exitName = steps[turnIdx].exitName;
           StructureType? nearbyStructure;
-          if (event == 'exit') {
+          if (event.startsWith('exit_')) {
             nearbyStructure = exitStructureByManeuverIdx?[turnIdx];
           }
           if (exitName != null && exitName.isNotEmpty) {
             vars['exit_name'] = exitName;
-            key = '${event}_${phase}_named$suffix';
-          } else if (event == 'exit' && nearbyStructure != null) {
+            key = '${event}_${phase}_named';
+          } else if (event.startsWith('exit_') && nearbyStructure != null) {
             // 구조물 인접 맥락이 일반 랜드마크 폴백보다 라이더에게 더
             // 유용하므로 우선한다.
             vars['structure'] = nearbyStructure.labelKo;
-            vars['direction_word'] = steps[turnIdx].type == 21 ? '왼쪽' : '오른쪽';
-            key = 'exit_${phase}_structure$suffix';
-          } else if (event == 'exit' && _landmarkForStep != null) {
+            key = '${event}_${phase}_structure';
+          } else if (event.startsWith('exit_') && _landmarkForStep != null) {
             vars['landmark'] = _landmarkForStep!;
-            vars['direction'] = steps[turnIdx].type == 21 ? '좌' : '우';
-            key = 'exit_${phase}_landmark$suffix';
+            key = '${event}_${phase}_landmark';
           }
         }
         out.add(SpeakIntent(key, vars));
@@ -159,10 +175,10 @@ class VoiceEngine {
   }
 }
 
-/// 고가도로/터널 등 구조물(zone) 진입 음성 안내.
+/// 고가도로/터널/지하차도 등 구조물(zone) 진입 음성 안내.
 /// [VoiceEngine]의 tiered "pending points, drain as distance decreases" 방식을
 /// 그대로 따르되 maneuver step이 아닌 구조물 zone 인덱스/거리/타입 기반으로 동작한다.
-/// 회전 관련 로직(_fast 축약, 출구명/랜드마크, 로터리 출구 번호 등)은 없다.
+/// 회전 관련 로직(출구명/랜드마크, 로터리 출구 번호 등)은 없다.
 class StructureVoiceEngine {
   final GuidanceProfile profile;
   StructureVoiceEngine(this.profile);
@@ -181,7 +197,11 @@ class StructureVoiceEngine {
       _immediatePoint = null;
       return const [];
     }
-    final event = type == StructureType.bridge ? 'bridge' : 'tunnel';
+    final event = switch (type) {
+      StructureType.bridge => 'bridge',
+      StructureType.tunnel => 'tunnel',
+      StructureType.underpass => 'underpass',
+    };
     final imminentM = profile.imminentForEvent(event);
     if (zoneIdx != _zoneIdx) {
       _zoneIdx = zoneIdx;
