@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -19,9 +20,11 @@ import 'package:share_plus/share_plus.dart';
 ///
 /// 실기기 렌더링(RepaintBoundary 레이아웃 타이밍, 네이티브 지도 스냅샷,
 /// 임시 파일 I/O, 플랫폼 공유 시트)에 걸쳐 있어 각 단계가 개별적으로
-/// 실패할 수 있다 — 어떤 단계든 실패하면 예외를 던지지 않고 `false`를
-/// 반환한다. 호출부는 `false`를 받으면 스낵바 등으로 사용자에게 실패를
-/// 알려야 한다.
+/// 실패할 수 있다. 네이티브 지도 스냅샷([ml.MapLibreMapController.takeSnapshot])
+/// 은 일부 실기기에서 타임아웃/오류가 나도 공유 자체를 포기하지 않고
+/// 통계 헤더만으로 폴백해 공유한다 — 그 외 단계(헤더 캡처, 파일 쓰기,
+/// 공유 시트 호출)가 실패하면 예외를 던지지 않고 `false`를 반환한다.
+/// 호출부는 `false`를 받으면 스낵바 등으로 사용자에게 실패를 알려야 한다.
 Future<bool> shareTourImage({
   required GlobalKey statHeaderKey,
   required ml.MapLibreMapController? mapController,
@@ -45,16 +48,31 @@ Future<bool> shareTourImage({
     // 텍스트가 항상 선명하게 나오도록 한다.
     headerImage = await renderObject.toImage(pixelRatio: 3.0);
 
-    final Uint8List mapBytes;
+    // 일부 실기기에서 네이티브 MapSnapshotter가 스타일을 재해석하다
+    // 무한 대기에 빠지는 경우가 확인되어(인라인 JSON 스타일 사용 시)
+    // 타임아웃을 두고, 실패해도 공유 자체를 포기하지 않고 헤더만으로
+    // 폴백한다.
+    Uint8List? mapBytes;
     try {
-      mapBytes = await mapController.takeSnapshot();
+      mapBytes = await mapController
+          .takeSnapshot()
+          .timeout(const Duration(seconds: 6));
+    } on TimeoutException {
+      mapBytes = null;
     } catch (_) {
-      return false;
+      mapBytes = null;
     }
-    mapImage = await _decodeImage(mapBytes);
 
-    composited = await _compositeVertically(headerImage, mapImage);
-    final pngData = await composited.toByteData(format: ui.ImageByteFormat.png);
+    final ByteData? pngData;
+    if (mapBytes != null) {
+      mapImage = await _decodeImage(mapBytes);
+      composited = await _compositeVertically(headerImage, mapImage);
+      pngData = await composited.toByteData(format: ui.ImageByteFormat.png);
+    } else {
+      // 지도 스냅샷을 얻지 못했다 — 지도 없이 헤더(통계 카드)만이라도
+      // 공유해 사용자가 빈손으로 남지 않도록 한다.
+      pngData = await headerImage.toByteData(format: ui.ImageByteFormat.png);
+    }
     if (pngData == null) return false;
 
     final dir = await getTemporaryDirectory();
