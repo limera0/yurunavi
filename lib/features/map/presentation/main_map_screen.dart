@@ -31,6 +31,7 @@ import '../../navigation/presentation/nav_screen.dart';
 import '../../navigation/providers/nav_state_provider.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../../tour_summary/presentation/tour_summary_list_screen.dart';
 import '../poi_feature_picker.dart';
 import '../poi_name_resolver.dart';
 import '../poi_category.dart';
@@ -1577,7 +1578,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 onRiderModeToggle: () =>
                     ref.read(riderModeProvider.notifier).toggle(),
                 onCourseRegister: () {},
-                onTourSummary: () {},
+                onTourSummary: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TourSummaryListScreen()),
+                ),
                 onSavedCourses: _showPlacesSheet,
                 onSettings: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
