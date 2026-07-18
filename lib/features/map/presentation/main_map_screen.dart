@@ -16,9 +16,11 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../models/address_result.dart';
 import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
 import '../../../models/saved_place.dart';
+import '../../../services/address_search_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
@@ -930,6 +932,21 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
   /// 없앤다. 이미 Poi 객체로 이름/카테고리를 알고 있으므로 _resolveTappedPoi(리버스
   /// 조회)는 생략.
   Future<void> _handlePoiTap(Poi poi) async {
+    await _handleLocationTap(
+      location: poi.location,
+      name: poi.name,
+      category: poi.type.label,
+    );
+  }
+
+  /// 검색시트(상호명/주소 검색 공통)에서 목적지 후보를 탭했을 때의 공통 처리 — GPS
+  /// 가드 → 확인시트(_showTapConfirmSheet) → _applyTapAction. `_handlePoiTap`(상호명
+  /// 검색 결과)과 `_handleAddressTap`(주소 검색 결과)이 이 헬퍼를 공유한다.
+  Future<void> _handleLocationTap({
+    required LatLng location,
+    required String name,
+    required String category,
+  }) async {
     final origin = _origin ?? _lastKnown;
     if (origin == null) {
       // ambient POI 레이어는 GPS 확보 전(_maybeFetchAmbientPois가 카메라 뷰포트만으로도
@@ -948,13 +965,21 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
 
     final hasRoute = _showCourseSheet;
     final act = await _showTapConfirmSheet(
-      poi.location,
-      _TappedPoi(name: poi.name, category: poi.type.label),
+      location,
+      _TappedPoi(name: name, category: category),
       hasRoute,
     );
     if (!mounted) return;
-    await _applyTapAction(act, poi.location, origin, preResolvedName: poi.name);
+    await _applyTapAction(act, location, origin, preResolvedName: name);
   }
+
+  /// 주소 검색 결과 탭 → `_handleLocationTap` 공통 파이프라인 진입. `category`는
+  /// 확인시트 표시용 라벨일 뿐 실제 분류 로직(PoiType)과는 무관.
+  Future<void> _handleAddressTap(AddressResult r) => _handleLocationTap(
+        location: r.location,
+        name: r.address,
+        category: '주소',
+      );
 
   Future<_TapAction?> _showTapConfirmSheet(LatLng tapped, _TappedPoi? poi, bool hasRoute) {
     final title = poi?.name ?? '선택 위치';
@@ -1217,6 +1242,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         onSelectDest: (poi) {
           Navigator.pop(ctx);
           _handlePoiTap(poi);
+        },
+        onSelectAddress: (r) {
+          Navigator.pop(ctx);
+          _handleAddressTap(r);
         },
       ),
     ).whenComplete(() {
@@ -2363,16 +2392,21 @@ class _PlacesSheet extends ConsumerWidget {
 // POI 탐색 시트 (13-1)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// 검색시트의 검색 모드 — 기본값 business로 기존 상호명 검색 동작을 그대로 보존한다.
+enum _SearchMode { business, address }
+
 class _PoiExploreSheet extends ConsumerStatefulWidget {
   final LatLng? origin;
   // 백그라운드 프리페치 캐시(5종 전체) — null이면 시트가 직접 조회(폴백).
   final List<Poi>? initialPois;
   final void Function(Poi poi) onSelectDest;
+  final void Function(AddressResult result) onSelectAddress;
 
   const _PoiExploreSheet({
     required this.origin,
     this.initialPois,
     required this.onSelectDest,
+    required this.onSelectAddress,
   });
 
   @override
@@ -2389,6 +2423,17 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   // 없음), 없으면 이 시트에서 딱 한 번만 조회한다. 이후 칩/검색어 필터링은 전부
   // 클라이언트에서만 처리하고 재조회하지 않는다.
   List<Poi> _allPois = const [];
+
+  // ── 주소 검색(V-World 지오코더 프록시) 관련 상태 ──────────────────────────
+  // 기본값 business로 고정 — 기존 사용자에게는 오늘 동작이 그대로 유지된다.
+  _SearchMode _searchMode = _SearchMode.business;
+  final AddressSearchService _addressSearchService = AddressSearchService();
+  List<AddressResult> _addressResults = [];
+  bool _addressLoading = false;
+  // 주소 검색은 상호명 검색과 달리 "제출(엔터/버튼)"이 있어야만 발생하므로,
+  // "아직 검색 안 함"과 "검색했지만 0건"을 구분할 별도 플래그가 필요하다.
+  bool _addressSearched = false;
+  String? _addressErrorMessage;
 
   @override
   void initState() {
@@ -2424,6 +2469,52 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     setState(() => _searchFocused = _searchFocusNode.hasFocus);
   }
 
+  /// 상호명/주소 검색 모드 전환. 검색창 텍스트와 각 모드의 검색 결과 상태를
+  /// 초기화해 모드가 바뀐 뒤 이전 모드의 잔여 텍스트/결과가 뒤섞여 보이는 걸 막는다.
+  void _setSearchMode(_SearchMode mode) {
+    if (mode == _searchMode) return;
+    setState(() {
+      _searchMode = mode;
+      _addressResults = [];
+      _addressLoading = false;
+      _addressSearched = false;
+      _addressErrorMessage = null;
+      // clear()가 리스너(_onSearchChanged)를 동기적으로 호출하므로, 그 시점에
+      // _searchMode가 이미 새 값이어야 business 전용 가드가 올바르게 동작한다.
+      _searchCtrl.clear();
+    });
+    ref.read(poiListProvider.notifier).set(_mapPinPois);
+  }
+
+  /// V-World 지오코더 프록시(`AddressSearchService`) 호출 — 상호명 검색과 달리
+  /// 키 입력마다가 아니라 명시적 제출(엔터/검색 버튼)에서만 호출된다(요금·쿼터가
+  /// 있는 외부 지오코더 호출이라 실시간 자동완성처럼 쓰면 안 됨).
+  Future<void> _searchAddress(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    setState(() {
+      _addressLoading = true;
+      _addressErrorMessage = null;
+    });
+    try {
+      final results = await _addressSearchService.search(trimmed);
+      if (!mounted) return;
+      setState(() {
+        _addressResults = results;
+        _addressLoading = false;
+        _addressSearched = true;
+      });
+    } on AddressSearchException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _addressResults = [];
+        _addressLoading = false;
+        _addressSearched = true;
+        _addressErrorMessage = e.toString();
+      });
+    }
+  }
+
   /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 5종 전체, 둘 다 없으면 빈 집합.
   Set<PoiType> get _effectiveTypes {
     if (_selectedTypes.isNotEmpty) return Set<PoiType>.from(_selectedTypes);
@@ -2440,6 +2531,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   }
 
   void _onSearchChanged() {
+    // 상호명 실시간 필터링 전용 — 주소 검색은 자동완성이 아니라 명시적 제출로만
+    // 동작해야 하므로(외부 지오코더 쿼터 보호), 주소 모드에서는 키 입력에 반응하지
+    // 않는다(네트워크 호출은 애초에 _searchAddress에서만 발생하지만, 여기서 조기
+    // 반환해 불필요한 rebuild/지도 핀 갱신도 막는다).
+    if (_searchMode != _SearchMode.business) return;
     setState(() {});
     ref.read(poiListProvider.notifier).set(_mapPinPois);
   }
@@ -2566,14 +2662,44 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
               ),
               const SizedBox(height: 8),
 
-              // ── 상호명 검색 ─────────────────────────────────────────────
+              // ── 검색 모드 전환(상호명/주소) ───────────────────────────────
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('상호명'),
+                    selected: _searchMode == _SearchMode.business,
+                    onSelected: (_) => _setSearchMode(_SearchMode.business),
+                    labelStyle: const TextStyle(fontSize: 12),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('주소'),
+                    selected: _searchMode == _SearchMode.address,
+                    onSelected: (_) => _setSearchMode(_SearchMode.address),
+                    labelStyle: const TextStyle(fontSize: 12),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // ── 상호명/주소 검색 입력창(공용) ─────────────────────────────
               TextField(
                 controller: _searchCtrl,
                 focusNode: _searchFocusNode,
                 decoration: InputDecoration(
-                  hintText: '상호명으로 검색 (예: 스타벅스)',
+                  hintText: _searchMode == _SearchMode.business
+                      ? '상호명으로 검색 (예: 스타벅스)'
+                      : '도로명주소 또는 지번주소 입력',
                   hintStyle: const TextStyle(fontSize: 13),
                   prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: _searchMode == _SearchMode.address
+                      ? IconButton(
+                          icon: const Icon(Icons.search, size: 20),
+                          onPressed: () => _searchAddress(_searchCtrl.text),
+                        )
+                      : null,
                   isDense: true,
                   filled: true,
                   fillColor: Colors.grey.shade100,
@@ -2584,43 +2710,45 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                   ),
                 ),
                 style: const TextStyle(fontSize: 13),
+                onSubmitted: _searchMode == _SearchMode.address ? _searchAddress : null,
               ),
               const SizedBox(height: 10),
 
-              // ── 카테고리 필터 칩 ────────────────────────────────────────────
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    for (final type in PoiType.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          label: Text(type.label),
-                          selected: _selectedTypes.contains(type),
-                          onSelected: (_) => _toggleType(type),
-                          selectedColor:
-                              Color(type.colorValue).withValues(alpha: 0.18),
-                          checkmarkColor: Color(type.colorValue),
-                          backgroundColor: Colors.white,
-                          side: BorderSide(
-                            color: _selectedTypes.contains(type)
-                                ? Color(type.colorValue)
-                                : Colors.grey.shade300,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _selectedTypes.contains(type)
-                                ? Color(type.colorValue)
-                                : AppColors.secondary,
+              // ── 카테고리 필터 칩(상호명 검색 전용) ─────────────────────────
+              if (_searchMode == _SearchMode.business)
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final type in PoiType.values)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: Text(type.label),
+                            selected: _selectedTypes.contains(type),
+                            onSelected: (_) => _toggleType(type),
+                            selectedColor:
+                                Color(type.colorValue).withValues(alpha: 0.18),
+                            checkmarkColor: Color(type.colorValue),
+                            backgroundColor: Colors.white,
+                            side: BorderSide(
+                              color: _selectedTypes.contains(type)
+                                  ? Color(type.colorValue)
+                                  : Colors.grey.shade300,
+                            ),
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _selectedTypes.contains(type)
+                                  ? Color(type.colorValue)
+                                  : AppColors.secondary,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               const SizedBox(height: 8),
               const Divider(),
 
@@ -2637,6 +2765,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   Widget _buildBody() {
     final origin = widget.origin;
     if (origin == null) {
+      // 주소 검색 결과도 확인시트/거리표시에 origin이 필요하므로 두 모드 공용.
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
@@ -2645,6 +2774,62 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         ),
       );
     }
+    if (_searchMode == _SearchMode.address) {
+      return _buildAddressBody(origin);
+    }
+    return _buildBusinessBody(origin);
+  }
+
+  Widget _buildAddressBody(LatLng origin) {
+    if (_addressLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_addressErrorMessage != null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('검색 중 오류가 발생했습니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    if (!_addressSearched) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('주소를 입력하고 검색하세요',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    if (_addressResults.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('검색 결과가 없습니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+    return Column(
+      children: _addressResults.map((r) {
+        final dist = PoiService.haversineMeters(origin, r.location);
+        return ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.location_on_outlined, size: 20),
+          title: Text(r.address, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(_formatDistance(dist), style: const TextStyle(fontSize: 11)),
+          onTap: () => widget.onSelectAddress(r),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildBusinessBody(LatLng origin) {
     if (_effectiveTypes.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
