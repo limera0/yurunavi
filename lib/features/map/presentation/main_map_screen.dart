@@ -963,6 +963,15 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     final interaction = ref.read(mapInteractionProvider);
     if (interaction.isLoading) return;
 
+    // 검색 결과(상호명/주소 공통)를 탭한 시점에 목적지 확정 전이라도 그 위치를
+    // 바로 보여준다 — 예전엔 "여기로 안내"까지 확정해야만(_applyDestination에서만)
+    // 카메라가 움직여, 확인시트를 닫기 전까진 검색한 곳이 어딘지 화면에서 전혀
+    // 알 수 없었다(2026-07-18 사용자 피드백). await하지 않는 fire-and-forget —
+    // 확인시트는 애니메이션 완료를 기다리지 않고 바로 뜬다.
+    _mlCtrl?.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(_toMl(location), 16.0),
+    );
+
     final hasRoute = _showCourseSheet;
     final act = await _showTapConfirmSheet(
       location,
