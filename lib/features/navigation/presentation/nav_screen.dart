@@ -21,10 +21,12 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
+import '../../../services/geocoding_service.dart';
 import '../../../services/native_engine.dart';
 import '../../../services/nav_foreground_service.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
+import '../../../services/tour_log_service.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
@@ -35,6 +37,7 @@ import '../../settings/providers/settings_providers.dart';
 import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
+import '../tour_recorder.dart';
 import '../voice_engine.dart';
 import '../../route/offset_origin.dart';
 
@@ -163,6 +166,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _showCourseSheet = false;
   Timer? _recenterTimer;
   ProviderSubscription<NavigationState?>? _locationSub;
+
+  // 투어 기록(주행 이력) — 첫 GPS fix에 시작, 실제 종료 경로(_exitNav)에서
+  // 마무리+저장된다. dispose()의 안전망도 이 플래그로 중복 저장을 막는다.
+  final _tourRecorder = TourRecorder();
+  bool _tourRecorderStarted = false;
+  bool _tourFinalizeStarted = false; // idempotency guard — see _finalizeAndPersistTour below
 
   // ETA — widget.durationMin 초기값, 재탐색 시 갱신
   int _durationMin = 0;
@@ -385,6 +394,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   @override
   void dispose() {
+    if (!_tourFinalizeStarted) {
+      unawaited(_finalizeAndPersistTour());
+    }
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarIconBrightness: Brightness.dark,
     ));
@@ -431,6 +443,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
         _ensureLocationMarker(effectiveHeadingDeg);
         unawaited(_maybeFetchAmbientPois());
+        if (!_tourRecorderStarted) {
+          _tourRecorderStarted = true;
+          unawaited(_tourRecorder.start(loc, DateTime.now()));
+        } else {
+          _tourRecorder.onFix(loc, next.speedKmh, DateTime.now());
+        }
         _checkWaypointProgress(loc, next.speedKmh);
       },
       fireImmediately: true,
@@ -507,7 +525,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _exitAutoCloseTimer?.cancel();
       if (can) {
         _exitAutoCloseTimer = Timer(const Duration(seconds: 10), () {
-          if (mounted && _canExit) Navigator.of(context).pop();
+          if (mounted && _canExit) _exitNav();
         });
       } else {
         _exitAutoCloseTimer = null;
@@ -839,6 +857,43 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return '$durationMin분';
   }
 
+  /// [_tourRecorder]를 종료하고, 최소 기준(60초/150m)을 만족하면 시작/종료
+  /// 주소를 역지오코딩한 뒤 [TourLogService]에 저장한다. `_tourFinalizeStarted`로
+  /// 멱등성을 보장한다 — `_exitNav()`와 `dispose()`의 안전망 양쪽에서 호출돼도
+  /// 중복 저장되지 않는다.
+  Future<void> _finalizeAndPersistTour() async {
+    if (_tourFinalizeStarted) return; // idempotent — dispose() also calls this as a safety net
+    _tourFinalizeStarted = true;
+    if (!_tourRecorderStarted) return; // never got a single GPS fix, nothing to finalize
+
+    // ref-free on purpose: dispose()'s safety net can call this after Flutter
+    // has already unmounted the element (mounted=false) but before
+    // State.dispose() runs — Riverpod's ref.read() throws in that window, so
+    // we source the end position from the recorder itself instead (updated
+    // on every start()/onFix(), no ref/context dependency).
+    final endPos = _tourRecorder.lastPos;
+    if (endPos == null) return;
+
+    final tourLog = await _tourRecorder.finish(endPos, DateTime.now());
+    if (tourLog == null) return; // below minimum duration/distance threshold, already cleaned up by TourRecorder
+
+    final geocoding = GeocodingService();
+    final results = await Future.wait([
+      geocoding.reverseGeocode(tourLog.startLat, tourLog.startLng),
+      geocoding.reverseGeocode(tourLog.endLat, tourLog.endLng),
+    ]);
+
+    final finalLog = tourLog.copyWith(startAddress: results[0], endAddress: results[1]);
+    await TourLogService().add(finalLog);
+  }
+
+  /// 내비 화면의 유일한 "실제 종료" 경로 — 투어 기록 마무리+저장을 트리거한 뒤
+  /// 화면을 pop한다. (다이얼로그 취소 등 비-종료성 pop은 이걸 거치지 않는다.)
+  void _exitNav() {
+    unawaited(_finalizeAndPersistTour());
+    Navigator.of(context).pop();
+  }
+
   void _confirmExit(BuildContext ctx) {
     showDialog<void>(
       context: ctx,
@@ -854,7 +909,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.of(dlgCtx).pop();
-              Navigator.of(ctx).pop();
+              _exitNav();
             },
             child: const Text('종료'),
           ),
@@ -1835,7 +1890,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           onTap: _canExit
                               ? () {
                                   _exitAutoCloseTimer?.cancel();
-                                  Navigator.of(context).pop();
+                                  _exitNav();
                                 }
                               : null,
                           child: Container(
@@ -2084,7 +2139,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                       }),
                       const SizedBox(width: 10),
                       GestureDetector(
-                        onTap: () => Navigator.of(context).pop(),
+                        onTap: () => _exitNav(),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           decoration: BoxDecoration(

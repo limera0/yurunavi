@@ -42,6 +42,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # wakelock_plus의 Pigeon 채널을 위젯 테스트에서 모킹하기 위해 직접 참조
+  # (test/nav_screen_tour_finalize_test.dart) — wakelock_plus 자체는 이미
+  # main 의존성으로 있고, 이건 그 플랫폼 인터페이스 패키지를 테스트에서
+  # 직접 import하기 위한 depend_on_referenced_packages 린트 대응.
+  wakelock_plus_platform_interface: ^1.5.1
 
 flutter:
   uses-material-design: true
