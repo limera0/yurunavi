@@ -17,6 +17,7 @@ import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/tour_log_providers.dart';
 import '../tour_log_format.dart';
+import '../tour_share_helper.dart';
 
 /// 완료된 투어 한 건의 상세 화면 — 상단 통계 헤더 + 배경 전체를 채우는
 /// 지도(주행 궤적 폴리라인 + 출발/도착 핀).
@@ -49,6 +50,11 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
   String? _currentMemo;
   bool _memoExpanded = false;
   bool _savingMemo = false;
+
+  // ── 공유 ──────────────────────────────────────────────────────
+  // 통계 헤더만 따로 캡처하기 위한 RepaintBoundary 앵커.
+  final _statHeaderKey = GlobalKey();
+  bool _sharing = false;
 
   @override
   void initState() {
@@ -96,6 +102,26 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
       );
     } finally {
       if (mounted) setState(() => _savingMemo = false);
+    }
+  }
+
+  Future<void> _shareTour() async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      final ok = await shareTourImage(
+        statHeaderKey: _statHeaderKey,
+        mapController: _mlCtrl,
+        memo: _currentMemo,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('공유에 실패했어요')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
     }
   }
 
@@ -276,62 +302,78 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
             right: 0,
             child: SafeArea(
               bottom: false,
-              child: Container(
-                margin: const EdgeInsets.all(12),
-                padding: const EdgeInsets.fromLTRB(12, 12, 16, 16),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () => Navigator.of(context).pop(),
-                          child: Icon(Icons.arrow_back, color: cs.onSurface),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            timeRange,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: cs.onSurface,
+              child: RepaintBoundary(
+                key: _statHeaderKey,
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 16, 16),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () => Navigator.of(context).pop(),
+                            child: Icon(Icons.arrow_back, color: cs.onSurface),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              timeRange,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: cs.onSurface,
+                              ),
                             ),
                           ),
-                        ),
-                        GestureDetector(
-                          onTap: _toggleMemoPanel,
-                          child: Icon(
-                            (_currentMemo?.isNotEmpty ?? false)
-                                ? Icons.edit_note
-                                : Icons.edit_note_outlined,
-                            color: (_currentMemo?.isNotEmpty ?? false)
-                                ? cs.primary
-                                : cs.onSurface,
+                          GestureDetector(
+                            onTap: _toggleMemoPanel,
+                            child: Icon(
+                              (_currentMemo?.isNotEmpty ?? false)
+                                  ? Icons.edit_note
+                                  : Icons.edit_note_outlined,
+                              color: (_currentMemo?.isNotEmpty ?? false)
+                                  ? cs.primary
+                                  : cs.onSurface,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _StatItem(label: '거리', value: formatTourDistanceKm(tourLog.distanceM)),
-                        _StatItem(label: '평균', value: formatTourSpeedKmh(tourLog.avgSpeedKmh)),
-                        _StatItem(label: '최고', value: formatTourSpeedKmh(tourLog.maxSpeedKmh)),
-                      ],
-                    ),
-                  ],
+                          const SizedBox(width: 12),
+                          // 캡처 도중(_sharing)에는 아이콘을 스피너로 바꾸지
+                          // 않는다 — 이 위젯 트리 전체가 RepaintBoundary로
+                          // 캡처되는 대상이라, 스피너로 바꾸면 그 프레임의
+                          // 스피너가 공유 이미지에 그대로 찍힐 수 있다.
+                          // 대신 흐리게 표시해 진행 중임만 알린다.
+                          GestureDetector(
+                            onTap: _sharing ? null : _shareTour,
+                            child: Opacity(
+                              opacity: _sharing ? 0.4 : 1.0,
+                              child: Icon(Icons.ios_share, color: cs.onSurface),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          _StatItem(label: '거리', value: formatTourDistanceKm(tourLog.distanceM)),
+                          _StatItem(label: '평균', value: formatTourSpeedKmh(tourLog.avgSpeedKmh)),
+                          _StatItem(label: '최고', value: formatTourSpeedKmh(tourLog.maxSpeedKmh)),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
