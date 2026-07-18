@@ -7,10 +7,13 @@ use api::{
 
 const VALHALLA_URL: &str = "http://localhost:8002/route";
 
-// V-World(국토교통부 브이월드) 지오코더 — 도로명/지번 주소 → 좌표 변환. `/geocode/search`가
-// 프록시하는 대상. 자체 호스팅 주소 DB(정부 데이터 신청 승인 후, Phase 2)로 교체되기 전까지의
-// 임시 프록시다. VALHALLA_URL과 동일하게 하드코딩 관례를 따른다.
-const VWORLD_GEOCODE_URL: &str = "https://api.vworld.kr/req/address";
+// V-World(국토교통부 브이월드) Search API — 도로명/지번 주소 → 좌표, 다중 후보(최대 10건)
+// 반환. `/geocode/search`가 프록시하는 대상. 자체 호스팅 주소 DB(정부 데이터 신청 승인 후,
+// Phase 2)로 교체되기 전까지의 임시 프록시다. VALHALLA_URL과 동일하게 하드코딩 관례를
+// 따른다. (이전에는 GetCoord 단일-결과 API를 썼으나, 사용자가 "58-2/58-4/58-6"처럼 같은
+// 도로명의 여러 건물 중 하나를 고를 수 있어야 한다는 요청으로 다중 후보를 주는 Search로
+// 교체했다.)
+const VWORLD_SEARCH_URL: &str = "https://api.vworld.kr/req/search";
 
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 fn http_client() -> &'static reqwest::Client {
@@ -821,8 +824,9 @@ struct GeocodeSearchQuery {
 }
 
 /// 클라이언트(Flutter)에 돌려주는 자체 DTO — V-World 원본 응답 포맷을 그대로 노출하지
-/// 않는다. 오늘은 0~1개만 담기지만, 배열로 둬서 나중에 다중 후보를 얹어도 클라이언트
-/// 계약이 안 깨지게 한다(기존 `/poi/nearby`의 배열-of-DTO 관례와 동일).
+/// 않는다. Search API가 최대 10건까지 후보를 줄 수 있어 배열로 반환한다(기존
+/// `/poi/nearby`의 배열-of-DTO 관례와 동일) — 클라이언트는 이미 이 배열을 그대로
+/// 렌더링하므로 0~1개였다가 0~10개로 늘어나도 클라이언트 쪽 변경이 필요 없다.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 struct GeocodeResultDto {
     address: String,
@@ -830,28 +834,47 @@ struct GeocodeResultDto {
     lon: f64,
 }
 
-/// V-World geocoder 응답(`serde_json::Value`) 하나를 파싱해 지오코딩 결과를 뽑아낸다.
-/// axum/reqwest 타입이 시그니처에 없는 순수 함수라 네트워크 없이 고정 픽스처로
-/// 단위 테스트할 수 있다(아래 tests 모듈의 OK/ROAD, OK/PARCEL, NOT_FOUND, ERROR 4종).
+/// V-World Search 응답(`serde_json::Value`)에서 후보 목록을 뽑아낸다. axum/reqwest
+/// 타입이 시그니처에 없는 순수 함수라 네트워크 없이 고정 픽스처로 단위 테스트할 수
+/// 있다(아래 tests 모듈의 OK/4건, NOT_FOUND, ERROR 픽스처).
 ///
-/// - `status == "OK"`: `refined.text`를 주소로(사용자 원문 대신 V-World가 정규화/보정한
-///   텍스트를 우선한다), `result.point.x`/`.y`를 각각 lon/lat으로 사용해 `Some(...)`.
-/// - `status == "NOT_FOUND"` / `"ERROR"` / 그 외(필드 누락 등 예상 밖 형태): `None`.
+/// - `status == "OK"`: `result.items[]`를 순회해 각 항목의 `address.road`를 주소로
+///   사용한다(비어 있으면 `address.parcel`로 폴백 — `category=road` 결과에서는
+///   사실상 발생하지 않아야 하지만 방어적으로 둔다), `point.x`/`.y`를 각각 lon/lat으로
+///   사용한다. V-World가 이미 요청의 `size=10`으로 상한을 걸어 보내므로 여기서 별도로
+///   자르지 않는다.
+/// - `status == "NOT_FOUND"` / `"ERROR"` / 그 외(필드 누락 등 예상 밖 형태): 빈 `Vec`.
 ///   `ERROR`일 때의 code/text는 이 함수가 아니라 [`vworld_error_info`]로 별도 추출해
 ///   호출부가 서버 로그에 남기게 한다(클라이언트에는 V-World 원본 에러를 노출하지 않음).
-fn parse_vworld_geocode(resp: &serde_json::Value) -> Option<GeocodeResultDto> {
+fn parse_vworld_search_items(resp: &serde_json::Value) -> Vec<GeocodeResultDto> {
     let response = &resp["response"];
     if response["status"].as_str() != Some("OK") {
-        return None;
+        return Vec::new();
     }
-    let address = response["refined"]["text"].as_str()?.to_string();
-    let lon: f64 = response["result"]["point"]["x"].as_str()?.parse().ok()?;
-    let lat: f64 = response["result"]["point"]["y"].as_str()?.parse().ok()?;
-    Some(GeocodeResultDto { address, lat, lon })
+    let items = match response["result"]["items"].as_array() {
+        Some(items) => items,
+        None => return Vec::new(),
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let road = item["address"]["road"].as_str().unwrap_or("");
+            let parcel = item["address"]["parcel"].as_str().unwrap_or("");
+            let address = if !road.trim().is_empty() { road } else { parcel };
+            if address.trim().is_empty() {
+                return None;
+            }
+            let lon: f64 = item["point"]["x"].as_str()?.parse().ok()?;
+            let lat: f64 = item["point"]["y"].as_str()?.parse().ok()?;
+            Some(GeocodeResultDto { address: address.to_string(), lat, lon })
+        })
+        .collect()
 }
 
 /// `status == "ERROR"`일 때 V-World가 돌려준 원인 코드/메시지를 뽑아낸다(서버 로그 전용 —
 /// 클라이언트 응답에는 절대 그대로 노출하지 않는다). ERROR가 아니면 `None`.
+/// GetCoord/Search 두 API가 동일한 에러 응답 형태(`status:"ERROR"`, `error:{code,text}`)를
+/// 쓰는 걸 실측으로 확인해(둘 다 같은 V-World API family) 그대로 재사용한다.
 fn vworld_error_info(resp: &serde_json::Value) -> Option<(String, String)> {
     let response = &resp["response"];
     if response["status"].as_str() != Some("ERROR") {
@@ -862,29 +885,32 @@ fn vworld_error_info(resp: &serde_json::Value) -> Option<(String, String)> {
     Some((code, text))
 }
 
-/// V-World `getCoord` 엔드포인트를 한 번 호출한다(`addr_type`은 "ROAD" 또는 "PARCEL").
-/// 5초 타임아웃. 준수사항: V-World 응답을 디스크/SQLite/TTL 캐시 등 어디에도 저장하지
-/// 않는다(서비스 약관상 실시간 pass-through만 허용) — 이 함수는 매 호출마다 그대로 새
-/// 요청을 보낼 뿐 아무것도 캐시하지 않는다.
-async fn fetch_vworld_geocode(
+/// V-World Search 엔드포인트를 한 번 호출한다(`category`는 "road" 또는 "parcel").
+/// 최대 10건(`size=10`)까지 요청 — 이 상한은 요청 파라미터 자체에 있으므로 응답 쪽에서
+/// 추가로 자를 필요가 없다. 5초 타임아웃. 준수사항: V-World 응답을 디스크/SQLite/TTL
+/// 캐시 등 어디에도 저장하지 않는다(서비스 약관상 실시간 pass-through만 허용) — 이
+/// 함수는 매 호출마다 그대로 새 요청을 보낼 뿐 아무것도 캐시하지 않는다.
+async fn fetch_vworld_search(
     client: &reqwest::Client,
     api_key: &str,
-    address: &str,
-    addr_type: &str,
+    query: &str,
+    category: &str,
 ) -> Result<serde_json::Value, StatusCode> {
     let resp = client
-        .get(VWORLD_GEOCODE_URL)
+        .get(VWORLD_SEARCH_URL)
         .query(&[
-            ("service", "address"),
-            ("request", "getCoord"),
+            ("service", "search"),
+            ("request", "search"),
             ("version", "2.0"),
             ("crs", "EPSG:4326"),
-            ("type", addr_type),
-            ("refine", "true"),
-            ("simple", "false"),
+            ("size", "10"),
+            ("page", "1"),
+            ("query", query),
+            ("type", "address"),
+            ("category", category),
             ("format", "json"),
+            ("errorformat", "json"),
             ("key", api_key),
-            ("address", address),
         ])
         .timeout(std::time::Duration::from_secs(5))
         .send()
@@ -895,16 +921,39 @@ async fn fetch_vworld_geocode(
             // 그대로 담고 있다 — DNS/연결/TLS 실패 시 실키가 stderr에 평문으로 남는다.
             // `.without_url()`로 URL을 떼어낸 뒤에만 로그로 남긴다.
             eprintln!(
-                "[YuruNavi/Rust] /geocode/search V-World 요청 실패(type={addr_type}): {}",
+                "[YuruNavi/Rust] /geocode/search V-World 요청 실패(category={category}): {}",
                 e.without_url()
             );
             StatusCode::BAD_GATEWAY
         })?;
 
     resp.json::<serde_json::Value>().await.map_err(|e| {
-        eprintln!("[YuruNavi/Rust] /geocode/search V-World 응답 파싱 실패(type={addr_type}): {e}");
+        eprintln!(
+            "[YuruNavi/Rust] /geocode/search V-World 응답 파싱 실패(category={category}): {e}"
+        );
         StatusCode::BAD_GATEWAY
     })
+}
+
+/// `category`(= "road" 또는 "parcel") 하나로 V-World Search를 호출해 후보 목록을 얻는다.
+/// `status:"ERROR"`면 code/text를 로그로 남기고 즉시 502로 중단한다(재시도 대상 아님 —
+/// 예: 잘못된 키). 그 외에는 [`parse_vworld_search_items`] 결과(0~10건)를 그대로 돌려준다.
+async fn try_vworld_search(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    category: &str,
+) -> Result<Vec<GeocodeResultDto>, StatusCode> {
+    let resp = fetch_vworld_search(client, api_key, query, category).await?;
+
+    if let Some((code, text)) = vworld_error_info(&resp) {
+        eprintln!(
+            "[YuruNavi/Rust] /geocode/search V-World 오류 응답(category={category}): {code} - {text}"
+        );
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+
+    Ok(parse_vworld_search_items(&resp))
 }
 
 /// "OO로N길" ↔ "OO로N번길" 표기 차이를 보정하는 폴백 후보를 만든다. V-World GetCoord는
@@ -974,42 +1023,32 @@ async fn handle_geocode_search(
 
     let client = http_client();
 
-    // 도로명(ROAD) 우선 조회 — NOT_FOUND(결과 0건)일 때만 지번(PARCEL)으로 한 번 더
-    // 시도한다(사용자가 지번 주소를 입력했을 가능성 대비). ROAD가 OK면 PARCEL은 시도하지
-    // 않는다. ERROR(예: 키 오류)는 재시도 대상이 아니라 즉시 502로 종료한다.
-    for addr_type in ["ROAD", "PARCEL"] {
-        let resp = fetch_vworld_geocode(client, api_key, query_text, addr_type).await?;
-
-        if let Some((code, text)) = vworld_error_info(&resp) {
-            eprintln!(
-                "[YuruNavi/Rust] /geocode/search V-World 오류 응답(type={addr_type}): {code} - {text}"
-            );
-            return Err(StatusCode::BAD_GATEWAY);
-        }
-
-        if let Some(result) = parse_vworld_geocode(&resp) {
-            return Ok(Json(vec![result]));
-        }
-        // NOT_FOUND(또는 예상 밖 OK 형태) → 다음 addr_type으로 재시도, PARCEL 차례면 그대로 루프 종료.
+    // 도로명(road) 우선 조회 — 결과가 하나라도 있으면(최대 10건, V-World size=10으로
+    // 상한) 그대로 반환하고 parcel은 시도하지 않는다.
+    let road_results = try_vworld_search(client, api_key, query_text, "road").await?;
+    if !road_results.is_empty() {
+        return Ok(Json(road_results));
     }
 
-    // 원본 쿼리로 ROAD/PARCEL 둘 다 NOT_FOUND면 "OO로N길"/"OO로N번길" 표기 차이 보정
-    // 변형으로 한 번 더 시도한다(beon_variant 문서 참조). 정규화할 게 없으면(None)
-    // V-World를 더 호출하지 않고 그대로 빈 배열로 끝낸다.
+    // road가 0건(NOT_FOUND)일 때만 지번(parcel)으로 한 번 더 시도한다(사용자가 지번
+    // 주소를 입력했을 가능성 대비).
+    let parcel_results = try_vworld_search(client, api_key, query_text, "parcel").await?;
+    if !parcel_results.is_empty() {
+        return Ok(Json(parcel_results));
+    }
+
+    // 원본 쿼리로 road/parcel 둘 다 0건이면 "OO로N길"/"OO로N번길" 표기 차이 보정 변형으로
+    // 한 번 더 시도한다(beon_variant 문서 참조 — Search API도 GetCoord와 마찬가지로 이
+    // 표기 차이를 스스로 보정해주지 않는 걸 실측으로 확인했다). 정규화할 게 없으면
+    // (None) V-World를 더 호출하지 않고 그대로 빈 배열로 끝낸다.
     if let Some(variant) = beon_variant(query_text) {
-        for addr_type in ["ROAD", "PARCEL"] {
-            let resp = fetch_vworld_geocode(client, api_key, &variant, addr_type).await?;
-
-            if let Some((code, text)) = vworld_error_info(&resp) {
-                eprintln!(
-                    "[YuruNavi/Rust] /geocode/search V-World 오류 응답(번 변형, type={addr_type}): {code} - {text}"
-                );
-                return Err(StatusCode::BAD_GATEWAY);
-            }
-
-            if let Some(result) = parse_vworld_geocode(&resp) {
-                return Ok(Json(vec![result]));
-            }
+        let road_variant = try_vworld_search(client, api_key, &variant, "road").await?;
+        if !road_variant.is_empty() {
+            return Ok(Json(road_variant));
+        }
+        let parcel_variant = try_vworld_search(client, api_key, &variant, "parcel").await?;
+        if !parcel_variant.is_empty() {
+            return Ok(Json(parcel_variant));
         }
     }
 
@@ -1477,60 +1516,75 @@ mod tests {
         );
     }
 
-    // ── /geocode/search: parse_vworld_geocode / vworld_error_info ──
+    // ── /geocode/search: parse_vworld_search_items / vworld_error_info ──
     //
-    // 실제 V-World API를 라이브로 호출해 확인한 응답 4종(OK/ROAD, OK/PARCEL, NOT_FOUND,
-    // ERROR)을 그대로 픽스처로 사용한다 — 네트워크 없이 순수 함수만 검증.
+    // 실제 V-World Search API를 라이브로 호출해 확인한 응답 3종(OK/4건, NOT_FOUND, ERROR)을
+    // 그대로 픽스처로 사용한다(2026-07-18, query=통일로12길 58, category=road 라이브
+    // 실측 — 서울 종로구 통일로12길/39길 58 일대 4건이 실제로 이렇게 돌아왔다) — 네트워크
+    // 없이 순수 함수만 검증.
 
-    const VWORLD_FIXTURE_OK_PARCEL: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "13(ms)"}, "status" : "OK", "input" : {"type" : "PARCEL", "address" : "서울특별시 중구 태평로1가 31"}, "refined" : {"text" : "서울특별시 중구 태평로1가 31", "structure" : {}}, "result" : {"crs" : "EPSG:4326", "point" : {"x" : "126.9782290751147", "y" : "37.56657117348658"}}}}"#;
+    const VWORLD_SEARCH_FIXTURE_OK: &str = r#"{"response" : {"service" : {"name" : "search", "version" : "2.0", "operation" : "search", "time" : "18(ms)"}, "status" : "OK", "record" : {"total" : "4", "current" : "4"}, "page" : {"total" : "1", "current" : "1", "size" : "10"}, "result" : {"crs" : "EPSG:4326", "type" : "address", "items" : [
+        {"id" : "1111018100102100118", "address" : {"zipcode" : "03026", "category" : "road", "road" : "서울특별시 종로구 통일로12길 58-2 (행촌동)", "parcel" : "행촌동 210-118", "bldnm" : "", "bldnmdc" : ""}, "point" : {"x" : "126.9619508464101", "y" : "37.57487101858912"}},
+        {"id" : "1111018100102100117", "address" : {"zipcode" : "03026", "category" : "road", "road" : "서울특별시 종로구 통일로12길 58-4 (행촌동)", "parcel" : "행촌동 210-117", "bldnm" : "", "bldnmdc" : ""}, "point" : {"x" : "126.96209959387484", "y" : "37.574867567460515"}},
+        {"id" : "1111018100102100697", "address" : {"zipcode" : "03026", "category" : "road", "road" : "서울특별시 종로구 통일로12길 58-6 (행촌동)", "parcel" : "행촌동 210-697", "bldnm" : "", "bldnmdc" : ""}, "point" : {"x" : "126.9621817768535", "y" : "37.57491628482984"}},
+        {"id" : "1111013300100580012", "address" : {"zipcode" : "03676", "category" : "road", "road" : "서울특별시 종로구 통일로39길 58-12 (홍제동,고은주택)", "parcel" : "홍제동 58-12", "bldnm" : "", "bldnmdc" : ""}, "point" : {"x" : "126.94158783314526", "y" : "37.5875524980416"}}
+    ]}}}"#;
 
-    const VWORLD_FIXTURE_OK_ROAD: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "12(ms)"}, "status" : "OK", "input" : {"type" : "ROAD", "address" : "세종대로 110"}, "refined" : {"text" : "서울특별시 중구 세종대로 110 (태평로1가)", "structure" : {}}, "result" : {"crs" : "EPSG:4326", "point" : {"x" : "126.9779183412472", "y" : "37.566370785810435"}}}}"#;
+    const VWORLD_SEARCH_FIXTURE_NOT_FOUND: &str = r#"{"response" : {"service" : {"name" : "search", "version" : "2.0", "operation" : "search", "time" : "5(ms)"}, "status" : "NOT_FOUND", "record" : {"total" : "0", "current" : "0"}, "page" : {"total" : "0", "current" : "1", "size" : "10"}}}"#;
 
-    const VWORLD_FIXTURE_NOT_FOUND: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "16(ms)"}, "status" : "NOT_FOUND", "record" : {"total" : "0", "current" : "0"}, "page" : {}}}"#;
-
-    const VWORLD_FIXTURE_ERROR: &str = r#"{"response" : {"service" : {"name" : "address", "version" : "2.0", "operation" : "getCoord", "time" : "3(ms)"}, "status" : "ERROR", "error" : {"level" : "2", "code" : "INVALID_KEY", "text" : "등록되지 않은 인증키입니다."}}}"#;
+    // 2026-07-18 라이브 실측(잘못된 키로 Search 엔드포인트 호출) — GetCoord와 동일한
+    // status:"ERROR"/error:{code,text} 형태임을 확인했다.
+    const VWORLD_SEARCH_FIXTURE_ERROR: &str = r#"{"response" : {"service" : {"name" : "search", "version" : "2.0", "operation" : "search", "time" : "1(ms)"}, "status" : "ERROR", "error" : {"level" : "2", "code" : "INVALID_KEY", "text" : "등록되지 않은 인증키입니다."}}}"#;
 
     #[test]
-    fn parse_vworld_geocode_ok_road_extracts_refined_text_and_lon_lat() {
-        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_OK_ROAD).unwrap();
-        let result = parse_vworld_geocode(&v).expect("OK/ROAD 응답은 Some이어야 함");
-        assert_eq!(result.address, "서울특별시 중구 세종대로 110 (태평로1가)");
-        assert!((result.lon - 126.9779183412472).abs() < 1e-9, "x=lon 이어야 함: {}", result.lon);
-        assert!((result.lat - 37.566370785810435).abs() < 1e-9, "y=lat 이어야 함: {}", result.lat);
+    fn parse_vworld_search_items_ok_returns_all_four_items_in_order() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_SEARCH_FIXTURE_OK).unwrap();
+        let results = parse_vworld_search_items(&v);
+        assert_eq!(results.len(), 4, "4건 모두 담겨야 함: {results:?}");
+
+        assert_eq!(results[0].address, "서울특별시 종로구 통일로12길 58-2 (행촌동)");
+        assert!((results[0].lon - 126.9619508464101).abs() < 1e-9, "x=lon 이어야 함");
+        assert!((results[0].lat - 37.57487101858912).abs() < 1e-9, "y=lat 이어야 함");
+
+        assert_eq!(results[3].address, "서울특별시 종로구 통일로39길 58-12 (홍제동,고은주택)");
+        assert!((results[3].lon - 126.94158783314526).abs() < 1e-9);
+        assert!((results[3].lat - 37.5875524980416).abs() < 1e-9);
+
         assert_eq!(vworld_error_info(&v), None);
     }
 
     #[test]
-    fn parse_vworld_geocode_ok_parcel_extracts_refined_text_and_lon_lat() {
-        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_OK_PARCEL).unwrap();
-        let result = parse_vworld_geocode(&v).expect("OK/PARCEL 응답은 Some이어야 함");
-        assert_eq!(result.address, "서울특별시 중구 태평로1가 31");
-        assert!((result.lon - 126.9782290751147).abs() < 1e-9);
-        assert!((result.lat - 37.56657117348658).abs() < 1e-9);
-        assert_eq!(vworld_error_info(&v), None);
-    }
-
-    #[test]
-    fn parse_vworld_geocode_not_found_returns_none_and_no_error_info() {
-        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_NOT_FOUND).unwrap();
-        assert_eq!(parse_vworld_geocode(&v), None);
+    fn parse_vworld_search_items_not_found_returns_empty_and_no_error_info() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_SEARCH_FIXTURE_NOT_FOUND).unwrap();
+        assert!(parse_vworld_search_items(&v).is_empty());
         assert_eq!(vworld_error_info(&v), None, "NOT_FOUND는 ERROR가 아니므로 error info가 없어야 함");
     }
 
     #[test]
-    fn parse_vworld_geocode_error_returns_none_and_extracts_error_info() {
-        let v: serde_json::Value = serde_json::from_str(VWORLD_FIXTURE_ERROR).unwrap();
-        assert_eq!(parse_vworld_geocode(&v), None);
+    fn parse_vworld_search_items_error_returns_empty_and_extracts_error_info() {
+        let v: serde_json::Value = serde_json::from_str(VWORLD_SEARCH_FIXTURE_ERROR).unwrap();
+        assert!(parse_vworld_search_items(&v).is_empty());
         let (code, text) = vworld_error_info(&v).expect("ERROR 응답은 error info가 있어야 함");
         assert_eq!(code, "INVALID_KEY");
         assert_eq!(text, "등록되지 않은 인증키입니다.");
     }
 
     #[test]
-    fn parse_vworld_geocode_malformed_json_does_not_panic() {
-        // status만 있고 refined/result가 없는 경우(스키마 밖 형태) — panic 없이 None.
+    fn parse_vworld_search_items_malformed_json_does_not_panic() {
+        // status만 있고 result/items가 없는 경우(스키마 밖 형태) — panic 없이 빈 Vec.
         let v: serde_json::Value = serde_json::json!({"response": {"status": "OK"}});
-        assert_eq!(parse_vworld_geocode(&v), None);
+        assert!(parse_vworld_search_items(&v).is_empty());
+    }
+
+    #[test]
+    fn parse_vworld_search_items_falls_back_to_parcel_when_road_empty() {
+        // address.road가 빈 문자열인 방어적 케이스 — parcel로 폴백해야 한다.
+        let v: serde_json::Value = serde_json::json!({"response": {"status": "OK", "result": {"items": [
+            {"address": {"road": "", "parcel": "행촌동 210-118"}, "point": {"x": "126.96", "y": "37.57"}}
+        ]}}});
+        let results = parse_vworld_search_items(&v);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].address, "행촌동 210-118");
     }
 
     // ── /geocode/search: beon_variant("OO로N길" ↔ "OO로N번길" 폴백 변형) ──
