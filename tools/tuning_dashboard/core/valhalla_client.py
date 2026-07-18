@@ -8,8 +8,9 @@ def build_costing_options(profile: dict) -> dict:
         "use_highways": profile.get("use_highways", 0.0),
         "use_tolls":    profile.get("use_tolls",    0.0),
     }
-    for k in ("curvature_penalty", "long_bridge_factor",
-              "long_tunnel_factor", "span_min_length"):
+    for k in ("curvature_penalty", "long_bridge_factor", "long_tunnel_factor",
+              "span_min_length", "use_tracks", "use_living_streets",
+              "top_speed", "use_ferry", "uturn_penalty"):
         if k in profile:
             m[k] = profile[k]
     return {"motorcycle": m}

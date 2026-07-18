@@ -1,30 +1,48 @@
+# 2026-07-18 Phase 2 튜닝 최종값(5라운드 반복, batch_validate.py로 5개 실측 OD 검증).
+# 단/중거리 코스(송탄-팔당, 화정-석모도, 청파동-춘천)는 튜닝 대상으로 삼아 개선했고,
+# 산악 횡단 장거리 코스(행촌동-강릉, 판교-무릉)는 대체 도로망 자체가 희박해 가중치를
+# 극단으로 밀어도 개선 폭이 작아 "구조적 한계"로 인정하기로 마스터와 합의함(겹침률 규칙의
+# 예외 취급). 남은 개선 여지: 송탄-팔당의 시골길-지방도 겹침(40%대)과 화정-석모도의
+# 지방도-국도 겹침(42%대, 강화도 진입 교량이 유일한 접근로라 구조적일 가능성 있음)은
+# 추가 라운드로 더 다듬을 수 있으나 이번 세션에서는 여기서 멈춤 — batch_validate.py 재실행
+# + 미세조정으로 언제든 이어갈 수 있음.
 profiles:
   rural:        # 시골길 우선
     color: "#e64980"
-    class_factors: { "0": 5.0, "1": 5.0, "2": 1.5, "3": 0.9, "4": 0.7, "5": 0.8, "6": 1.0, "7": 1.2 }
-    curvature_penalty: 0.2
-    long_bridge_factor: 1.0
-    long_tunnel_factor: 1.0
-    span_min_length: 500
+    class_factors: { "0": 100, "1": 100, "2": 10, "3": 4, "4": 0.5, "5": 1.3, "6": 1.4, "7": 1.6 }
+    curvature_penalty: 3.0
+    long_bridge_factor: 6.0
+    long_tunnel_factor: 6.0
+    span_min_length: 300
     use_highways: 0.0
     use_tolls: 0.0
+    use_tracks: 0.15
+    use_living_streets: 1.0
+    top_speed: 40
+    uturn_penalty: 50
   provincial:   # 지방도 우선
     color: "#4263eb"
-    class_factors: { "0": 5.0, "1": 5.0, "2": 1.2, "3": 0.7, "4": 0.9, "5": 1.0, "6": 1.1, "7": 1.3 }
+    class_factors: { "0": 100, "1": 100, "2": 2.0, "3": 0.3, "4": 1.1, "5": 1.8, "6": 2.2, "7": 3.0 }
     curvature_penalty: 0.5
+    long_bridge_factor: 5.0
+    long_tunnel_factor: 5.0
+    span_min_length: 1000
+    use_highways: 0.0
+    use_tolls: 0.0
+    use_tracks: 0.2
+    use_living_streets: 0.5
+    uturn_penalty: 70
+  national:     # 국도 우선
+    color: "#2f9e44"
+    class_factors: { "0": 100, "1": 100, "2": 0.3, "3": 1.2, "4": 2.0, "5": 4.0, "6": 5.0, "7": 8.0 }
+    curvature_penalty: 0.0
     long_bridge_factor: 1.0
     long_tunnel_factor: 1.0
     span_min_length: 500
     use_highways: 0.0
     use_tolls: 0.0
-  national:     # 국도 우선
-    color: "#2f9e44"
-    class_factors: { "0": 3.0, "1": 3.0, "2": 0.8, "3": 1.0, "4": 1.2, "5": 1.3, "6": 1.4, "7": 1.5 }
-    curvature_penalty: 1.0
-    long_bridge_factor: 1.0
-    long_tunnel_factor: 1.0
-    span_min_length: 500
-    use_highways: 0.0
-    use_tolls: 0.2
+    use_tracks: 0.0
+    use_living_streets: 0.0
+    uturn_penalty: 120
 hard_constraints:
   time_fallback_multiplier: 1.5

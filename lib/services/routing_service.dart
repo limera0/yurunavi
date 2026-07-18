@@ -158,6 +158,27 @@ class RoutingService {
 
   static const double _ruralDetourThreshold = 1.5;
 
+  // 지방도 우회 과다 시 완화용 costing (시골길의 _ruralBalancedOpts와 동일한 패턴)
+  static const Map<String, dynamic> _provincialBalancedOpts = {
+    'use_highways': 0.0,
+    'use_ferry': 0.0,
+    'class_factors': {
+      '0': 100,   // motorway: 고속도로 회피
+      '1': 100,   // trunk: 자동차전용 회피
+      '2': 1.0,   // primary: 국도 일부 허용 (지방도 2.0→폴백 1.0)
+      '3': 0.6,   // secondary: 지방도 선호 유지(다소 완화)
+      '4': 1.3,   // tertiary: 시군도 다소 회피
+      '5': 1.8,   // unclassified
+      '6': 2.2,   // residential
+      '7': 3.0,   // service
+    },
+    'curvature_penalty': 0.3,
+    'long_bridge_factor': 2.0,
+    'long_tunnel_factor': 2.0,
+  };
+
+  static const double _provincialDetourThreshold = 1.3;
+
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
   static const _cacheMaxSize = 20;
@@ -208,22 +229,23 @@ class RoutingService {
         'use_highways': 0.0,
         'use_ferry': 0.0,
         'use_living_streets': 1.0,
-        'use_tracks': 0.8,
+        'use_tracks': 0.15,
         'top_speed': 40,
         'class_factors': {
           '0': 100,   // motorway: 고속도로 회피
           '1': 100,   // trunk: 자동차전용 회피
-          '2': 6,     // primary: 일반국도 회피
-          '3': 2,     // secondary: 지방도 중간
-          '4': 0.6,   // tertiary: 시군도 선호
-          '5': 0.8,   // unclassified: 소로 선호
-          '6': 0.9,   // residential: 마을길 선호
-          '7': 1.0,   // service: 농로 기준
+          '2': 10,    // primary: 일반국도 회피
+          '3': 4,     // secondary: 지방도 회피
+          '4': 0.5,   // tertiary: 시군도 선호
+          '5': 1.3,   // unclassified: 소로 약한 회피
+          '6': 1.4,   // residential: 마을길 약한 회피
+          '7': 1.6,   // service: 농로 약한 회피
         },
-        'curvature_penalty': 2.5,
-        'long_bridge_factor': 3.0,
-        'long_tunnel_factor': 3.0,
-        'span_min_length': 500,
+        'curvature_penalty': 3.0,
+        'long_bridge_factor': 6.0,
+        'long_tunnel_factor': 6.0,
+        'span_min_length': 300,
+        'uturn_penalty': 50,
       },
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
       {
@@ -235,16 +257,17 @@ class RoutingService {
           '0': 100,   // motorway: 고속도로 회피
           '1': 100,   // trunk: 자동차전용 회피
           '2': 2.0,   // primary: 일반국도 약한 회피
-          '3': 0.5,   // secondary: 지방도 선호
-          '4': 0.9,   // tertiary: 시군도 약한 선호
-          '5': 1.5,   // unclassified: 소로 약한 회피
-          '6': 2.0,   // residential: 마을길 회피
+          '3': 0.3,   // secondary: 지방도 선호
+          '4': 1.1,   // tertiary: 시군도 약한 회피
+          '5': 1.8,   // unclassified: 소로 약한 회피
+          '6': 2.2,   // residential: 마을길 회피
           '7': 3.0,   // service: 농로 회피
         },
-        'curvature_penalty': 1.0,
-        'long_bridge_factor': 1.5,
-        'long_tunnel_factor': 1.5,
-        'span_min_length': 500,
+        'curvature_penalty': 0.5,
+        'long_bridge_factor': 5.0,
+        'long_tunnel_factor': 5.0,
+        'span_min_length': 1000,
+        'uturn_penalty': 70,
       },
       // 국도: 주요도로 선호, 생활도로·트랙·고속도로·유료도로 회피
       // 'shortest' 제거: motorcyclecost.cc EdgeCost()가 shortest_일 때
@@ -260,7 +283,7 @@ class RoutingService {
         'class_factors': {
           '0': 100,   // motorway: 고속도로 회피
           '1': 100,   // trunk: 자동차전용 회피
-          '2': 0.5,   // primary: 일반국도 강한 선호
+          '2': 0.3,   // primary: 일반국도 강한 선호
           '3': 1.2,   // secondary: 지방도 기준
           '4': 2.0,   // tertiary: 시군도 회피
           '5': 4.0,   // unclassified: 소로 강한 회피
@@ -270,6 +293,7 @@ class RoutingService {
         'curvature_penalty': 0.0,
         'long_bridge_factor': 1.0,
         'long_tunnel_factor': 1.0,
+        'uturn_penalty': 120,
       },
     ];
 
@@ -399,15 +423,16 @@ class RoutingService {
     }
 
     // ── 시골길 1.3배 폴백 (main.rs 와 동작 일치) ──────────────────
-    // 시골(0) 시간이 지방(1) 시간의 1.3배 이상이면 과다 우회로 보고
+    // 시골(0) 거리가 지방(1) 거리의 1.3배 이상이면 과다 우회로 보고
     // balanced costing 으로 시골 경로만 재요청해 교체한다.
     if (results.length == 3) {
-      final ruralMins = results[0].durationMin;
-      final provMins = results[1].durationMin;
-      if (provMins > 0 && ruralMins / provMins >= _ruralDetourThreshold) {
+      final ruralKm = results[0].distanceKm;
+      final provKm = results[1].distanceKm;
+      if (provKm > 0 && ruralKm / provKm >= _ruralDetourThreshold) {
         dev.log(
-          '시골길 과다우회 감지 (rural=${ruralMins}m / prov=${provMins}m '
-          '= ${(ruralMins / provMins).toStringAsFixed(2)}x ≥ $_ruralDetourThreshold) '
+          '시골길 과다우회 감지 (rural=${ruralKm.toStringAsFixed(1)}km / '
+          'prov=${provKm.toStringAsFixed(1)}km '
+          '= ${(ruralKm / provKm).toStringAsFixed(2)}x ≥ $_ruralDetourThreshold) '
           '→ balanced 재요청',
           name: 'RoutingService',
         );
@@ -460,6 +485,73 @@ class RoutingService {
           // balanced 실패 시: 기존 시골 경로 유지 (조용히 폴백, throw 금지)
         } catch (e) {
           dev.log('balanced 폴백 실패 → 기존 시골 경로 유지: $e',
+              name: 'RoutingService', level: 900);
+        }
+      }
+
+      // ── 지방도로 1.3배 폴백 (시골길 폴백과 동일 패턴) ──────────────
+      // 지방도(1) 거리가 국도(2) 거리의 1.3배 이상이면 과다 우회로 보고
+      // balanced costing 으로 지방도 경로만 재요청해 교체한다.
+      // results[1]은 위 시골길 폴백에서 건드리지 않으므로 순서 무관하게 안전.
+      final provKm2 = results[1].distanceKm;
+      final natlKm = results[2].distanceKm;
+      if (natlKm > 0 && provKm2 / natlKm >= _provincialDetourThreshold) {
+        dev.log(
+          '지방도로 과다우회 감지 (prov=${provKm2.toStringAsFixed(1)}km / '
+          'natl=${natlKm.toStringAsFixed(1)}km '
+          '= ${(provKm2 / natlKm).toStringAsFixed(2)}x ≥ $_provincialDetourThreshold) '
+          '→ balanced 재요청',
+          name: 'RoutingService',
+        );
+        try {
+          final resp = await http
+              .post(
+                Uri.parse('$_valhallaBase/route'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'locations': locations,
+                  'costing': 'motorcycle',
+                  'costing_options': {'motorcycle': _provincialBalancedOpts},
+                }),
+              )
+              .timeout(const Duration(seconds: 20));
+
+          if (resp.statusCode == 200) {
+            final data = jsonDecode(resp.body) as Map<String, dynamic>;
+            final trip = data['trip'] as Map<String, dynamic>?;
+            final legs = (trip?['legs'] as List?) ?? [];
+            final pts = _extractPoints(legs);
+            if (pts.isNotEmpty) {
+              final km = legs.fold<double>(
+                0,
+                (sum, leg) =>
+                    sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
+              );
+              // ETA 는 기존과 동일하게 _courseSpeeds[1] 로 재계산 (회귀 방지 핵심)
+              final realisticMins = (km / _courseSpeeds[1] * 60).round();
+              final maneuvers = _collectManeuvers(legs);
+              if (maneuvers.isNotEmpty) {
+                dev.log(
+                  'shape_index check (balanced): lastEnd=${maneuvers.last.endShapeIdx} pts=${pts.length}',
+                  name: 'RoutingService',
+                );
+              }
+              results[1] = RouteResult(
+                points: pts,
+                distanceKm: km,
+                durationMin: realisticMins,
+                maneuvers: maneuvers,
+              );
+              dev.log(
+                'balanced 교체 완료: ${km.toStringAsFixed(1)}km '
+                '${realisticMins}m',
+                name: 'RoutingService',
+              );
+            }
+          }
+          // balanced 실패 시: 기존 지방도 경로 유지 (조용히 폴백, throw 금지)
+        } catch (e) {
+          dev.log('balanced 폴백 실패 → 기존 지방도 경로 유지: $e',
               name: 'RoutingService', level: 900);
         }
       }

@@ -210,7 +210,7 @@ with left:
         with st.expander("도로등급 분포 (trace_attributes)"):
             for pname, res in st.session_state.result.items():
                 st.write(f"**{PROFILE_LABELS.get(pname, pname)}**")
-                dist = road_class_distribution(res["coords"])
+                dist = road_class_distribution(res["coords"], distance_km=res["distance_km"])
                 if "error" in dist:
                     st.warning(f"trace_attributes 실패: {dist['error']}")
                 else:
@@ -236,7 +236,7 @@ with right:
                 label = ROAD_CLASS_LABELS.get(k, f"class_{k}")
                 val = float(profile["class_factors"].get(k, 1.0))
                 new_cf[k] = st.number_input(
-                    label, min_value=0.1, max_value=20.0, value=val,
+                    label, min_value=0.1, max_value=150.0, value=val,
                     step=0.1, format="%.2f",
                     key=f"{pname}_cf_{k}",
                 )

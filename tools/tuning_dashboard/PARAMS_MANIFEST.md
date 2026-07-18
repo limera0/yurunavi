@@ -1,7 +1,7 @@
 # Valhalla 포크 motorcycle costing 파라미터 명세
 
 소스: `/data/projects/valhalla-src/src/sif/motorcyclecost.cc`
-Proto: `/data/projects/valhalla-src/proto/descriptors/options.proto` (field 97–100)
+Proto: `/data/projects/valhalla-src/proto/descriptors/options.proto` (field 97–102)
 
 ---
 
@@ -17,6 +17,7 @@ Proto: `/data/projects/valhalla-src/proto/descriptors/options.proto` (field 97�
 | use_highways | `use_highways` | float | 0.0 | 1.0 | 0.5 | 고속도로 사용 선호도 (0=완전 회피, 1=적극 이용) |
 | use_tolls | `use_tolls` | float | 0.0 | 1.0 | 0.5 | 유료도로 사용 선호도 |
 | use_trails | `use_trails` | float | 0.0 | 1.0 | 0.0 | 비포장/트레일 사용 선호도 |
+| uturn_penalty | `uturn_penalty` | float | 0.0 | 20000.0 | 5000.0 | U턴(turntype==kReverse) 전이 비용 배율(patch5, 2026-07-18). **낮을수록 U턴을 더 쉽게 허용** — "U턴을 피하려면 이 비용 이상 돌아가야 하는 경우에만 U턴" 개념. 0 지정 시 무시되고 기본값(5000) 적용됨(다른 factor류와 동일한 "0=unset" 관례). |
 
 ---
 
