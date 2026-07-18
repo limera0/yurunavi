@@ -92,6 +92,7 @@
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
 | 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | TODO — 2026-07-13 발견 계기, 배포 전 필수 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
+| 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | TODO — 2026-07-18 등록, 아래 16번 상세 참조 |
 
 ## 항목별 상세
 
@@ -607,6 +608,38 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   클라이언트), `ce709b8`(백업/재동기화 스크립트/문서).
 - 상세 설계 배경은 `loop/HANDOFF_0715_poi_quota.md`, 인프라 운영 절차는
   `docker/INFRA.md` §5 참조.
+
+### 16. 구조물/지오메트리 급커브 카드 UI 신설 — TODO
+
+**배경 (2026-07-18, 음성/카드 문구 CSV 검토 세션 중 등록)**: `loop/VOICE_MESSAGES_KO_REVIEW.csv`로
+카드/TTS 문구 전수 검토를 하던 중, 다음 두 종류의 이벤트가 **TTS만 있고 화면 카드가 아예
+없다**는 게 확인됨 — 사용자가 이번엔 문구 교정만 반영하고 카드 UI 신설은 별도 작업으로
+미루기로 결정.
+
+- **구조물 진입(고가도로/터널/지하차도)**: `StructureVoiceEngine`(`voice_engine.dart`)이
+  Valhalla maneuver가 아니라 구조물 zone 인덱스/거리 기반으로 독립 동작 — 상단 회전카드
+  (`_TurnStep`/`_labelForType`)는 Valhalla maneuver step 목록만 참조하므로 이 이벤트를
+  아예 모름. TTS 문구는 이번 세션에 교정 완료(`{dist}미터 앞 고가도로로 진입합니다` 등,
+  underpass/tunnel 이벤트 분리 버그도 같이 수정함).
+- **지오메트리 감지 급커브**: `CurveVoiceEngine`도 마찬가지로 maneuver가 아닌 shape
+  geometry 기반 커브 zone에서 동작 — 교차로에서의 급회전(유형11/14, 카드 있음)과 달리
+  코너링 중 지오메트리로만 잡히는 급커브는 카드가 없음.
+
+**필요 작업(다음 착수 세션)**:
+1. `nav_screen.dart`에 상단 회전카드와는 별개인 임시 배지/알림 UI 신설 필요 — 기존
+   `_TurnStep` 파이프라인에 억지로 끼워넣지 말고 구조물/커브 zone 진행 상태를 별도로
+   구독하는 위젯으로 설계할 것(회전카드는 "다음 turn maneuver" 하나만 가정하는 구조라
+   구조물/커브 zone과 개념적으로 안 맞음).
+2. `RouteProgress`(`route_progress_provider.dart`)가 이미 `distToNextStructureM`/
+   `distToNextCurveM`/`nextStructureType`/`nextCurveDirection`을 들고 있으므로(구조물
+   TTS가 이미 이 필드로 동작 중) 신규 위젯은 이 provider를 그대로 재사용하면 됨 — 새
+   데이터 소스 필요 없음.
+3. 카드 문구는 `VOICE_MESSAGES_KO_REVIEW.csv`의 "고가도로"/"터널"/"지하차도" 행,
+   `sharp_turn_left/right`의 "코너링 중 지오메트리로만 감지된 급커브도 표시할 것" 비고
+   참고.
+
+**선행조건 없음** — 12번(백엔드) 완료 상태라 바로 착수 가능. 디자인 트랙(7~11번) 확정 전
+이라도 순수 기능이므로 진행 가능(단, 새 위젯이라 11번 스윕 대상에 포함시킬 것).
 
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
