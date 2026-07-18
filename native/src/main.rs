@@ -907,6 +907,57 @@ async fn fetch_vworld_geocode(
     })
 }
 
+/// "OO로N길" ↔ "OO로N번길" 표기 차이를 보정하는 폴백 후보를 만든다. V-World GetCoord는
+/// 완전 일치 파서라 이 표기 차이 하나만으로도 NOT_FOUND가 나는 게 실사용자 리포트로
+/// 확인됨(예: "신창로55길 29" 입력 → 정식 등록명은 "신창로55번길 29") — 오탈자 1건이
+/// 아니라 "번" 누락/과다입력이라는 흔한 한국 도로명주소 입력 클래스 전체를 다룬다.
+///
+/// - "번길"을 포함하면 → "번길"을 "길"로 바꾼 변형을 돌려준다(번을 과다 입력한 드문
+///   경우 대응). 이 함수는 원본 쿼리로 이미 두 유형(ROAD/PARCEL) 다 NOT_FOUND가 난
+///   *뒤에만* 폴백으로 호출되므로 — 원본 "번길" 표기가 애초에 맞았다면 원본 시도에서
+///   이미 매치되어 이 함수까지 오지 않는다. 즉 "이미 정상인데 왜 번을 지우나" 상황은
+///   호출 경로상 발생하지 않는다.
+/// - 아니면, 숫자 뒤에 바로 "길"이 오고 그 숫자런 앞에 "번"이 없는 첫 위치를 찾으면 →
+///   그 "길" 앞에 "번"을 삽입한 변형을 돌려준다(번 누락 보정 — 실사용자 패턴의 절대
+///   다수). 첫 매치만 처리하고 곧장 반환하므로 문자열 뒤쪽에 다른 "길"이 더 있어도
+///   중복 삽입하지 않는다.
+/// - 둘 다 아니면 → `None`(정규화할 게 없으니 폴백 V-World 호출 자체를 하지 않는다).
+fn beon_variant(query: &str) -> Option<String> {
+    if let Some(pos) = query.find("번길") {
+        let beon_len = '번'.len_utf8();
+        let mut variant = String::with_capacity(query.len());
+        variant.push_str(&query[..pos]);
+        variant.push_str(&query[pos + beon_len..]);
+        return Some(variant);
+    }
+
+    let chars: Vec<char> = query.chars().collect();
+    for i in 0..chars.len() {
+        if chars[i] != '길' {
+            continue;
+        }
+        if i == 0 || !chars[i - 1].is_ascii_digit() {
+            continue;
+        }
+        // 숫자런의 시작 인덱스를 뒤로 훑어서 찾는다.
+        let mut start = i - 1;
+        while start > 0 && chars[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        // 숫자런 시작 바로 앞 문자가 이미 '번'이면(위 find("번길")에서 못 잡는 형태는
+        // 없지만 방어적으로 유지) 정상 표기이므로 건너뛴다.
+        if start > 0 && chars[start - 1] == '번' {
+            continue;
+        }
+        let mut variant: String = chars[..i].iter().collect();
+        variant.push('번');
+        variant.push_str(&chars[i..].iter().collect::<String>());
+        return Some(variant);
+    }
+
+    None
+}
+
 async fn handle_geocode_search(
     Query(q): Query<GeocodeSearchQuery>,
 ) -> Result<Json<Vec<GeocodeResultDto>>, StatusCode> {
@@ -940,6 +991,26 @@ async fn handle_geocode_search(
             return Ok(Json(vec![result]));
         }
         // NOT_FOUND(또는 예상 밖 OK 형태) → 다음 addr_type으로 재시도, PARCEL 차례면 그대로 루프 종료.
+    }
+
+    // 원본 쿼리로 ROAD/PARCEL 둘 다 NOT_FOUND면 "OO로N길"/"OO로N번길" 표기 차이 보정
+    // 변형으로 한 번 더 시도한다(beon_variant 문서 참조). 정규화할 게 없으면(None)
+    // V-World를 더 호출하지 않고 그대로 빈 배열로 끝낸다.
+    if let Some(variant) = beon_variant(query_text) {
+        for addr_type in ["ROAD", "PARCEL"] {
+            let resp = fetch_vworld_geocode(client, api_key, &variant, addr_type).await?;
+
+            if let Some((code, text)) = vworld_error_info(&resp) {
+                eprintln!(
+                    "[YuruNavi/Rust] /geocode/search V-World 오류 응답(번 변형, type={addr_type}): {code} - {text}"
+                );
+                return Err(StatusCode::BAD_GATEWAY);
+            }
+
+            if let Some(result) = parse_vworld_geocode(&resp) {
+                return Ok(Json(vec![result]));
+            }
+        }
     }
 
     Ok(Json(Vec::new()))
@@ -1460,5 +1531,46 @@ mod tests {
         // status만 있고 refined/result가 없는 경우(스키마 밖 형태) — panic 없이 None.
         let v: serde_json::Value = serde_json::json!({"response": {"status": "OK"}});
         assert_eq!(parse_vworld_geocode(&v), None);
+    }
+
+    // ── /geocode/search: beon_variant("OO로N길" ↔ "OO로N번길" 폴백 변형) ──
+
+    #[test]
+    fn beon_variant_inserts_beon_when_missing() {
+        // 실사용자 리포트 사례: "번" 누락. V-World 정식 등록명은 "신창로55번길".
+        assert_eq!(
+            beon_variant("신창로55길 29"),
+            Some("신창로55번길 29".to_string())
+        );
+    }
+
+    #[test]
+    fn beon_variant_removes_beon_when_already_present() {
+        // 제거 브랜치: 이 함수는 오직 원본이 이미 NOT_FOUND난 뒤의 폴백으로만 호출되므로,
+        // "번길"이 이미 있는 입력이 여기 들어오는 유일한 실사용 경로는 "번을 과다 입력한"
+        // 드문 경우뿐이다(정상 표기였다면 원본 시도에서 이미 매치되어 폴백 자체가 안 불림).
+        assert_eq!(
+            beon_variant("신창로55번길 29"),
+            Some("신창로55길 29".to_string())
+        );
+    }
+
+    #[test]
+    fn beon_variant_no_gil_pattern_returns_none() {
+        assert_eq!(beon_variant("세종대로 110"), None);
+    }
+
+    #[test]
+    fn beon_variant_gil_without_preceding_digit_returns_none() {
+        // "길"이 있어도 바로 앞이 숫자가 아니면(예: 순우리말 지명) 정규화 대상이 아니다.
+        assert_eq!(beon_variant("논길 15"), None);
+    }
+
+    #[test]
+    fn beon_variant_only_processes_first_match_no_double_insert() {
+        // "번길"이 이미 있는 케이스가 최우선 분기이므로, 뒤쪽에 다른 digit+길이 있어도
+        // 제거 변형 하나만 반환하고 추가 삽입으로 뒤섞인 결과를 만들지 않는다.
+        let variant = beon_variant("신창로55번길 12길 3").expect("번길 포함 — Some이어야 함");
+        assert_eq!(variant, "신창로55길 12길 3");
     }
 }
