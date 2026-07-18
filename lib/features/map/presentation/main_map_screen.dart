@@ -2430,10 +2430,14 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   final AddressSearchService _addressSearchService = AddressSearchService();
   List<AddressResult> _addressResults = [];
   bool _addressLoading = false;
-  // 주소 검색은 상호명 검색과 달리 "제출(엔터/버튼)"이 있어야만 발생하므로,
-  // "아직 검색 안 함"과 "검색했지만 0건"을 구분할 별도 플래그가 필요하다.
+  // "아직 검색 안 함"과 "검색했지만 0건"을 구분할 별도 플래그.
   bool _addressSearched = false;
   String? _addressErrorMessage;
+  // 텍스트 변경(자동완성 포함) 후 자동 검색까지의 디바운스 타이머 — 키 입력마다
+  // 쏘지 않고 입력이 잠시 멈췄을 때만 조회해 쿼터가 있는 외부 지오코더 호출량을
+  // 억제한다(2026-07-18: OS 키보드 자동완성으로 채워넣으면 onSubmitted가 전혀
+  // 발생하지 않아 "아무 반응 없음"으로 보이는 버그 리포트 → 디바운스 자동검색 추가).
+  Timer? _addressDebounce;
 
   @override
   void initState() {
@@ -2456,6 +2460,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
 
   @override
   void dispose() {
+    _addressDebounce?.cancel();
     _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
     _searchFocusNode.removeListener(_onSearchFocusChanged);
@@ -2473,6 +2478,9 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   /// 초기화해 모드가 바뀐 뒤 이전 모드의 잔여 텍스트/결과가 뒤섞여 보이는 걸 막는다.
   void _setSearchMode(_SearchMode mode) {
     if (mode == _searchMode) return;
+    // 모드를 벗어나는 순간 아직 안 쏜 디바운스 검색이 남아있으면 안 된다(예: 주소
+    // 입력 중 모드를 상호명으로 바꿨는데 잠시 후 엉뚱하게 예전 텍스트로 조회가 발동).
+    _addressDebounce?.cancel();
     setState(() {
       _searchMode = mode;
       _addressResults = [];
@@ -2486,10 +2494,12 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     ref.read(poiListProvider.notifier).set(_mapPinPois);
   }
 
-  /// V-World 지오코더 프록시(`AddressSearchService`) 호출 — 상호명 검색과 달리
-  /// 키 입력마다가 아니라 명시적 제출(엔터/검색 버튼)에서만 호출된다(요금·쿼터가
-  /// 있는 외부 지오코더 호출이라 실시간 자동완성처럼 쓰면 안 됨).
+  /// V-World 지오코더 프록시(`AddressSearchService`) 호출. 명시적 제출(엔터/검색
+  /// 버튼)과 디바운스 자동검색(`_onAddressTextChanged`) 양쪽에서 호출된다 — 어느
+  /// 경로로 오든 아직 안 쏜 디바운스 타이머가 남아있으면 중복 호출을 막기 위해
+  /// 먼저 취소한다(명시적 제출이 디바운스보다 먼저 도착한 경우 등).
   Future<void> _searchAddress(String query) async {
+    _addressDebounce?.cancel();
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
     setState(() {
@@ -2499,6 +2509,9 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     try {
       final results = await _addressSearchService.search(trimmed);
       if (!mounted) return;
+      // 응답 대기 중 사용자가 검색창을 지우거나 다른 텍스트로 바꿨으면(디바운스로
+      // 이미 새 검색이 걸렸을 수도 있음) 이 낡은 응답으로 화면을 덮어쓰지 않는다.
+      if (_searchCtrl.text.trim() != trimmed) return;
       setState(() {
         _addressResults = results;
         _addressLoading = false;
@@ -2506,6 +2519,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       });
     } on AddressSearchException catch (e) {
       if (!mounted) return;
+      if (_searchCtrl.text.trim() != trimmed) return;
       setState(() {
         _addressResults = [];
         _addressLoading = false;
@@ -2531,13 +2545,41 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   }
 
   void _onSearchChanged() {
-    // 상호명 실시간 필터링 전용 — 주소 검색은 자동완성이 아니라 명시적 제출로만
-    // 동작해야 하므로(외부 지오코더 쿼터 보호), 주소 모드에서는 키 입력에 반응하지
-    // 않는다(네트워크 호출은 애초에 _searchAddress에서만 발생하지만, 여기서 조기
-    // 반환해 불필요한 rebuild/지도 핀 갱신도 막는다).
-    if (_searchMode != _SearchMode.business) return;
+    if (_searchMode == _SearchMode.address) {
+      _onAddressTextChanged();
+      return;
+    }
+    // 상호명 실시간 필터링 — 키 입력마다 클라이언트에서만 필터링(재조회 없음).
     setState(() {});
     ref.read(poiListProvider.notifier).set(_mapPinPois);
+  }
+
+  /// 주소 모드에서 검색창 텍스트가 바뀔 때마다(키 입력은 물론, OS 키보드
+  /// 자동완성/자동교정처럼 `onSubmitted`를 거치지 않는 경로도 포함) 호출된다.
+  /// 자동완성으로 채워넣기만 하고 엔터/검색버튼을 누르지 않으면 아무 반응이 없어
+  /// "먹통"으로 보인다는 실기기 리포트(2026-07-18) 대응 — 매 키 입력마다 쏘면
+  /// 쿼터가 있는 외부 지오코더를 과다 호출하므로 500ms 디바운스로 묶어 자동검색한다.
+  void _onAddressTextChanged() {
+    _addressDebounce?.cancel();
+    final trimmed = _searchCtrl.text.trim();
+    if (trimmed.isEmpty) {
+      // 필드를 지웠는데 직전 검색 결과/에러/로딩 상태가 남아있으면 안 되므로 idle로
+      // 리셋한다(_addressLoading도 포함 — 지우기 직전 요청이 진행 중이었을 수 있고,
+      // 그 응답은 _searchAddress의 stale-guard가 별도로 무시하지만 로딩 스피너
+      // 자체는 여기서 바로 꺼줘야 "영원히 스피닝" 없이 즉시 idle 문구로 돌아간다).
+      setState(() {
+        _addressResults = [];
+        _addressLoading = false;
+        _addressSearched = false;
+        _addressErrorMessage = null;
+      });
+      return;
+    }
+    if (trimmed.length < 2) return; // 한 글자만으로는 조회하지 않음.
+    _addressDebounce = Timer(
+      const Duration(milliseconds: 500),
+      () => _searchAddress(trimmed),
+    );
   }
 
   Future<void> _fetchAll() async {
