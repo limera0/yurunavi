@@ -113,10 +113,54 @@
 **신규 추가 (2026-07-17 사용자 요청, 미착수)**:
 
 5. **주소 검색 기능** — 검색창에 주소를 입력하면 해당 위치로 지도 포인터 이동.
-   - 기존 13-1 검색창(`main_map_screen.dart`)은 data.go.kr 상가 DB 기반 **상호명 검색**이라
-     이것과는 다른 기능 — 임의 주소 문자열을 좌표로 바꾸는 지오코딩이 별도로 필요할
-     가능성이 높음(도로명주소 API, Nominatim류, 또는 Valhalla 자체 기능 여부는 미조사).
-     착수 전 지오코딩 소스 조사가 선행돼야 할 것으로 보임.
+   **1단계 DONE(2026-07-18)** — 아래 실행 결과 참조. 2단계(완전 자체호스팅)는 juso.go.kr
+   승인 대기 중이라 BLOCKED.
+
+**5번 실행 결과 — 1단계(V-World 프록시), 2단계(자체호스팅)는 승인 대기 (2026-07-18)**:
+사용자가 처음 제안한 data.go.kr "내비게이션용DB"(15050419, 좌표 포함, POI 상가 CSV와
+동일 방식 완전 자체호스팅 목표)를 조사한 결과, POI CSV와 달리 「도로명주소법 시행령
+제46조·시행규칙 제53조」에 따른 신청서+이용목적 심사가 필요해 즉시 다운로드 불가능함을
+확인 — 사용자가 이미 business.juso.go.kr에 실명인증 후 신청서를 제출했으나 승인
+소요기간은 불명. 이중작업을 피하기 위해 승인 대기 중엔 **국토교통부 브이월드(V-World)
+Geocoder API**를 navi 백엔드가 서버사이드로 프록시하는 1단계로 먼저 기능을 띄우고,
+승인된 DB가 도착하면 POI 자체호스팅과 동일한 패턴(SQLite 적재+Rust 엔드포인트)으로
+교체하기로 사용자와 합의(AskUserQuestion으로 확정). 승인된 계획은
+`/home/limera/.claude/plans/floating-greeting-lake.md` 참조.
+
+- **백엔드**(`native/src/main.rs`, 커밋 `41fa455`): 신규 `GET /geocode/search?q=`가
+  ROAD(도로명) 시도 → 결과 없으면 PARCEL(지번) 폴백으로 V-World를 대신 호출. 응답
+  파싱은 실제 키로 라이브 curl 먼저 실행해 정확한 JSON 스키마(`response.status`가
+  `OK`/`NOT_FOUND`/`ERROR`, 성공 시 `refined.text`+`result.point.x/y`)를 확인한 뒤
+  구현(POI/data.go.kr 연동 때와 동일한 "라이브 검증 후 코드 확정" 관례). V-World
+  이용약관("실시간 사용만 가능, 저장 금지")에 따라 응답을 SQLite/파일/캐시 어디에도
+  저장하지 않고 매 요청 그대로 프록시. API 키는 `native/.env`(gitignored)로 서버에만
+  보관 — 예전 POI 서비스키를 클라이언트에 박아 전 사용자가 쿼터를 공유하던 실수
+  ([[project_poi_datasource]]) 반복 방지.
+  - code-auditor 1차 FAIL: `reqwest::Error`의 `Display`가 실패 요청의 URL(쿼리스트링의
+    `key=` 포함)을 그대로 담아, V-World 연결 실패 시 실제 API 키가 서버 로그에 평문으로
+    남는 버그 발견 → `.without_url()`로 수정, 강제 연결실패 테스트로 로그에 키가 전혀
+    안 남는 것까지 재확인 후 2차 PASS.
+- **프론트엔드**(`main_map_screen.dart`+신규 `lib/models/address_result.dart`/
+  `lib/services/address_search_service.dart`, 커밋 `a344726`): 기존 "상호명 검색"
+  바텀시트(13-1)에 "상호명/주소" 토글 추가(기본값 상호명, 기존 동작 100% 보존). 주소
+  모드는 상호명 모드의 실시간(키 입력마다) 클라이언트 필터링과 달리 **명시적 검색
+  실행 시에만** 1회 호출(외부 지오코더 프록시라 자동완성 방식엔 안 맞고 쿼터/ToS
+  관점에서도 맞음). `Poi`/`PoiType`은 건드리지 않고 `AddressResult`를 별도 모델로 분리
+  (카테고리 색상/줌레벨/앰비언트 우선순위에 깊이 얽힌 `PoiType`에 억지로 얹으면 파급
+  범위가 커짐). 목적지 확정 파이프라인은 `_handlePoiTap`의 공통 로직을
+  `_handleLocationTap`으로 추출해 POI 탭과 주소 탭이 공유 — 이후 경로조회 흐름은
+  무수정 재사용.
+  - code-auditor PASS(수정 없이 통과) — `_handlePoiTap`→`_handleLocationTap` 추출이
+    원본과 1:1 동치인지, 모드 전환 시 결과 누수 없는지, 주소모드가 키 입력마다 호출
+    안 하는지, 실패/결과없음 문구가 구분되는지 등 라인 단위로 확인.
+- `flutter analyze` 0 issues, `flutter test` 250개 전부 통과, `flutter build apk --debug`
+  빌드 성공(JDK 21 사용).
+- **미확인 상태로 남은 것**: 헤드리스 서버라 실기기 육안 확인/실주행 검증 못 함 — 다음
+  세션에서 adb install 후 실제 주소 검색→목적지 설정→경로조회 흐름 확인 권장.
+- **2단계(추후, juso.go.kr 승인 후)**: 승인된 DB로 `native/src/bin/ingest_address.rs`
+  신규 → 로컬 SQLite 조회로 `/geocode/search` 내부 구현 교체(클라이언트 무수정, 응답
+  스키마 동일하게 맞추면 됨) → V-World 의존성 제거 또는 로컬 DB 미포함 신축 건물용
+  폴백으로 유지 여부는 그때 판단. 파일 스키마를 아직 몰라 이번 세션엔 착수 안 함.
 
 6. **즐겨찾기 기능 보강** — 집/자주 가는 곳을 POI로 등록.
    - 기존 `places_service.dart`(즐겨찾기·최근장소 로컬 저장)가 이미 존재하나 UI 흐름은
