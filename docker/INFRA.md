@@ -67,10 +67,18 @@ uncommitted 상태로만** 존재했다 — `motorcyclecost.cc`(곡률/신호/U�
 로컬 전용. `docker/backup.sh`가 이 디렉토리 전체(`.git` 포함)를 매일 백업 대상에 포함하도록
 추가함.
 
-**남은 리스크**: 이 소스는 여전히 이 서버에만 존재하는 로컬 커밋이다. 진짜 원격
-백업(예: private GitHub 리포로 push)은 하지 않았음 — 다른 GitHub 계정/조직 리소스를
-새로 만드는 일이라 사용자 승인 없이 진행하지 않음. 원한다면 다음 세션에서
-`git remote add backup <private-repo-url> && git push backup yurunavi-fork`로 처리 가능.
+**✅ 원격 백업 완료(2026-07-18)**: 사용자가 private GitHub 저장소
+`github.com/limera0/valhalla-yurunavi-fork`를 생성 → `git remote add backup
+https://github.com/limera0/valhalla-yurunavi-fork.git && git push backup yurunavi-fork`로
+전체 히스토리(공식 valhalla 14,529커밋 + `cbf9a425b`/`6e374e021`) 푸시 완료. 이제 서버 로컬
++ `docker/backup.sh` 일일 스냅샷 + 이 원격 저장소, 3중으로 보호됨. **앞으로 이 브랜치에
+새 커밋을 만들면 `git push backup yurunavi-fork`도 같이 실행할 것** — origin(공식
+valhalla/valhalla.git)은 여전히 push 금지(사용자 소유 아님, 쓰기 권한도 없음).
+
+**패치 이력**: `patch1`(코스팅 기반) → `patch2-signals` → `patch3-uturn`(모터사이클 U턴
+페널티, `loop/REPORT_PATCH3_uturn.md`) → **`patch4-turnangles`(2026-07-18, 회전각
+slight/right/sharp 임계값 재조정, `loop/REPORT_voice_wording_0718.md` §2 참조, 현재 운영
+배포 중)**. 현재 `docker-compose.yml`의 `image:`는 `valhalla-fork:patch4-turnangles`.
 
 ## 4. 백업
 
