@@ -70,7 +70,37 @@
 ## 3순위 — 기능 공백 (사용자 경험에 실질적 영향)
 
 **기존**:
-- 투어 요약(주행 이력) — 0%, 로그인 불필요 로컬 MVP부터 (RELEASE_ROADMAP 13-3).
+- ~~투어 요약(주행 이력)~~ — **DONE(로컬 MVP, 2026-07-18)**. 승인된 계획
+  (`/home/limera/.claude/plans/greedy-moseying-lantern.md`) 기준 구현. 신규 DB
+  의존성(sqflite) 없이 기존 관례 두 개를 재사용 — 주행 중 GPS 트랙은
+  `lib/core/logging/file_logger.dart`의 파일 append 패턴을 본떠 트립별
+  `.jsonl`로 실시간 기록(`lib/features/navigation/tour_track_writer.dart`
+  +`tour_recorder.dart`), 요약 정보(거리/시간/평균·최고속도/From·To 주소)는
+  `places_service.dart`의 shared_preferences 패턴 재사용
+  (`lib/services/tour_log_service.dart`). 내비 종료 4개 경로(자동종료 타이머/
+  뒤로가기 확인다이얼로그/"안내 종료"/"종료" 버튼) 전부에서 자동 저장되도록
+  `nav_screen.dart`에 훅업. 목록/상세 화면(`lib/features/tour_summary/`) +
+  지도 헤더 히스토리 아이콘 연결(`main_map_screen.dart`). 신규 패키지는
+  `geocoding`(역지오코딩)·`share_plus` 둘뿐.
+  **세션 중 사용자 추가 요청 2건도 함께 반영**: 상세화면 메모(자유 텍스트)
+  기능, 통계+지도 합성 이미지를 OS 공유시트로 보내는 공유 기능(메모는 캡션
+  텍스트로 동봉). **미포함**: 투어 중 사진을 GPS/날짜로 지도에 표시하는
+  기능은 사용자가 "더 한다면"으로 명시한 스트레치였고 카메라/EXIF 기반이
+  전무해 별도 과제로 분리(Phase 2, 미착수).
+  code-auditor 루프에서 실기기 테스트 없이는 못 잡았을 실제 버그 3건 발견·
+  수정: (1) `dispose()` 안전망이 Riverpod `ref.read()`를 언마운트 후 호출해
+  크래시 나던 것(정상 종료 외 경로에서 주행기록이 조용히 유실될 뻔),
+  (2) 공유 이미지 합성 시 `ui.Image`/`Codec` dispose 누락으로 매 공유마다
+  메모리 누수, (3) **`MapLibreMapController.takeSnapshot()`이 M32F 실기기에서
+  90초+ 무한정 멈추는 버그** — 6초 타임아웃 + "지도 없이 헤더 카드만이라도
+  공유" 폴백으로 해결.
+  `flutter analyze` 0 issues, `flutter test` 249개 전부 통과. **가상GPS
+  실주행 검증**(합성 경로 ~3.6km/약2분30초, M32F): 트립 저장→목록/상세
+  화면 렌더링→메모 저장 후 앱 재실행해도 유지→공유(폴백 경로 정상 작동
+  확인)→삭제(인덱스+트랙파일 모두 정리) 전부 실기기에서 직접 확인.
+  커밋 `36398e3`~`e7fb8ae`(9개) + `git push` 완료(`verify/ride-0711`,
+  2026-07-18). 상세는 `RELEASE_ROADMAP.md` 13-3 참조(갱신 필요 — 이 문서
+  갱신 시점 기준 아직 TODO로 남아있음).
 - ~~백그라운드/오버레이 내비게이션~~ — **DONE(Android, 2026-07-17)**. Phase A(포그라운드
   서비스, 커밋 `d4b50e1`/`b883ee5`) + Phase B(PiP 미니창, 커밋 `1e99528`), 둘 다 실기기
   가상GPS 검증 완료(`loop/feedback/VGPS_BGNAV_PHASE_A_0717.md`/`_PHASE_B_0717.md`).

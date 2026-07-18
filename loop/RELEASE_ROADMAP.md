@@ -89,7 +89,7 @@
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
-| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-3부터 진행 |
+| 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
 | 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | TODO — 2026-07-13 발견 계기, 배포 전 필수 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 
@@ -308,9 +308,8 @@
   전혀 없음 — 프로필(`profile_service.dart`)/즐겨찾기·최근장소(`places_service.dart`)/
   저장경로(`route_service.dart`) 전부 `shared_preferences` 로컬 저장뿐, 클라우드 동기화
   자체가 없음. 즉 로그인을 지금 만들어도 연결할 데가 없음.
-- **투어 요약(주행 이력)**: 데이터 모델·저장·화면 **전부 0%** — 관련 파일 자체가 없음
-  (CLAUDE.md가 언급하는 `tour_summary` 모듈은 애초에 생성된 적 없음, [[project_yurunavi]]
-  참조). 로그인 없이 로컬 저장(`shared_preferences` 또는 파일)만으로 1차 MVP 가능.
+- ~~**투어 요약(주행 이력)**: 데이터 모델·저장·화면 전부 0%~~ — **DONE(2026-07-18, 13-3
+  참조)**. 아래 하위 항목 표 및 13-3 실행 결과 섹션 참조.
 - **POI 탐색 UI**: 백엔드는 이미 완성돼 있음 — `lib/services/poi_service.dart`(Overpass
   API로 카페/주유소/주차장/은행/병원/편의점 등 실시간 조회, 235줄, 오모테나시 목적지 스냅
   로직 포함). 그런데 `poiServiceProvider`(`map_providers.dart:278`)가 **어디서도 소비되지
@@ -350,7 +349,7 @@ Phase2" 순서는 최초 트리아지 세션에서의 단순 나열이었지 우
 |---|-----------|-----------|------|
 | 13-1 | POI 탐색 UI (+13-1b 상시표시 레이어) | 백엔드 완성·미사용 상태, UI만 필요 → 최저비용 최고가치 | **DONE** (`2d91e4d`, `27cc8db`) — data.go.kr API 교체 + 검색시트 + 줌기반 상시 POI 레이어(홈/내비 화면) 전부 완료 |
 | 13-2 | 설정: 약관/오픈소스 라이선스 화면 | 완전 독립, 정적 화면, 스토어 컴플라이언스 | **DONE** (`9393af3`, 2026-07-13) — `docs/terms_of_service.md` 초안(법률 검토 전, 배포 전 변호사 검토 필요) 작성 + `TermsScreen`(설정>이용약관) + `showLicensePage`(설정>오픈소스 라이선스, Flutter 내장 API) |
-| 13-3 | 투어 요약(주행 이력) 로컬 MVP | 로그인 불필요, 데이터모델부터 신규 구축 | TODO |
+| 13-3 | 투어 요약(주행 이력) 로컬 MVP | 로그인 불필요, 데이터모델부터 신규 구축 | **DONE(2026-07-18)** — 아래 실행 결과 참조. 커밋 `36398e3`~`e7fb8ae`(9개) |
 | 13-4 | 설정: 도로 선호도 / 내비뷰 설정 | 착수 시 Valhalla costing 옵션 재조사 필요 | TODO |
 | 13-5 | 백그라운드/오버레이 내비게이션 | 네이티브 포그라운드 서비스+알림, 리스크 최고. **`loop/` 야간루프 트랙의 §3.6과 동일 항목** — 그쪽도 "가장 무거움, 단독 세션 권장"으로 이미 표시돼 있음(`MORNING_REPORT_0711_night2.md`). 착수 시 두 트랙 다 여기 하나로 처리하고 양쪽에 완료 기록할 것, 중복 작업 금지 | **DONE(Android만, 2026-07-17)** — iOS는 별도 과제(아래 상세). 커밋 `d4b50e1`/`b883ee5`/`e2f1db9`(Phase A)/`1e99528`/`059eea4`(Phase B) |
 | 13-6 | 로그인/회원가입 | 게이팅할 기능 없음 — 13-3 이후 "클라우드 동기화 필요" 시점에 재평가 | **DONE(Google 로그인만, 2026-07-17)** — 아래 상세. 커밋 `990e22b`/`22c2f69` |
@@ -433,6 +432,59 @@ MapLibre CircleLayer 렌더링)은 재사용 가능성 높음 — 데이터 소�
   세션 시작점" 섹션이 최신 소스.
 - ~~다음 세션: 13-2(설정: 약관/오픈소스 라이선스 화면)부터 이어가면 됨.~~ → 피드백 버그픽스
   (`BUGFIX_progress.md`)가 먼저 끝나야 함.
+
+**13-3 실행 결과 — 로컬 MVP + 메모/공유 (2026-07-18)**:
+`HANDOFF_0717_launch_priorities.md` 사용자 요청 착수분. 승인된 계획
+(`/home/limera/.claude/plans/greedy-moseying-lantern.md`) 기준 구현 — 최초 검토 시
+sqflite 도입을 고려했으나, 사용자 피드백("매 라이딩마다 전체 이력을 통째로 읽고
+다시쓰기 하는 구조는 너무 어렵지 않냐")을 반영해 신규 DB 의존성 없이 기존 코드베이스
+관례 두 개를 재사용하는 방향으로 재설계함:
+- **트랙(궤적) 데이터**: `lib/core/logging/file_logger.dart`의 파일 append 패턴을 그대로
+  본떠, 주행 중 채택된 GPS 포인트(20m 이동 또는 8초+3m 경과마다 1개)를 트립별
+  `tours/tour_<id>.jsonl` 파일에 실시간으로 한 줄씩 append(`lib/features/navigation/
+  tour_track_writer.dart`). 라이딩 내내 전체 궤적을 메모리에 들고 있을 필요가 없어짐.
+- **요약 정보**(거리/시간/평균·최고속도/From·To 주소): `lib/services/places_service.dart`의
+  shared_preferences 패턴 그대로 재사용(`lib/services/tour_log_service.dart`, 키
+  `tour_logs_v1`) — `addRecent`류의 자동 trim은 가져오지 않고 사용자가 명시적으로
+  삭제하기 전까진 전부 보존.
+- **기록 로직**: `lib/features/navigation/tour_recorder.dart` — 순수 Dart 클래스,
+  `nav_screen.dart`의 기존 `navStateProvider` 리스너에 얹어 거리(속도×시간 적분)/최고속도
+  누적. 내비 종료 4개 실제 경로(자동종료 타이머, 뒤로가기 확인다이얼로그의 "종료",
+  "안내 종료" 버튼, "종료" 버튼) 전부에서 신규 `_exitNav()` 헬퍼를 통해 자동 저장, 60초/
+  150m 미만 트립은 저장 안 함(잡음 필터).
+- **역지오코딩**: `geocoding` 패키지(OS 네이티브, API 키 불필요) 신규 도입,
+  `lib/services/geocoding_service.dart` — 실패 시 null 허용, UI는 좌표 문자열로 폴백.
+- **UI**: `lib/features/tour_summary/`(목록 화면: 날짜별 그룹, 카드별 통계+From→To+삭제,
+  상세 화면: 통계 헤더 + MapLibre 지도에 경로선+시작/종료 핀+카메라 자동 프레이밍).
+  `main_map_screen.dart`의 기존 히스토리 아이콘 스텁(`onTourSummary: () {}`)을 연결.
+- **세션 중 사용자 추가 요청 2건도 같은 스코프에서 반영**: (1) 상세화면에 자유 텍스트
+  메모 기능(하단 확장 패널, 명시적 저장, 실패 시 스낵바+초안 보존), (2) 통계 카드+지도를
+  합성한 이미지를 OS 공유시트로 전달하는 공유 기능(`share_plus` 신규 도입, 메모를 캡션
+  텍스트로 동봉). **미포함**: 투어 중 사진을 GPS/날짜로 지도에 표시하는 기능은 사용자가
+  "더 한다면"으로 명시한 스트레치였고 카메라/EXIF 기반이 코드베이스에 전무해 별도
+  과제(Phase 2)로 분리, 미착수.
+- 신규 패키지는 `geocoding`·`share_plus` 둘뿐.
+- **code-auditor 루프에서 실기기 검증 없이는 못 잡았을 실제 버그 3건 발견·수정**:
+  (1) `dispose()` 안전망이 Flutter가 위젯을 이미 unmount한 뒤 Riverpod `ref.read()`를
+  호출해 크래시 — `_exitNav()` 경로 외 종료 시 주행기록이 조용히 유실될 뻔함, 회귀
+  테스트로 고정. (2) 공유 이미지 합성 시 `ui.Image`/`Codec` dispose 누락 — 공유 버튼
+  누를 때마다 메모리 누수, `lib/services/poi_icon_renderer.dart` 기존 관례로 수정.
+  (3) **`MapLibreMapController.takeSnapshot()`이 M32F 실기기에서 90초+ 무한정 멈추는
+  버그** — 지도 스타일이 인라인 JSON이라 네이티브 `MapSnapshotter`의 독립 재렌더링이
+  해석 불가능한 스타일 참조에 걸려 멈추는 것으로 추정(완전한 근본원인 규명은 서드파티
+  플러그인 네이티브 코드 영역이라 보류). 대안으로 검토한 "지도를 RepaintBoundary로 직접
+  캡처"는 이 앱의 MapLibreMap이 기본 SurfaceView 렌더링(`useHybridComposition` 전역
+  static 플래그, 앱 전체 지도에 영향)이라 배제. 6초 타임아웃 + "지도 없이 헤더 카드만
+  이라도 공유" 폴백으로 해결, 실기기 재검증 완료(공유시트 정상 표시 확인).
+- `flutter analyze` 0 issues, `flutter test` 249개 전부 통과.
+- **가상 GPS 실주행 검증**(M32F, 합성 경로 ~3.6km/약 2분 30초 — 실좌표 기반 Valhalla
+  라우팅은 아니고 서비스 지역 내 임의 좌표 간 직접 생성한 CSV): 트립 저장(로그 확인)→
+  목록 화면에 정확한 통계로 표시→상세 화면 지도/폴리라인/핀 렌더링→메모 저장 후 앱
+  재실행(재설치)해도 유지→공유(헤더 폴백 경로로 공유시트 정상 표시)→삭제(인덱스+트랙
+  파일 모두 정리) 전부 실기기에서 직접 확인. 최고속도 110km/h로 찍힌 건 테스트용 합성
+  경로가 65→85→65km/h로 비현실적으로 급변한 데 대해 기존(이번 세션 무관) 속도 보정
+  로직이 순간 오버슈트한 것으로 판단 — 실주행에서 재확인 권장.
+- `git push` 완료(`verify/ride-0711`, 2026-07-18).
 
 **13-5 실행 결과 — Android 완료, iOS 별도 과제 (2026-07-17)**:
 `HANDOFF_0717_launch_priorities.md` 3순위 착수분. 착수 전 레퍼런스 조사 결과 두 가지가
