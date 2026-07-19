@@ -720,7 +720,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (dest == null) return;
     setState(() => _isRerouting = true);
     final navState = ref.read(navStateProvider);
-    final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    // 단순 speedKmh>2 게이트는 라이더가 재탐색 사이에 잠깐 감속/정차하면
+    // heading을 null로 버려 offsetOrigin이 no-op이 되고, 그 시점에 다시
+    // 이탈→재탐색이 걸리면 방향 힌트 없이 나가 제자리 유턴을 유도한다(실주행
+    // 2회 이상 연속 재탐색에서 재현됨). _resolveHeading()은 이미 카메라
+    // bearing 쪽에서 검증된 "저속 시 마지막 관측 heading 유지" 폴백을 갖고
+    // 있으므로 재탐색에도 동일하게 적용한다.
+    final heading =
+        navState != null ? _resolveHeading(navState.speedKmh, navState.headingDeg) : null;
     debugPrint('YNAV_REROUTE hdg_src spd=${navState?.speedKmh} rawHdg=${navState?.headingDeg} used=$heading');
     final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
     final routeOrigin = LatLng(off.lat, off.lng);
@@ -1505,7 +1512,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (origin == null || dest == null) return;
     // _reroute()와 동일한 heading 오프셋 — 안 하면 재탐색 버튼도 반대편(뒤쪽)
     // 엣지에 스냅되어 제자리 유턴을 유도할 수 있다 (RECON_heading_reroute.md §3).
-    final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    // _resolveHeading()으로 저속/정차 시에도 마지막 관측 heading을 유지한다
+    // (단순 speedKmh>2 게이트의 2회+ 연속 재탐색 버그, 위 _reroute()와 동일).
+    final heading =
+        navState != null ? _resolveHeading(navState.speedKmh, navState.headingDeg) : null;
     final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
     final routeOrigin = LatLng(off.lat, off.lng);
     try {
