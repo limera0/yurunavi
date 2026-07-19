@@ -1,6 +1,6 @@
 services:
   valhalla:
-    image: valhalla-fork:patch5-uturn-allowance
+    image: valhalla-fork:patch6-turnangle2
     container_name: yurunavi-valhalla
     restart: unless-stopped
     ports:

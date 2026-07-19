@@ -1485,12 +1485,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _originalSelectedIdx = currentMapState.selectedRouteIdx;
     _originalAllRoutes = currentMapState.allRoutes;
     _originalAllRouteMeta = currentMapState.allRouteMeta;
-    final origin = ref.read(navStateProvider)?.pos;
+    final navState = ref.read(navStateProvider);
+    final origin = navState?.pos;
     final dest = widget.destination;
     if (origin == null || dest == null) return;
+    // _reroute()와 동일한 heading 오프셋 — 안 하면 재탐색 버튼도 반대편(뒤쪽)
+    // 엣지에 스냅되어 제자리 유턴을 유도할 수 있다 (RECON_heading_reroute.md §3).
+    final heading = (navState != null && navState.speedKmh > 2) ? navState.headingDeg : null;
+    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
+    final routeOrigin = LatLng(off.lat, off.lng);
     try {
       final routes = await RoutingService.fetchRoutes(
-        origin: origin,
+        origin: routeOrigin,
         destination: dest,
         waypoints: widget.waypoints.sublist(_passedWaypointCount),
       );
