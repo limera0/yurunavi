@@ -298,14 +298,25 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final lat = (dest['lat'] as num?)?.toDouble();
     final lon = (dest['lon'] as num?)?.toDouble();
     if (lat == null || lon == null) return;
+    final courseIdx = (dest['courseIdx'] as num?)?.toInt();
+    final noAutostart = ((dest['noAutostart'] as num?)?.toDouble() ?? 0.0) >= 1.0;
 
-    dev.log('E2E_HARNESS dest=$lat,$lon start', name: 'E2EHarness');
+    dev.log('E2E_HARNESS dest=$lat,$lon courseIdx=$courseIdx start',
+        name: 'E2EHarness');
     await _applyDestination(LatLng(lat, lon));
 
     final gotRoutes = await _e2eWaitForRoutes();
     if (!mounted) return;
     if (!gotRoutes) {
       dev.log('E2E_HARNESS timeout waiting for routes', name: 'E2EHarness');
+      return;
+    }
+    if (courseIdx != null) {
+      ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(courseIdx);
+    }
+    if (noAutostart) {
+      dev.log('E2E_HARNESS routes ready, autostart 생략(비교 시트 유지)',
+          name: 'E2EHarness');
       return;
     }
     _startNavigation();

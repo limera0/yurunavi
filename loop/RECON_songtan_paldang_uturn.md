@@ -265,8 +265,47 @@ code-auditor 1라운드 FAIL, 지적사항 반영:
 수정 후 `flutter analyze` 0 issues, `flutter test` 254/254(신규 루프 감지 유닛테스트
 4개 포함 — 직선/합성 루프/사인파 굽이길(오탐 안 함)/경계값).
 
+## 9. 실기기 검증 (2026-07-19, M32F + 가상GPS)
+
+curl 기반 검증(§8)에 이어 실제 안드로이드 기기(M32F, `RZ8RC1N3V9W`)에 디버그 APK를
+설치하고 가상 GPS(`gpsinjector`, 송탄 좌표에 정지 상태로 고정)로 실측했다. 실행 경로:
+Valhalla 로컬(`localhost:8002`)이 아니라 프로덕션 호스트(`https://valhalla.westinx.com`)를
+그대로 타서 실사용자 조건과 동일.
+
+**E2E 하네스 확장**: 기존 `e2e_dest_lat`/`e2e_dest_lon` 외에 `e2e_course_idx`(시작할
+코스, 기본값은 국도=2라서 명시 필요)와 `e2e_no_autostart`(경로만 계산하고 코스 비교
+시트에서 멈춤 — 3코스 비교 스크린샷 검증용)를 추가했다. 둘 다 기존과 동일하게
+`kDebugMode` 게이트 안에서만 동작하는 디버그 전용 확장(`MainActivity.kt` +
+`main_map_screen.dart`).
+
+**결과 — 코스 비교 시트 스크린샷** (마스터가 원래 첨부한 "동그라미 친 유턴" 스크린샷과
+동일한 화면 구성으로 비교 가능):
+
+| 코스 | 이전(마스터 실측, 첨부 이미지) | 이번(실기기, 수정 후) |
+|---|---|---|
+| 시골길로 느긋하게 | 98km, 3시간15분 (유턴 포함) | **89km, 2시간58분, 재미55** |
+| 지방도로 여유롭게 | 98km, 2시간44분 (유턴 포함, 시골길과 사실상 동일 경로) | **90km, 2시간29분, 재미49** |
+| 국도로 빠르게 | 86km, 1시간55분 | **88km, 1시간57분, 재미38** (거의 무변화 — 애초에 루프 없었음) |
+
+지도에 그려진 시골길 경로(금색 실선)가 오산-수원-성남-서울 경계를 지나 목적지(팔당,
+지도 우상단 빨간 마커)까지 매끄럽게 이어지며, 원본 스크린샷에서 동그라미 쳐졌던
+"동쪽으로 갔다가 유턴해서 서쪽으로" 되돌아오는 구간이 **육안으로 사라짐** 확인. 시골길과
+지방도 카드도 이제 확연히 다른 거리·시간·재미 점수로 분리됨(이전엔 둘 다 98km로 사실상
+동일 코스였음).
+
+내비게이션 실제 시작(별도 실행)에서도 총 거리 87.5km·ETA 2시간58분으로 표시됨 — 평균
+속도 87.5÷2.967≈29.5km/h가 시골길 코스 전용 속도 상수(30km/h, `_speedCountrysideKmh`)와
+정확히 일치해 `e2e_course_idx=0`이 의도대로 반영됐음을 교차 확인(국도 코스였다면
+45km/h 기준 ETA가 약 1시간57분이 됐어야 함).
+
+**결론**: §8의 curl 기반 검증이 실기기·프로덕션 Valhalla 환경에서도 그대로 재현됨.
+마스터가 지적한 두 가지 문제(①유턴 잔존 ②시골길-지방도 코스 미분화) 전부 실기기
+스크린샷으로 해소 확인.
+
 ---
 
 *작성: 2026-07-18~19, `/goal` 세션. §1-7은 초기 조사(costing 튜닝 한계 확인), §8은 마스터
-피드백 이후 재조사·구현·검증. `lib/services/routing_service.dart`,
-`test/routing_service_loop_detection_test.dart` 변경 완료(§8.6).*
+피드백 이후 재조사·구현·검증(curl), §9는 실기기 검증. `lib/services/routing_service.dart`,
+`test/routing_service_loop_detection_test.dart`,
+`android/app/src/main/kotlin/com/westinx/yurunavi/MainActivity.kt`,
+`lib/features/map/presentation/main_map_screen.dart` 변경 완료.*

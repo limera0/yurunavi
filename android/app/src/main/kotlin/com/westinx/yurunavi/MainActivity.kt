@@ -102,6 +102,13 @@ class MainActivity : FlutterActivity() {
         val lat = extras?.getString("e2e_dest_lat")?.toDoubleOrNull()
         val lon = extras?.getString("e2e_dest_lon")?.toDoubleOrNull()
         if (lat == null || lon == null) return null
-        return mapOf("lat" to lat, "lon" to lon)
+        // 선택: e2e_course_idx(0=시골길/1=지방도로/2=국도) — 없으면 Dart 쪽 기본값(국도) 유지.
+        val courseIdx = extras.getString("e2e_course_idx")?.toDoubleOrNull()
+        // 선택: e2e_no_autostart=true면 경로 계산까지만 하고 코스 비교 시트에서 멈춘다
+        // (3코스 비교 스크린샷 검증용, 1.0=true/그 외=false로 Dart에 bool 전달).
+        val noAutostart = if (extras.getBoolean("e2e_no_autostart", false)) 1.0 else 0.0
+        val out = mutableMapOf("lat" to lat, "lon" to lon, "noAutostart" to noAutostart)
+        if (courseIdx != null) out["courseIdx"] = courseIdx
+        return out
     }
 }
