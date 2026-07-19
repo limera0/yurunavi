@@ -328,6 +328,44 @@ class FavoritePlacesNotifier extends AsyncNotifier<List<FavoritePlace>> {
   }
 }
 
+/// 즐겨찾기 카테고리 목록(설정 > 즐겨찾기 카테고리 관리에서 편집). 즐겨찾기
+/// 등록 시트의 카테고리 선택 칩이 이 목록을 그대로 보여준다.
+final favoriteCategoriesProvider =
+    AsyncNotifierProvider<FavoriteCategoriesNotifier, List<String>>(
+        FavoriteCategoriesNotifier.new);
+
+class FavoriteCategoriesNotifier extends AsyncNotifier<List<String>> {
+  @override
+  Future<List<String>> build() =>
+      ref.read(placesServiceProvider).loadCategories();
+
+  Future<void> add(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final current = state.value ?? const <String>[];
+    if (current.contains(trimmed)) return;
+    final updated = [...current, trimmed];
+    await ref.read(placesServiceProvider).saveCategories(updated);
+    state = AsyncData(updated);
+  }
+
+  Future<void> rename(int index, String newName) async {
+    final trimmed = newName.trim();
+    if (trimmed.isEmpty) return;
+    final current = [...(state.value ?? const <String>[])];
+    if (index < 0 || index >= current.length) return;
+    current[index] = trimmed;
+    await ref.read(placesServiceProvider).saveCategories(current);
+    state = AsyncData(current);
+  }
+
+  Future<void> remove(String name) async {
+    final current = [...(state.value ?? const <String>[])]..remove(name);
+    await ref.read(placesServiceProvider).saveCategories(current);
+    state = AsyncData(current);
+  }
+}
+
 final recentRoutesProvider =
     AsyncNotifierProvider<RecentRoutesNotifier, List<RecentRoute>>(
         RecentRoutesNotifier.new);

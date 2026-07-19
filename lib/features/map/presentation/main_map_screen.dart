@@ -1071,16 +1071,32 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Column(
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 2),
-                      Text(subtitle,
-                          style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade600)),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(title,
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 2),
+                            Text(subtitle,
+                                style: TextStyle(
+                                    fontSize: 13, color: Colors.grey.shade600)),
+                          ],
+                        ),
+                      ),
+                      // 실제 POI(이름이 있는 장소)를 확인 중일 때만 즐겨찾기 등록을
+                      // 허용 — 지도 빈 곳을 무심코 탭한 좌표까지 굳이 저장 대상으로
+                      // 노출하지 않는다.
+                      if (poi != null)
+                        _FavoriteStarButton(
+                          lat: tapped.latitude,
+                          lng: tapped.longitude,
+                          initialName: title,
+                        ),
                     ],
                   ),
                 ),
@@ -2336,6 +2352,206 @@ class _ClusterDot extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 즐겨찾기 ☆/★ 토글 (POI 팝업/주소·상호명 검색 결과 카드 공용)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 검색 결과 카드/POI 확인시트 우측 상단에 붙는 ☆(미등록)/★(등록됨) 아이콘.
+/// [favoritePlacesProvider]의 현재 목록과 (lat, lng)를 비교해 즉시 반영되므로
+/// 별도 상태를 들고 있지 않다 — 등록/해제 후에도 provider 변경만으로 리빌드된다.
+class _FavoriteStarButton extends ConsumerWidget {
+  final double lat;
+  final double lng;
+  final String initialName;
+
+  const _FavoriteStarButton({
+    required this.lat,
+    required this.lng,
+    required this.initialName,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final favorites = ref.watch(favoritePlacesProvider).value ?? const [];
+    final existing = FavoritePlace.findByLocation(favorites, lat, lng);
+    final isFav = existing != null;
+
+    return InkWell(
+      customBorder: const CircleBorder(),
+      onTap: () async {
+        if (isFav) {
+          await ref.read(favoritePlacesProvider.notifier).remove(existing.id);
+          return;
+        }
+        await _showAddFavoriteSheet(
+          context,
+          ref,
+          lat: lat,
+          lng: lng,
+          initialName: initialName,
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(
+          isFav ? Icons.star_rounded : Icons.star_border_rounded,
+          size: 20,
+          color: isFav ? const Color(0xFFFFB300) : Colors.grey.shade400,
+        ),
+      ),
+    );
+  }
+}
+
+/// ☆ 탭 시 뜨는 즐겨찾기 등록 시트 — 이름(수정 가능, 기본값은 카드에 이미
+/// 표시돼 있던 이름/주소)과 카테고리(설정 > 즐겨찾기 카테고리에서 관리하는
+/// 목록 + 항상 존재하는 "미분류")를 고른 뒤 확인하면 저장하고 시트를 닫는다.
+Future<void> _showAddFavoriteSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required double lat,
+  required double lng,
+  required String initialName,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _AddFavoriteSheet(lat: lat, lng: lng, initialName: initialName),
+  );
+}
+
+class _AddFavoriteSheet extends ConsumerStatefulWidget {
+  final double lat;
+  final double lng;
+  final String initialName;
+
+  const _AddFavoriteSheet({
+    required this.lat,
+    required this.lng,
+    required this.initialName,
+  });
+
+  @override
+  ConsumerState<_AddFavoriteSheet> createState() => _AddFavoriteSheetState();
+}
+
+class _AddFavoriteSheetState extends ConsumerState<_AddFavoriteSheet> {
+  late final TextEditingController _nameCtrl =
+      TextEditingController(text: widget.initialName);
+  String _selectedCategory = kUncategorizedFavoriteCategory;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirm() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return;
+    await ref.read(favoritePlacesProvider.notifier).add(
+          FavoritePlace(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            name: name,
+            lat: widget.lat,
+            lng: widget.lng,
+            category: _selectedCategory,
+          ),
+        );
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final categoriesAsync = ref.watch(favoriteCategoriesProvider);
+    final categories = [
+      kUncategorizedFavoriteCategory,
+      ...(categoriesAsync.value ?? const <String>[]),
+    ];
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('즐겨찾기 등록',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _nameCtrl,
+                decoration: InputDecoration(
+                  labelText: '이름',
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('카테고리',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: categories.map((c) {
+                  final selected = c == _selectedCategory;
+                  return ChoiceChip(
+                    label: Text(c),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _selectedCategory = c),
+                    labelStyle: const TextStyle(fontSize: 12),
+                    visualDensity: VisualDensity.compact,
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF008080),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: _confirm,
+                  child: const Text('확인'),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 내 장소 시트 (즐겨찾기 + 최근 경로)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2395,9 +2611,20 @@ class _PlacesSheet extends ConsumerWidget {
                               color: AppColors.primary, size: 22),
                           title: Text(p.name,
                               style: const TextStyle(fontSize: 14)),
-                          subtitle: Text(
-                              '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}',
-                              style: const TextStyle(fontSize: 10)),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                  '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}',
+                                  style: const TextStyle(fontSize: 10)),
+                              Text(p.category,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline, size: 18),
                             onPressed: () => onRemoveFavorite(p.id),
@@ -2934,6 +3161,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
           leading: const Icon(Icons.location_on_outlined, size: 20),
           title: Text(r.address, style: const TextStyle(fontSize: 14)),
           subtitle: Text(_formatDistance(dist), style: const TextStyle(fontSize: 11)),
+          trailing: _FavoriteStarButton(
+            lat: r.location.latitude,
+            lng: r.location.longitude,
+            initialName: r.address,
+          ),
           onTap: () => widget.onSelectAddress(r),
         );
       }).toList(),
@@ -3006,6 +3238,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                   overflow: TextOverflow.ellipsis,
                 ),
             ],
+          ),
+          trailing: _FavoriteStarButton(
+            lat: poi.location.latitude,
+            lng: poi.location.longitude,
+            initialName: poi.name,
           ),
           onTap: () => widget.onSelectDest(poi),
         );

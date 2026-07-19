@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_providers.dart';
 import '../../../models/map_language.dart';
 import '../../profile/presentation/profile_screen.dart';
+import 'favorite_categories_screen.dart';
 import 'terms_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -41,6 +42,15 @@ class SettingsScreen extends ConsumerWidget {
           // TODO Phase 2: 안내 음성 / 안내 언어
 
           const _SectionHeader(title: '앱 설정'),
+          ListTile(
+            leading: const Icon(Icons.label_outline),
+            title: const Text('즐겨찾기 카테고리'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FavoriteCategoriesScreen()),
+            ),
+          ),
+          const Divider(height: 1),
           // TODO Phase 2: 다크모드
           // TODO Phase 2: 지도 다운로드
 
