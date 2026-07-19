@@ -179,6 +179,34 @@ class RoutingService {
 
   static const double _provincialDetourThreshold = 1.3;
 
+  // ── 제자리 루프(신갈JC형) 회피 ────────────────────────────────────────
+  // RECON_songtan_paldang_uturn.md 참조: costing 튜닝으로는 없앨 수 없는 유형의
+  // "제자리 루프"가 실측으로 확인됨(신갈JC 인근 인터체인지 연결로) — 경로가
+  // [_loopMinPathM] 이상 진행한 뒤 [_loopProximityM] 이내로 되돌아오면, 루프
+  // 중심 주변에 경유점을 뿌려 origin→경유점→destination으로 재요청한다. 대안이
+  // 루프 중심을 [_loopClearanceM] 이상 벗어나고(=실제로 그 지점을 피함) 원본
+  // 대비 [_loopAcceptRatio] 배 이내 거리면 교체하고, 그렇지 않으면(=진짜 산길
+  // 스위치백 등 지형상 불가피) 원본을 그대로 둔다. "우회해도 더/비슷하게
+  // 짧아지는가"만으로 판정하므로 헤어핀 각도 등 임의의 임계값이 필요 없다 —
+  // 판교-무릉(강원도 산길 스위치백) 실측으로 오탐 없음을 확인함(§7 참조).
+  static const double _loopProximityM = 1500;
+  static const double _loopMinPathM = 5000;
+  static const double _loopSearchWindowM = 30000;
+  static const double _loopCoarseStepM = 200;
+  // 2026-07-19 실측 튜닝: 3000m는 신갈JC 실제 사례(loopCenter 기준 clearance
+  // 2464m)를 걸러내 버려 2000m로 낮춤 — loop/RECON_songtan_paldang_uturn.md §8
+  // 검증표 참조.
+  static const double _loopClearanceM = 2000;
+  static const double _loopAcceptRatio = 1.02;
+  static const List<double> _loopSweepRadiiKm = [6, 15];
+  static const List<int> _loopSweepAnglesDeg = [
+    0, 45, 90, 135, 180, 225, 270, 315,
+  ];
+  // 긴 경로(400km+)는 신갈형 병목이 두 곳 이상 연속될 수 있음(청파동-춘천
+  // 실측: 1차 회피 후에도 다른 지점에 2번째 루프가 남아있었음) — 매 라운드
+  // 루프가 없어질 때까지 반복하되 무한루프 방지로 상한을 둔다.
+  static const int _loopEscapeMaxRounds = 3;
+
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
   static const _cacheMaxSize = 20;
@@ -425,6 +453,10 @@ class RoutingService {
     // ── 시골길 1.3배 폴백 (main.rs 와 동작 일치) ──────────────────
     // 시골(0) 거리가 지방(1) 거리의 1.3배 이상이면 과다 우회로 보고
     // balanced costing 으로 시골 경로만 재요청해 교체한다.
+    // 아래에서 실제로 results[0]/[1]을 교체했는지 추적 — 뒤이은 루프 회피
+    // 단계가 재요청 시 어느 costing을 써야 하는지 판단하는 데 쓰인다.
+    bool ruralReplacedByBalanced = false;
+    bool provincialReplacedByBalanced = false;
     if (results.length == 3) {
       final ruralKm = results[0].distanceKm;
       final provKm = results[1].distanceKm;
@@ -475,6 +507,7 @@ class RoutingService {
                 durationMin: realisticMins,
                 maneuvers: maneuvers,
               );
+              ruralReplacedByBalanced = true;
               dev.log(
                 'balanced 교체 완료: ${km.toStringAsFixed(1)}km '
                 '${realisticMins}m',
@@ -542,6 +575,7 @@ class RoutingService {
                 durationMin: realisticMins,
                 maneuvers: maneuvers,
               );
+              provincialReplacedByBalanced = true;
               dev.log(
                 'balanced 교체 완료: ${km.toStringAsFixed(1)}km '
                 '${realisticMins}m',
@@ -557,7 +591,218 @@ class RoutingService {
       }
     }
 
-    return results;
+    // ── 제자리 루프 회피 (전 코스 공통, 위 폴백들 이후 최종 결과에 적용) ──
+    // effectiveCostingOptions: 위 시골길/지방도로 balanced 폴백이 실제로
+    // results[i]를 교체했다면 그 costing으로, 아니면 원래 costingOptions[i]로
+    // 재요청해야 한다 — 그렇지 않으면 balanced로 이미 완화된 경로를 원래(더
+    // 극단적인) costing으로 다시 요청해 완화 효과가 무효화된다.
+    final effectiveCostingOptions = List<Map<String, dynamic>>.from(costingOptions);
+    if (results.length == 3) {
+      if (ruralReplacedByBalanced) {
+        effectiveCostingOptions[0] = _ruralBalancedOpts;
+      }
+      if (provincialReplacedByBalanced) {
+        effectiveCostingOptions[1] = _provincialBalancedOpts;
+      }
+    }
+
+    final escaped = await Future.wait([
+      for (int i = 0; i < results.length; i++)
+        _escapeLoopIfPossible(
+          results[i],
+          effectiveCostingOptions[i],
+          _courseSpeeds[i],
+        ).catchError((Object e) {
+          dev.log('루프 회피 로직 실패(무시, 원본 유지): $e',
+              name: 'RoutingService', level: 900);
+          return results[i];
+        }),
+    ]);
+
+    return escaped;
+  }
+
+  /// [result]의 경로에서 "제자리 루프"(일정 거리 이상 진행한 뒤 근처로
+  /// 되돌아오는 구간)를 감지해, 가능하면 그 지점을 피해가는 대안으로
+  /// 교체한다. 400km+ 장거리 경로는 이런 병목이 두 곳 이상 있을 수 있어
+  /// [_loopEscapeMaxRounds]까지 반복한다. 루프가 없거나, 있어도 대안이
+  /// 원본보다 짧거나 비슷하지 않으면(=지형상 불가피) 그 시점 결과를 그대로
+  /// 반환한다. 상세 설계·검증 데이터는 loop/RECON_songtan_paldang_uturn.md
+  /// §6-8 참조.
+  static Future<RouteResult> _escapeLoopIfPossible(
+    RouteResult result,
+    Map<String, dynamic> costingOpts,
+    double courseSpeedKmh,
+  ) async {
+    var current = result;
+    for (int round = 0; round < _loopEscapeMaxRounds; round++) {
+      if (current.points.length < 2) return current;
+      final loopCenter = findLoopCenter(current.points);
+      if (loopCenter == null) return current;
+
+      final origin = current.points.first;
+      final destination = current.points.last;
+      dev.log(
+        '제자리 루프 감지(round $round): center='
+        '${loopCenter.latitude.toStringAsFixed(4)},'
+        '${loopCenter.longitude.toStringAsFixed(4)} → 경유점 탐색 시작',
+        name: 'RoutingService',
+      );
+
+      RouteResult? best;
+      double bestKm = double.infinity;
+
+      for (final radiusKm in _loopSweepRadiiKm) {
+        final candidates = await Future.wait([
+          for (final angleDeg in _loopSweepAnglesDeg)
+            _tryViaRoute(
+              origin,
+              destination,
+              _bearingDistance.offset(loopCenter, radiusKm * 1000, angleDeg),
+              costingOpts,
+            ),
+        ]);
+
+        for (final candidate in candidates) {
+          if (candidate == null) continue;
+          final clearanceM = candidate.points
+              .map((p) => _bearingDistance(p, loopCenter))
+              .reduce((a, b) => a < b ? a : b);
+          if (clearanceM < _loopClearanceM) continue; // 루프 지점을 여전히 지남
+          if (candidate.distanceKm > current.distanceKm * _loopAcceptRatio) {
+            continue; // 원본보다 유의미하게 더 돎
+          }
+          if (candidate.distanceKm < bestKm) {
+            best = candidate;
+            bestKm = candidate.distanceKm;
+          }
+        }
+        if (best != null) break; // 더 작은 반경에서 찾았으면 더 큰 우회는 안 봄
+      }
+
+      if (best == null) {
+        dev.log(
+          '루프 회피 대안 없음(round $round) → 이 시점 결과 유지(지형상 불가피로 판단)',
+          name: 'RoutingService',
+        );
+        return current;
+      }
+
+      final km = best.distanceKm;
+      final realisticMins = (km / courseSpeedKmh * 60).round();
+      dev.log(
+        '루프 회피 성공(round $round): ${current.distanceKm.toStringAsFixed(1)}km → '
+        '${km.toStringAsFixed(1)}km (경유점 재요청으로 교체)',
+        name: 'RoutingService',
+      );
+      current = RouteResult(
+        points: best.points,
+        distanceKm: km,
+        durationMin: realisticMins,
+        maneuvers: best.maneuvers,
+      );
+    }
+    return current;
+  }
+
+  /// origin→via→destination 2-leg 경로를 시도한다. 실패(네트워크 오류·논라우트)
+  /// 시 null — 호출자가 조용히 다음 후보로 넘어간다. durationMin은 호출자가
+  /// 코스별 실효속도로 재계산하므로 0으로 둔다.
+  static Future<RouteResult?> _tryViaRoute(
+    LatLng origin,
+    LatLng destination,
+    LatLng via,
+    Map<String, dynamic> costingOpts,
+  ) async {
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$_valhallaBase/route'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'locations': [
+                {'lon': origin.longitude, 'lat': origin.latitude},
+                {'lon': via.longitude, 'lat': via.latitude},
+                {'lon': destination.longitude, 'lat': destination.latitude},
+              ],
+              'costing': 'motorcycle',
+              'costing_options': {'motorcycle': costingOpts},
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return null;
+
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final trip = data['trip'] as Map<String, dynamic>?;
+      final legs = (trip?['legs'] as List?) ?? [];
+      if (legs.isEmpty) return null;
+
+      final pts = _extractPoints(legs);
+      if (pts.isEmpty) return null;
+
+      final km = legs.fold<double>(
+        0,
+        (sum, leg) =>
+            sum + ((leg['summary']?['length'] as num?) ?? 0).toDouble(),
+      );
+      final maneuvers = _collectManeuvers(legs);
+      return RouteResult(
+        points: pts,
+        distanceKm: km,
+        durationMin: 0,
+        maneuvers: maneuvers,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// 경로가 [_loopMinPathM] 이상의 도로를 지나온 뒤 [_loopProximityM] 이내로
+  /// 되돌아오는 "제자리 루프" 구간이 있으면 그 지점을 반환한다(없으면 null).
+  /// 순수 동기 geometry 계산 — 네트워크 호출 없음. 수백 km 경로에서도 빠르게
+  /// 돌기 위해 원본 폴리라인을 [_loopCoarseStepM] 간격으로 성기게 리샘플링한
+  /// 뒤 그 위에서만 스캔한다(정밀 보간 불필요 — 루프 유무 판정용 근사).
+  static LatLng? findLoopCenter(List<LatLng> points) {
+    final coarse = _resampleByDistance(points, _loopCoarseStepM);
+    if (coarse.length < 2) return null;
+
+    final n = coarse.length;
+    final cumM = List<double>.filled(n, 0.0);
+    for (int i = 1; i < n; i++) {
+      cumM[i] = cumM[i - 1] + _bearingDistance(coarse[i - 1], coarse[i]);
+    }
+
+    for (int i = 0; i < n; i++) {
+      int j = i;
+      while (j < n && cumM[j] - cumM[i] < _loopMinPathM) {
+        j++;
+      }
+      while (j < n && cumM[j] - cumM[i] <= _loopSearchWindowM) {
+        if (_bearingDistance(coarse[i], coarse[j]) <= _loopProximityM) {
+          return coarse[i];
+        }
+        j++;
+      }
+    }
+    return null;
+  }
+
+  /// [points]를 누적 거리 기준 [stepM] 간격으로 성기게 리샘플링한다(보간 없이
+  /// 가장 가까운 원본 점만 선택 — [findLoopCenter]의 근사 스캔용).
+  static List<LatLng> _resampleByDistance(List<LatLng> points, double stepM) {
+    if (points.isEmpty) return const [];
+    final out = <LatLng>[points.first];
+    double acc = 0.0;
+    double nextAt = stepM;
+    for (int i = 0; i < points.length - 1; i++) {
+      acc += _bearingDistance(points[i], points[i + 1]);
+      if (acc >= nextAt) {
+        out.add(points[i + 1]);
+        nextAt += stepM;
+      }
+    }
+    if (out.last != points.last) out.add(points.last);
+    return out;
   }
 
   /// leg별 maneuvers를 전역 shape 인덱스로 변환해 수집.
