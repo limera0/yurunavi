@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -9,9 +11,14 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'features/map/providers/map_providers.dart';
 import 'firebase_options.dart';
+import 'services/tour_recovery_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 프로세스 강제종료(태스크 스와이프/OEM 배터리 매니저/OOM)로 인해 요약이
+  // 저장되지 못한 고아 투어 트랙을 백그라운드에서 복구한다 — 앱 시작을
+  // 지연시키면 안 되므로 await 없이 fire-and-forget으로 호출한다.
+  unawaited(TourRecoveryService().recoverOrphans());
   await initCrashReporting(DefaultFirebaseOptions.currentPlatform);
   await FileLogger.init();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
