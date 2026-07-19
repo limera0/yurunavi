@@ -876,20 +876,34 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final tourLog = await _tourRecorder.finish(endPos, DateTime.now());
     if (tourLog == null) return; // below minimum duration/distance threshold, already cleaned up by TourRecorder
 
-    final geocoding = GeocodingService();
-    final results = await Future.wait([
-      geocoding.reverseGeocode(tourLog.startLat, tourLog.startLng),
-      geocoding.reverseGeocode(tourLog.endLat, tourLog.endLng),
-    ]);
+    // 역지오코딩은 "있으면 좋은" 부가 정보일 뿐이다 — GeocodingService는 이미
+    // 내부에서 실패를 잡아 null을 반환하지만, 여기서도 한 번 더 방어적으로
+    // 감싼다. 이 블록에서 예외가 나도 투어 저장 자체(아래)는 반드시 시도한다 —
+    // 이 함수는 unawaited()로 호출돼 예외가 나면 아무 로그도 없이 통째로
+    // 유실되기 때문이다.
+    var finalLog = tourLog;
+    try {
+      final geocoding = GeocodingService();
+      final results = await Future.wait([
+        geocoding.reverseGeocode(tourLog.startLat, tourLog.startLng),
+        geocoding.reverseGeocode(tourLog.endLat, tourLog.endLng),
+      ]);
+      finalLog = tourLog.copyWith(startAddress: results[0], endAddress: results[1]);
+    } catch (e) {
+      debugPrint('YNAV_TOUR geocode failed, saving without address: $e');
+    }
 
-    final finalLog = tourLog.copyWith(startAddress: results[0], endAddress: results[1]);
-    await TourLogService().add(finalLog);
-    debugPrint('YNAV_TOUR saved id=${finalLog.id} '
-        'distanceM=${finalLog.distanceM.toStringAsFixed(0)} '
-        'durationS=${finalLog.durationS} '
-        'avgKmh=${finalLog.avgSpeedKmh.toStringAsFixed(1)} '
-        'maxKmh=${finalLog.maxSpeedKmh.toStringAsFixed(1)} '
-        'track=${finalLog.trackFilePath}');
+    try {
+      await TourLogService().add(finalLog);
+      debugPrint('YNAV_TOUR saved id=${finalLog.id} '
+          'distanceM=${finalLog.distanceM.toStringAsFixed(0)} '
+          'durationS=${finalLog.durationS} '
+          'avgKmh=${finalLog.avgSpeedKmh.toStringAsFixed(1)} '
+          'maxKmh=${finalLog.maxSpeedKmh.toStringAsFixed(1)} '
+          'track=${finalLog.trackFilePath}');
+    } catch (e) {
+      debugPrint('YNAV_TOUR save FAILED id=${finalLog.id}: $e');
+    }
   }
 
   /// 내비 화면의 유일한 "실제 종료" 경로 — 투어 기록 마무리+저장을 트리거한 뒤
