@@ -199,6 +199,7 @@ class StructureVoiceEngine {
     }
     final event = switch (type) {
       StructureType.bridge => 'bridge',
+      StructureType.overpass => 'overpass',
       StructureType.tunnel => 'tunnel',
       StructureType.underpass => 'underpass',
     };

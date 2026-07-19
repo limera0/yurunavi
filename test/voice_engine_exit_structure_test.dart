@@ -59,9 +59,19 @@ void main() {
       expect(intents[0].vars['structure'], '터널');
     });
 
-    test('left exit(type 21) + bridge 인접 → exit_left structure 키, 고가도로', () {
+    test('left exit(type 21) + bridge 인접 → exit_left structure 키, 다리', () {
       final engine = VoiceEngine(profile,
           exitStructureByManeuverIdx: {1: StructureType.bridge});
+      final steps = [step(), step(type: 21, beginShapeIdx: 0), step(type: 4)];
+      final intents = drive(engine, 0, [600, 500], steps);
+
+      expect(intents[0].key, 'exit_left_approach_structure');
+      expect(intents[0].vars['structure'], '다리');
+    });
+
+    test('left exit(type 21) + overpass 인접 → exit_left structure 키, 고가도로', () {
+      final engine = VoiceEngine(profile,
+          exitStructureByManeuverIdx: {1: StructureType.overpass});
       final steps = [step(), step(type: 21, beginShapeIdx: 0), step(type: 4)];
       final intents = drive(engine, 0, [600, 500], steps);
 

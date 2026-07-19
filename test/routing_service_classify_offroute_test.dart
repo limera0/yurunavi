@@ -15,19 +15,27 @@ void main() {
     };
   }
 
-  group('A — bridge는 이름 무관 항상 고가도로', () {
-    test('bridge=true, 이름 없음 → StructureType.bridge', () {
+  group('A — bridge 이름 판정 (다리/고가도로)', () {
+    test('bridge=true, 이름 없음 → StructureType.bridge(다리) 폴백', () {
       final edges = <dynamic>[
         locateEdge(distance: 78.3, bridge: true),
       ];
       expect(RoutingService.classifyOffRouteEdges(edges), StructureType.bridge);
     });
 
-    test('bridge=true + 이름이 있어도 여전히 고가도로', () {
+    test('bridge=true + 이름에 "고가" 없음("OO대교") → 여전히 다리', () {
       final edges = <dynamic>[
         locateEdge(distance: 50.0, bridge: true, names: ['어떤대교']),
       ];
       expect(RoutingService.classifyOffRouteEdges(edges), StructureType.bridge);
+    });
+
+    test('bridge=true + 이름에 "고가" 포함("OO고가차도") → overpass', () {
+      final edges = <dynamic>[
+        locateEdge(distance: 50.0, bridge: true, names: ['영동대교북단고가차도']),
+      ];
+      expect(
+          RoutingService.classifyOffRouteEdges(edges), StructureType.overpass);
     });
   });
 

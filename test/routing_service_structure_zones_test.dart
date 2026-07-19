@@ -8,6 +8,7 @@ void main() {
     double? length,
     int? beginShapeIndex,
     int? endShapeIndex,
+    List<String>? names,
   }) {
     final m = <String, dynamic>{};
     if (bridge) m['bridge'] = bridge;
@@ -15,6 +16,7 @@ void main() {
     if (length != null) m['length'] = length;
     if (beginShapeIndex != null) m['begin_shape_index'] = beginShapeIndex;
     if (endShapeIndex != null) m['end_shape_index'] = endShapeIndex;
+    if (names != null) m['names'] = names;
     return m;
   }
 
@@ -163,6 +165,101 @@ void main() {
       expect(() => RoutingService.buildStructureZones(edges), returnsNormally);
       final zones = RoutingService.buildStructureZones(edges);
       expect(zones, isEmpty);
+    });
+  });
+
+  group('G — 이름 기반 고가도로(overpass) 판정', () {
+    test('bridge=true + 이름에 "고가" 포함 → overpass', () {
+      final edges = <dynamic>[
+        edge(
+          bridge: true,
+          beginShapeIndex: 1,
+          endShapeIndex: 2,
+          length: 0.06,
+          names: ['영동대교북단고가차도'],
+        ),
+      ];
+
+      final zones = RoutingService.buildStructureZones(edges);
+
+      expect(zones.length, 1);
+      expect(zones[0].type, StructureType.overpass);
+    });
+
+    test('bridge=true + 이름에 "고가" 없음("OO대교") → bridge(다리) 유지', () {
+      final edges = <dynamic>[
+        edge(
+          bridge: true,
+          beginShapeIndex: 1,
+          endShapeIndex: 2,
+          length: 0.06,
+          names: ['천호대교'],
+        ),
+      ];
+
+      final zones = RoutingService.buildStructureZones(edges);
+
+      expect(zones.length, 1);
+      expect(zones[0].type, StructureType.bridge);
+    });
+
+    test('인접한 bridge run과 overpass run은 타입이 다르므로 병합되지 않고 zone 2개', () {
+      final edges = <dynamic>[
+        edge(
+          bridge: true,
+          beginShapeIndex: 0,
+          endShapeIndex: 1,
+          length: 0.05,
+          names: ['천호대교'],
+        ),
+        edge(
+          bridge: true,
+          beginShapeIndex: 1,
+          endShapeIndex: 2,
+          length: 0.05,
+          names: ['천호대교북단고가차도'],
+        ),
+      ];
+
+      final zones = RoutingService.buildStructureZones(edges);
+
+      expect(zones.length, 2);
+      expect(zones[0].type, StructureType.bridge);
+      expect(zones[0].beginShapeIdx, 0);
+      expect(zones[0].endShapeIdx, 1);
+      expect(zones[1].type, StructureType.overpass);
+      expect(zones[1].beginShapeIdx, 1);
+      expect(zones[1].endShapeIdx, 2);
+    });
+  });
+
+  group('H — 이름 기반 지하차도(underpass) 판정 (buildStructureZones에도 동일 로직 적용)', () {
+    test('tunnel=true + 이름에 "지하차도" 포함 → underpass', () {
+      final edges = <dynamic>[
+        edge(
+          tunnel: true,
+          beginShapeIndex: 1,
+          endShapeIndex: 2,
+          length: 0.06,
+          names: ['고덕지하차도'],
+        ),
+      ];
+
+      final zones = RoutingService.buildStructureZones(edges);
+
+      expect(zones.length, 1);
+      expect(zones[0].type, StructureType.underpass);
+    });
+
+    test('tunnel=true + 이름 정보 없음 → tunnel 폴백 유지', () {
+      final edges = <dynamic>[
+        edge(tunnel: true, beginShapeIndex: 1, endShapeIndex: 2, length: 0.06),
+      ];
+
+      final zones = RoutingService.buildStructureZones(edges);
+
+      expect(zones.length, 1);
+      expect(zones[0].type, StructureType.tunnel);
     });
   });
 }

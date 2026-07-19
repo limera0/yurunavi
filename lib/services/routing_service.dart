@@ -55,14 +55,22 @@ class ManeuverStep {
   });
 }
 
-/// 고가도로/터널/지하차도 등 구조물 종류.
-enum StructureType { bridge, tunnel, underpass }
+/// 고가도로/다리/터널/지하차도 등 구조물 종류.
+///
+/// [bridge]는 OSM `bridge=yes`이면서 이름에 "고가"류 키워드가 없는 경우
+/// (하천을 가로지르는 실제 "다리", 예: "OO대교") — [overpass]는 같은
+/// `bridge=yes`이지만 이름에 "고가"(고가도로/고가차도/고가로)가 포함된 경우
+/// (다른 도로 위를 지나는 입체 교차 고가도로). Valhalla/OSM은 이 둘을 태그
+/// 레벨에서 구분하지 않으므로 way 이름으로 후분류한다(2026-07-19 라이딩
+/// 피드백 — 강을 건너는 다리를 전부 "고가도로"라고 안내해 혼란을 줌).
+enum StructureType { bridge, overpass, tunnel, underpass }
 
 /// 구조물 타입 → 한국어 안내 라벨. 카드 라벨(nav_screen)과 TTS(voice_engine)
 /// 양쪽에서 공유해 중복 판정 로직을 피한다.
 extension StructureTypeLabel on StructureType {
   String get labelKo => switch (this) {
-        StructureType.bridge => '고가도로',
+        StructureType.bridge => '다리',
+        StructureType.overpass => '고가도로',
         StructureType.tunnel => '터널',
         StructureType.underpass => '지하차도',
       };
@@ -870,44 +878,71 @@ class RoutingService {
   }) {
     final zones = <StructureZone>[];
 
-    void collect(StructureType type, bool Function(Map edge) isType) {
-      int? runBegin;
-      int runEnd = 0;
-      double runLengthM = 0;
+    // 한 번의 순회로 각 edge를 분류하고, "직전 run과 타입이 같은 경우"에만
+    // 이어붙인다 — 타입이 다르면(예: bridge 다음 바로 overpass) 인접해도
+    // 별개 zone으로 나뉘어야 한다(둘 다 raw bridge=true 플래그는 같지만
+    // 안내 문구가 다르므로 섞이면 안 됨).
+    StructureType? runType;
+    int? runBegin;
+    int runEnd = 0;
+    double runLengthM = 0;
 
-      void flush() {
-        if (runBegin != null && runLengthM >= minLengthM) {
-          zones.add(StructureZone(
-            type: type,
-            beginShapeIdx: runBegin!,
-            endShapeIdx: runEnd,
-          ));
-        }
-        runBegin = null;
-        runLengthM = 0;
+    void flush() {
+      if (runType != null && runBegin != null && runLengthM >= minLengthM) {
+        zones.add(StructureZone(
+          type: runType!,
+          beginShapeIdx: runBegin!,
+          endShapeIdx: runEnd,
+        ));
       }
-
-      for (final e in edges) {
-        final edge = e as Map;
-        if (isType(edge)) {
-          final b = (edge['begin_shape_index'] as num?)?.toInt() ?? 0;
-          final end = (edge['end_shape_index'] as num?)?.toInt() ?? 0;
-          final lenM = ((edge['length'] as num?)?.toDouble() ?? 0.0) * 1000;
-          runBegin ??= b;
-          runEnd = end;
-          runLengthM += lenM;
-        } else {
-          flush();
-        }
-      }
-      flush();
+      runType = null;
+      runBegin = null;
+      runLengthM = 0;
     }
 
-    collect(StructureType.bridge, (e) => (e['bridge'] as bool?) ?? false);
-    collect(StructureType.tunnel, (e) => (e['tunnel'] as bool?) ?? false);
+    for (final e in edges) {
+      final edge = e as Map;
+      final type = _classifyStructureEdge(edge);
+      if (type != null) {
+        if (runType != null && runType != type) flush();
+        final b = (edge['begin_shape_index'] as num?)?.toInt() ?? 0;
+        final end = (edge['end_shape_index'] as num?)?.toInt() ?? 0;
+        final lenM = ((edge['length'] as num?)?.toDouble() ?? 0.0) * 1000;
+        runType = type;
+        runBegin ??= b;
+        runEnd = end;
+        runLengthM += lenM;
+      } else {
+        flush();
+      }
+    }
+    flush();
 
     zones.sort((a, b) => a.beginShapeIdx.compareTo(b.beginShapeIdx));
     return zones;
+  }
+
+  /// trace_attributes 응답의 edge 한 개(`edge.bridge`/`edge.tunnel`/
+  /// `edge.names` — 모두 최상위 flat 필드, `edge.` 접두사 제거된 형태)를
+  /// bridge/overpass/tunnel/underpass 중 하나로 분류한다. bridge/tunnel이
+  /// 모두 false면 null. [classifyOffRouteEdges]와 동일한 이름 키워드
+  /// 판정(고가/지하차도)을 쓰되, 입력 edge의 스키마가 다르다(/locate 응답은
+  /// `edge`/`edge_info` 하위 중첩, 여기(trace_attributes)는 flat) — 스키마
+  /// 차이는 2026-07-19 실제 Valhalla 응답으로 확인됨.
+  static StructureType? _classifyStructureEdge(Map edge) {
+    final isBridge = (edge['bridge'] as bool?) ?? false;
+    final isTunnel = (edge['tunnel'] as bool?) ?? false;
+    if (!isBridge && !isTunnel) return null;
+    final names =
+        ((edge['names'] as List?) ?? const <dynamic>[]).whereType<String>();
+    if (isBridge) {
+      return names.any((n) => n.contains('고가'))
+          ? StructureType.overpass
+          : StructureType.bridge;
+    }
+    return names.any((n) => n.contains('지하차도'))
+        ? StructureType.underpass
+        : StructureType.tunnel;
   }
 
   /// exit(type 20/21) maneuver가 구조물 zone과 겹치거나, zone 종료 지점으로부터
@@ -1090,6 +1125,10 @@ class RoutingService {
                   'edge.length',
                   'edge.bridge',
                   'edge.tunnel',
+                  // 다리(고가도로 아님)/지하차도(터널 아님) 후분류에 필요
+                  // (2026-07-19). 응답에서 flat 'names' 리스트로 온다(실측
+                  // 확인, 아래 buildStructureZones/_classifyStructureEdge 참조).
+                  'edge.names',
                 ],
                 'action': 'include',
               },
@@ -1213,11 +1252,14 @@ class RoutingService {
   }
 
   /// /locate 응답의 edges 배열(한 location 분)에서 가장 가까운 다리/터널
-  /// 엣지를 골라 타입을 판정한다. bridge는 이름과 무관하게 항상 고가도로로
-  /// 확정(모호함 없음). tunnel은 way 이름에 "지하차도"/"터널"이 있으면 그
-  /// 라벨을 그대로 쓰고, 이름 정보가 없으면 터널로 통칭(폴백 — 실제 지하차도/
-  /// 터널 사례를 더 모아 길이 기반 임계값을 정할 때까지는 이 단순 폴백을
-  /// 유지한다, HANDOFF_0716 §3-4 참조).
+  /// 엣지를 골라 타입을 판정한다. bridge는 way 이름에 "고가"(고가도로/
+  /// 고가차도/고가로)가 있으면 overpass(고가도로), 없으면 bridge(다리 —
+  /// 예: "OO대교")로 후분류한다(2026-07-19 수정 — 이전엔 bridge=true를
+  /// 무조건 "고가도로"로 확정해 하천 다리까지 전부 고가도로로 안내하는
+  /// 버그가 있었다). tunnel은 way 이름에 "지하차도"가 있으면 그 라벨을
+  /// 그대로 쓰고, 없으면 터널로 통칭(폴백 — 실제 지하차도/터널 사례를 더
+  /// 모아 길이 기반 임계값을 정할 때까지는 이 단순 폴백을 유지한다,
+  /// HANDOFF_0716 §3-4 참조).
   static StructureType? classifyOffRouteEdges(List<dynamic> edges) {
     StructureType? best;
     double bestDistM = double.infinity;
@@ -1233,17 +1275,17 @@ class RoutingService {
       final distM = (edge['distance'] as num?)?.toDouble() ?? 0.0;
       if (distM >= bestDistM) continue;
 
+      final names = ((edge['edge_info'] as Map?)?['names'] as List? ?? [])
+          .whereType<String>();
       StructureType type;
       if (isBridge) {
-        type = StructureType.bridge;
+        type = names.any((n) => n.contains('고가'))
+            ? StructureType.overpass
+            : StructureType.bridge;
+      } else if (names.any((n) => n.contains('지하차도'))) {
+        type = StructureType.underpass;
       } else {
-        final names = ((edge['edge_info'] as Map?)?['names'] as List? ?? [])
-            .whereType<String>();
-        if (names.any((n) => n.contains('지하차도'))) {
-          type = StructureType.underpass;
-        } else {
-          type = StructureType.tunnel; // 이름 무관("터널" 포함이든 없든) 통칭 폴백
-        }
+        type = StructureType.tunnel; // 이름 무관("터널" 포함이든 없든) 통칭 폴백
       }
       bestDistM = distM;
       best = type;
@@ -1257,8 +1299,9 @@ class RoutingService {
   /// maneuver의 시작점이 아니라 끝점(목적지 방향) 근처 엣지에 붙어있는
   /// 경우가 있어, 시작점만 조회하면 이름 없는 tunnel 플래그만 잡혀 "터널"로
   /// 과도하게 통칭된다. underpass(이름 매칭 성공)가 하나라도 있으면 그게
-  /// 가장 구체적인 정보이므로 즉시 채택하고, 그 다음은 bridge(이름 무관
-  /// 확정), tunnel(이름 없는 폴백)은 최후순위로 다른 결과가 있으면 대체된다.
+  /// 가장 구체적인 정보이므로 즉시 채택한다. bridge/overpass는 [isBridge]
+  /// 분기에서 이미 이름으로 확정된 값이라 서로 동등하게 최우선으로 취급하고,
+  /// tunnel(이름 없는 폴백)만 최후순위로 다른 결과가 있으면 대체된다.
   static StructureType? mergeOffRouteStructures(
       Iterable<StructureType?> results) {
     StructureType? best;

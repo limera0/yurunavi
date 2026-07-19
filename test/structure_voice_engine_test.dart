@@ -5,8 +5,9 @@ import 'package:yurunavi/services/routing_service.dart';
 
 void main() {
   // Fallback-equivalent profile (tiers sorted descending), extended with
-  // bridge/tunnel so isEnabled()/tiersForEvent() fall back to the same
-  // common tiers/imminentM used by guidance_profile.json's global defaults.
+  // bridge/overpass/tunnel/underpass so isEnabled()/tiersForEvent() fall back
+  // to the same common tiers/imminentM used by guidance_profile.json's
+  // global defaults.
   final profile = GuidanceProfile(
     imminentM: 10,
     tiers: const [
@@ -15,7 +16,7 @@ void main() {
       GuidanceTier(minEntryM: 30, pointsM: [100, 50]),
       GuidanceTier(minEntryM: 0, pointsM: []),
     ],
-    enabledEvents: {'bridge', 'tunnel', 'underpass'},
+    enabledEvents: {'bridge', 'overpass', 'tunnel', 'underpass'},
   );
 
   List<SpeakIntent> drive(
@@ -27,7 +28,7 @@ void main() {
     return out;
   }
 
-  group('A — 고가도로(bridge)', () {
+  group('A — 다리(bridge, 하천을 가로지르는 실제 다리)', () {
     test('zoneIdx 0을 [600,500,300,50,5]로 접근: approach ×3 + imminent', () {
       final engine = StructureVoiceEngine(profile);
       final intents = drive(engine, 0, [600, 500, 300, 50, 5], StructureType.bridge);
@@ -36,6 +37,19 @@ void main() {
         'bridge_approach',
         'bridge_approach',
         'bridge_imminent',
+      ]);
+    });
+  });
+
+  group('A1 — 고가도로(overpass), bridge와 별개 이벤트로 분리되는지 회귀 가드', () {
+    test('zoneIdx 0을 [600,500,300,50,5]로 접근: overpass_* (bridge_*로 새지 않음)', () {
+      final engine = StructureVoiceEngine(profile);
+      final intents = drive(engine, 0, [600, 500, 300, 50, 5], StructureType.overpass);
+      expect(intents.map((i) => i.key).toList(), [
+        'overpass_approach',
+        'overpass_approach',
+        'overpass_approach',
+        'overpass_imminent',
       ]);
     });
   });

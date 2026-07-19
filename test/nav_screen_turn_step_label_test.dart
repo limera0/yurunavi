@@ -26,16 +26,30 @@ void main() {
       );
     });
 
-    test('type 20 + bridge 인접 → "고가도로 우측 옆길"', () {
+    test('type 20 + bridge 인접 → "다리 우측 옆길"', () {
       expect(
         turnStepLabelForType(20, nearbyStructure: StructureType.bridge),
+        '다리 우측 옆길',
+      );
+    });
+
+    test('type 21 + bridge 인접 → "다리 좌측 옆길"', () {
+      expect(
+        turnStepLabelForType(21, nearbyStructure: StructureType.bridge),
+        '다리 좌측 옆길',
+      );
+    });
+
+    test('type 20 + overpass 인접 → "고가도로 우측 옆길"', () {
+      expect(
+        turnStepLabelForType(20, nearbyStructure: StructureType.overpass),
         '고가도로 우측 옆길',
       );
     });
 
-    test('type 21 + bridge 인접 → "고가도로 좌측 옆길"', () {
+    test('type 21 + overpass 인접 → "고가도로 좌측 옆길"', () {
       expect(
-        turnStepLabelForType(21, nearbyStructure: StructureType.bridge),
+        turnStepLabelForType(21, nearbyStructure: StructureType.overpass),
         '고가도로 좌측 옆길',
       );
     });
