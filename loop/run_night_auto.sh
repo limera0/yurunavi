@@ -346,7 +346,12 @@ while [ "$tick" -lt "$MAX_TICKS" ]; do
   mtime_after=$(file_mtime "$HANDOFF_FILE")
   commits_made=$((count_after - count_before))
   handoff_updated="no"; [ "$mtime_after" -gt "$mtime_before" ] && handoff_updated="yes"
-  status=$(handoff_status)
+  # handoff_updated=no면 handoff.md는 이전 실행(혹은 오늘 낮 dry-run 등)이 남긴 stale
+  # 내용이다 — 이번 틱이 크래시(ECONNRESET 등)로 파일을 못 썼는데 예전 STATUS: DONE을
+  # 그대로 믿고 멈춰버리는 사고가 실제로 있었음(2026-07-20). handoff_updated=yes일 때만
+  # status를 신뢰한다.
+  status=""
+  [ "$handoff_updated" = "yes" ] && status=$(handoff_status)
   dirty=""; [ -n "$(git status --porcelain)" ] && dirty=" [경고: 작업트리 dirty]"
 
   echo "tick $tick done exit=$tick_exit elapsed=${tick_elapsed}s commits=${commits_made} (HEAD ${head_before:0:7}->${head_after:0:7}) handoff_updated=${handoff_updated} status=${status:-NONE}${dirty} log=$tick_log"
