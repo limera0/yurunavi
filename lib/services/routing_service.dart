@@ -215,6 +215,20 @@ class RoutingService {
   // 루프가 없어질 때까지 반복하되 무한루프 방지로 상한을 둔다.
   static const int _loopEscapeMaxRounds = 3;
 
+  // ── 알려진 그래프 오류 지점(불가능한 좌회전) 회피 ────────────────────────
+  /// Valhalla 라우팅 그래프가 "가능"으로 잘못 판단한 좌회전 2건
+  /// (마스터가 직접 주행하며 실측 확인 — loop/RECON_impossible_left_turns.md).
+  /// 두 지점 다 중앙분리대로 물리 분리된 편도 간선도로인데 OSM에
+  /// turn:lanes/restriction 관계가 없어 그래프가 좌회전 가능으로 단순 처리한
+  /// 것으로 추정된다. 이는 범용 "avoid 지점 등록" 기능이 아니라, 그래프
+  /// 데이터 자체를 고치기 전까지의 임시 안전장치다 — `avoid_locations`는
+  /// 해당 지점 근방에 페널티만 주고(하드 차단 아님) 모든 라우팅 요청에
+  /// 항상 포함시킨다.
+  static const List<Map<String, double>> knownImpossibleTurnAvoids = [
+    {'lat': 37.09172, 'lon': 127.09205}, // 삼봉로/삼남로
+    {'lat': 37.13696, 'lon': 127.07838}, // 동부대로/남부대로
+  ];
+
   // ── Route cache (TTL 5 min, max 20 entries) ──────────────────────────────
   static const _cacheTtl = Duration(minutes: 5);
   static const _cacheMaxSize = 20;
@@ -384,6 +398,7 @@ class RoutingService {
               'locations': locations,
               'costing': 'motorcycle',
               'costing_options': {'motorcycle': opts},
+              'avoid_locations': knownImpossibleTurnAvoids,
             }),
           )
           .timeout(const Duration(seconds: 20)),
@@ -485,6 +500,7 @@ class RoutingService {
                   'locations': locations,
                   'costing': 'motorcycle',
                   'costing_options': {'motorcycle': _ruralBalancedOpts},
+                  'avoid_locations': knownImpossibleTurnAvoids,
                 }),
               )
               .timeout(const Duration(seconds: 20));
@@ -553,6 +569,7 @@ class RoutingService {
                   'locations': locations,
                   'costing': 'motorcycle',
                   'costing_options': {'motorcycle': _provincialBalancedOpts},
+                  'avoid_locations': knownImpossibleTurnAvoids,
                 }),
               )
               .timeout(const Duration(seconds: 20));
@@ -735,6 +752,7 @@ class RoutingService {
               ],
               'costing': 'motorcycle',
               'costing_options': {'motorcycle': costingOpts},
+              'avoid_locations': knownImpossibleTurnAvoids,
             }),
           )
           .timeout(const Duration(seconds: 10));
