@@ -2474,76 +2474,79 @@ class _AddFavoriteSheetState extends ConsumerState<_AddFavoriteSheet> {
       child: SafeArea(
         child: Container(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          decoration: BoxDecoration(
+          child: Material(
             color: Colors.white,
             borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36, height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
+            clipBehavior: Clip.antiAlias,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36, height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text('즐겨찾기 등록',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _nameCtrl,
-                decoration: InputDecoration(
-                  labelText: '이름',
-                  isDense: true,
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                  const SizedBox(height: 14),
+                  const Text('즐겨찾기 등록',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: '이름',
+                      isDense: true,
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text('카테고리',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: categories.map((c) {
-                  final selected = c == _selectedCategory;
-                  return ChoiceChip(
-                    label: Text(c),
-                    selected: selected,
-                    onSelected: (_) => setState(() => _selectedCategory = c),
-                    labelStyle: const TextStyle(fontSize: 12),
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF008080),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                  const SizedBox(height: 14),
+                  const Text('카테고리',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: categories.map((c) {
+                      final selected = c == _selectedCategory;
+                      return ChoiceChip(
+                        label: Text(c),
+                        selected: selected,
+                        onSelected: (_) => setState(() => _selectedCategory = c),
+                        labelStyle: const TextStyle(fontSize: 12),
+                        visualDensity: VisualDensity.compact,
+                      );
+                    }).toList(),
                   ),
-                  onPressed: _confirm,
-                  child: const Text('확인'),
-                ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF008080),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _confirm,
+                      child: const Text('확인'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         ),
       ),
@@ -2574,10 +2577,10 @@ class _PlacesSheet extends ConsumerWidget {
     return SafeArea(
       child: Container(
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
+        child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Column(
@@ -2672,6 +2675,7 @@ class _PlacesSheet extends ConsumerWidget {
               const SizedBox(height: 8),
             ],
           ),
+        ),
         ),
       ),
     );
@@ -2964,10 +2968,10 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                   16
               : MediaQuery.of(context).size.height * 0.75,
         ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
+        child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Column(
@@ -3094,6 +3098,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
               const SizedBox(height: 8),
             ],
           ),
+        ),
         ),
       ),
       ),
