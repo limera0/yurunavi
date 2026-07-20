@@ -90,7 +90,7 @@
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
-| 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | TODO — 2026-07-13 발견 계기, 배포 전 필수 |
+| 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | PARTIAL — A/C 완료(`afc6048`), B/D 남음, 아래 상세 참조 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 | 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | TODO — 2026-07-18 등록, 아래 16번 상세 참조 |
 
@@ -547,7 +547,7 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 - iOS는 스코프 밖(`GoogleService-Info.plist`/URL scheme 미설정, 이 서버는 헤드리스 Linux라
   Xcode 빌드 불가) — 13-5와 동일한 패턴으로 별도 과제.
 
-### 14. Crashlytics fatal 오분류 전수 감사 — TODO (배포 전 필수)
+### 14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)
 
 - **계기 (2026-07-13)**: Firebase Crashlytics가 1.0.1(2)에서 157건의 "치명적(Fatal)" 이벤트를
   경고 메일로 보내왔으나, 실제로는 앱이 죽은 게 아니라 `lib/core/crash_reporting.dart:18`의
@@ -562,17 +562,32 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   여러 기기에서 동시다발적으로 fatal로 잡혀 Crashlytics 대시보드의 크래시프리율 지표가 실제보다
   훨씬 나빠 보이고, 진짜 치명적 버그가 노이즈에 묻혀 놓칠 위험이 있음.
 - **배포 전 해야 할 일**:
-  1. `flutter build apk --release`(assert가 스트립되는 빌드)에서도 이런 프레임워크 debug 경고가
-     여전히 `FlutterError.onError`를 타는지, 아니면 release에서는 애초에 발생 자체가 없는지 확인.
-     (assert 스트립 여부에 따라 이 항목의 실사용자 영향도가 크게 달라짐 — 확인 전엔 추측 금지.)
-  2. 위 확인 결과에 따라 `FlutterError.onError`를 `recordFlutterFatalError`(현재, Firebase
-     공식 권장값) 그대로 둘지, 실제로 앱을 죽이지 않는 프레임워크 경고까지 fatal로 잡히는 걸
-     막기 위해 `recordFlutterError`(non-fatal)로 완화할지 결정.
-  3. 오늘 고친 것과 같은 유형(색깔 있는 Container/DecoratedBox가 Material과 ListTile 사이에
-     끼는 패턴)이 다른 화면에도 남아있는지 전수 점검 — `main_map_screen.dart`/
-     `settings_screen.dart` 외 화면 포함.
-  4. 릴리스 빌드로 한 번 실사용 시나리오를 돌려보고 Crashlytics에 fatal 이벤트가 안 뜨는지
-     확인 (10번 "실제 release build 검증" 항목과 묶어서 진행 가능).
+  1. ✅ (2026-07-20) `flutter build apk --release`로 확인 완료 — release APK를 M32에 설치,
+     `_PoiExploreSheet`(당시 미수정 상태)를 열어 칩/리스트타일을 실제로 여러 번 탭해 ink
+     splash를 직접 유발시키면서 logcat을 관찰. **release 빌드에서는 이 프레임워크 debug
+     경고 자체가 발생하지 않음** (Dart `assert()`가 release 컴파일 시 스트립되는 표준 동작과
+     일치) — FlutterError/Crashlytics 관련 로그 전혀 없음, 앱 정상 동작. 근거: 로드맵 위
+     "계기" 문단의 157건도 실은 디버그 APK(1.0.1(2)) 테스트 중 발생한 것이었음(사용자가
+     "디버그 APK로 단일 기기 테스트 중"이라 명시) — release 배포본에서 이 노이즈가 재현될
+     가능성은 낮다는 뜻.
+  2. 위 근거로 **현재 세션 권고: `recordFlutterFatalError` 그대로 유지** (Firebase 공식
+     권장값과 일치, 실측상 release에서 오분류 위험 낮음). 다만 이건 정책 판단이라 코드
+     변경 없이 권고로만 기록 — 마스터 최종 확인 필요(B는 "결정 보류, 마스터 확인 대기"
+     상태로 둠, `recordFlutterFatalError` 코드는 손대지 않음).
+  3. ✅ (2026-07-20) 전수 점검 완료 — `main_map_screen.dart`/`settings_screen.dart` 외
+     `lib/features/{profile,tour_summary,auth,navigation}/presentation/` 전체 확인.
+     **`main_map_screen.dart` 안에서 3건 추가 발견**: `_AddFavoriteSheet`/`_PlacesSheet`/
+     `_PoiExploreSheet` — 전부 `_showTapConfirmSheet`(8e56b40에서 수정된 것)와 동일한
+     `Container`+`BoxDecoration`이 `Material`과 `ListTile`/`ChoiceChip`/`IconButton` 사이에
+     끼는 패턴. 커밋 `afc6048`로 3건 전부 동일한 `Material` 래핑 방식으로 수정,
+     code-auditor PASS, `flutter analyze` 이상없음. 다른 화면(`settings_screen.dart`,
+     `favorite_categories_screen.dart`, `profile_screen.dart`, `tour_summary_*`,
+     `splash_screen.dart`)은 `Scaffold`/`Card`/`AlertDialog`가 이미 Material 조상을
+     제공하는 구조라 문제없음 확인.
+  4. ⬜ 아직 — release 빌드로 지도 열기 → POI 검색 → 내비 시작 → 설정 진입 등 주요 화면
+     순회하며 Crashlytics 콘솔에서 fatal 이벤트가 실제로 안 뜨는지 최종 확인 필요(10번
+     "실제 release build 검증" 항목과 묶어서 진행 가능). 1번에서 로컬 logcat으로는 확인했지만
+     Crashlytics 콘솔 쪽 최종 확인은 아직 안 함.
 
 ### 15. POI 데이터소스 자체 호스팅 전환 — DONE (2026-07-15, 발견 당일 해결)
 
