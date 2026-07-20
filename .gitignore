@@ -69,3 +69,12 @@ android/*.keystore
 # 쿼터 토큰이라 firebase 키와 달리 진짜 비밀임. --dart-define-from-file=env.json으로
 # 빌드 시에만 주입, 절대 커밋하지 않음.
 env.json
+
+# 야간 자동화 tick 체인 스크래치 상태 (loop/run_night_auto.sh) — 매 틱 갱신되며
+# git-tracked이면 브랜치 이동/머지 충돌 유발(구 loop/tick.md 상습 충돌 사례,
+# loop/HANDOFF_0705_1.md:10 참고). 최종 산출물(MORNING_REPORT_*.md, HANDOFF_*.md)은
+# 이 디렉토리 밖 loop/ 에 직접 써서 정상적으로 커밋됨.
+loop/.auto/
+
+# 디스코드 웹훅 URL 등 진짜 비밀 (CLAUDE.md 하드룰: 키는 전부 .env로).
+.env
