@@ -1,0 +1,78 @@
+# 실주행에서 확인된 "불가능한 좌회전" 지점에 대한 로컬 그래프 오버레이 목록.
+# pbf 갱신마다 apply_impossible_turn_overlays.sh가 이 파일을 순회해 재적용한다.
+#
+# private_land_overlays.yaml(사유지 회피)과 달리 이 오버레이들은 폴리곤+태그필터가
+# 아니라 특정 node/way id를 직접 참조하는 .osc다 — turn restriction(pt2)이나
+# way 분할(pt1)은 "영역 내 아무 도로"가 아니라 "정확히 이 교차로의 이 엣지"를
+# 지목해야 하는 작업이라 폴리곤 기반 재탐색으로 일반화할 수 없다. 대신 매
+# 재적용 전에 check_overlay_ids.py가 아래 expected_nodes 좌표로 각 id가
+# 여전히 유효한지(존재+좌표 일치) 검증하고, 하나라도 어긋나면 전체 파이프라인을
+# 중단한다(매퍼가 재작도했을 가능성 — 사람이 .osc를 다시 만들어야 함).
+version: 1
+overlays:
+  - id: pt1_sambong_connector
+    name: "삼봉로/삼남로 — 관통 연결로 절단"
+    reported_at: [37.09172, 127.09205]
+    reason: >
+      무명 주택가 도로(way 970139442)가 삼봉로의 두 편도 차로(분리대로 물리
+      분리)를 노드 하나 사이에 두고 그대로 관통하도록 매핑되어 있어, 실제로는
+      불가능한 좌회전을 그래프가 "가능"으로 제공하던 지점. 마스터 실주행 확인
+      (2026-07-19), 상세: loop/RECON_impossible_left_turns.md §1,
+      loop/RECON_overlay_pipeline_impossible_turns.md.
+    osc: pt1_sambong_connector.osc
+    fix_kind: way_split_access_no
+    verified_poc: "2026-07-20, 격리 컨테이너 before/after (0.01km 유령 관통 → 0.467km 실제 우회, 회귀 없음)"
+    expected_nodes:
+      - id: 8977582047
+        lat: 37.0919082
+        lon: 127.0919759
+        note: "far carriageway 접점 (way 819321926)"
+      - id: 8977582048
+        lat: 37.0918174
+        lon: 127.0920029
+        note: "near carriageway 접점 (way 813377254)"
+    target_test:
+      description: "패치 전 0.01km 유령 관통이던 구간 — 패치 후엔 실제 우회로 늘어나야 함"
+      from: {lat: 37.0919082, lon: 127.0919759}
+      to: {lat: 37.0918174, lon: 127.0920029}
+      min_length_km: 0.2
+    regression_test:
+      description: "패치와 무관한 주택가 남쪽 접근은 그대로여야 함"
+      from: {lat: 37.0875837, lon: 127.093055}
+      to: {lat: 37.0918174, lon: 127.0920029}
+      max_length_km: 0.6
+
+  - id: pt2_milmeori_dongbudaero
+    name: "밀머리로 → 동부대로(북행) — 좌회전 금지 관계 추가"
+    reported_at: [37.13696, 127.07838]
+    reason: >
+      밀머리로(way 37404818, 왕복)가 동부대로 북행 차로(way 837782045/837782046)와
+      정확히 같은 노드(7811891565)를 공유해, 실제로는 중앙분리대로 막힌 좌회전을
+      그래프가 정상 교차로 회전처럼 제공하던 지점. 마스터 실주행 확인
+      (2026-07-19). 이 교차로는 80개 이상 way로 이루어진 복합 입체교차 구간이라
+      pt1처럼 단순 절단이 아니라, 정확히 이 진입로(from)→이 노드(via)→이
+      출구(to) 3요소만 지정하는 OSM 표준 turn restriction relation으로 처리.
+      상세: loop/RECON_impossible_left_turns.md §2.
+    osc: pt2_milmeori_dongbudaero.osc
+    fix_kind: turn_restriction_relation
+    verified_poc: "2026-07-20, 격리 컨테이너 before/after (0.436km 유령 좌회전 → 1.023km 남부대로 경유 실제 우회, 회귀 없음)"
+    expected_nodes:
+      - id: 7811891565
+        lat: 37.1369431
+        lon: 127.0783101
+        note: "via node — 밀머리로/동부대로 북행 공유 지점"
+    expected_ways:
+      - id: 37404818
+        note: "from — 밀머리로"
+      - id: 837782046
+        note: "to — 동부대로 북행"
+    target_test:
+      description: "패치 전 0.436km 유령 좌회전이던 구간 — 패치 후엔 실제 우회로 늘어나야 함"
+      from: {lat: 37.13692, lon: 127.07857}
+      to: {lat: 37.1406573, lon: 127.0783435}
+      min_length_km: 0.6
+    regression_test:
+      description: "밀머리로 직진(동부대로로 회전하지 않는 경로)은 그대로여야 함"
+      from: {lat: 37.13692, lon: 127.07857}
+      to: {lat: 37.13698, lon: 127.0779}
+      max_length_km: 0.2

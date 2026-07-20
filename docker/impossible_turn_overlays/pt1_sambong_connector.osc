@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osmChange version="0.6" generator="yurunavi-overlay-poc">
+  <modify>
+    <way id="970139442" version="2" timestamp="2026-07-20T00:00:00Z">
+      <nd ref="8977582048"/>
+      <nd ref="8977582049"/>
+      <nd ref="8977582050"/>
+      <nd ref="8977582051"/>
+      <nd ref="8977582052"/>
+      <nd ref="8977582053"/>
+      <nd ref="8977582054"/>
+      <nd ref="8977587764"/>
+      <nd ref="8977582055"/>
+      <nd ref="8977582056"/>
+      <nd ref="8977582057"/>
+      <tag k="highway" v="residential"/>
+    </way>
+  </modify>
+  <create>
+    <way id="9970139442" version="1" timestamp="2026-07-20T00:00:00Z">
+      <nd ref="8977582047"/>
+      <nd ref="8977582048"/>
+      <tag k="highway" v="residential"/>
+      <tag k="motor_vehicle" v="no"/>
+      <tag k="motorcycle" v="no"/>
+      <tag k="note" v="yurunavi local overlay: median-blocked crossing, RECON_impossible_left_turns.md pt1"/>
+    </way>
+  </create>
+</osmChange>
