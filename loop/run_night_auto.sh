@@ -16,6 +16,13 @@
 #   --tick-timeout N           틱 1회 타임아웃 초 (기본 2700 = 45분)
 #   --permission-mode MODE     claude -p 에 넘길 --permission-mode (기본 bypassPermissions)
 #   --effort LEVEL             claude -p 에 넘길 --effort (기본 high)
+#   --blocked-wait-seconds N   BLOCKED 상태에서 디스코드 답장 대기 상한 초 (기본 10800 = 3시간)
+#
+# 디스코드 연동 (.env, 없으면 조용히 생략):
+#   DISCORD_WEBHOOK_URL     — 종료/BLOCKED 알림 발송용
+#   DISCORD_BOT_TOKEN       — BLOCKED 답장 폴링용 (봇, 웹훅과 별개)
+#   DISCORD_CHANNEL_ID      — 폴링할 채널
+#   DISCORD_OWNER_USER_ID   — 이 유저 ID가 보낸 메시지만 답장으로 인정(보안)
 
 set -uo pipefail
 cd /data/projects/yurunavi || exit 1
@@ -47,6 +54,7 @@ MAX_WALL_SECONDS=37800     # 10.5h — ~12h 부재 시간에서 최종 리포트
 TICK_TIMEOUT=2700          # 45min — 틱 1회 하드 타임아웃(ECONNRESET 회피 핵심)
 PERMISSION_MODE="bypassPermissions"
 EFFORT_LEVEL="high"
+BLOCKED_WAIT_SECONDS=10800  # 3h — BLOCKED 상태에서 디스코드 답장 기다리는 상한
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +63,7 @@ while [ $# -gt 0 ]; do
     --tick-timeout) TICK_TIMEOUT="$2"; shift 2 ;;
     --permission-mode) PERMISSION_MODE="$2"; shift 2 ;;
     --effort) EFFORT_LEVEL="$2"; shift 2 ;;
+    --blocked-wait-seconds) BLOCKED_WAIT_SECONDS="$2"; shift 2 ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
   esac
 done
@@ -151,6 +160,93 @@ PYEOF
   fi
 }
 
+# BLOCKED로 멈췄을 때 "답장 기다리는 중" 알림 (최종 종료 알림과 별개, 웹훅 재사용).
+notify_discord_blocked() {
+  if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+    return 0
+  fi
+  local payload
+  payload=$(python3 - "$tick" "$BLOCKED_WAIT_SECONDS" "$HANDOFF_FILE" <<'PYEOF'
+import json, sys
+tick, wait_s, handoff_file = sys.argv[1:4]
+hours = int(wait_s) / 3600
+try:
+    text = open(handoff_file, encoding="utf-8", errors="ignore").read()
+except OSError:
+    text = ""
+preview = text[:1200]
+lines = [
+    f"⏸️ tick {tick}: BLOCKED — 사람 판단 필요",
+    f"이 채널에 답장하면 이어서 진행합니다 (최대 {hours:.1f}시간 대기, 안 오면 그냥 종료).",
+    "",
+    preview,
+]
+content = "\n".join(lines)[:1900]
+print(json.dumps({"content": content}))
+PYEOF
+)
+  curl -sS --max-time 15 -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>&1
+}
+
+# 폴링용 봇 자격 3종이 다 있어야 동작 — 하나라도 없으면 BLOCKED 즉시 종료(기존 동작)로 폴백.
+discord_polling_available() {
+  [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "${DISCORD_CHANNEL_ID:-}" ] && [ -n "${DISCORD_OWNER_USER_ID:-}" ]
+}
+
+discord_latest_message_id() {
+  curl -sS --max-time 15 -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+    "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages?limit=1" 2>/dev/null \
+    | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d[0]['id'] if d else '0')
+except Exception:
+    print('0')
+" 2>/dev/null || echo "0"
+}
+
+# $1 = 이 메시지 ID 이후의 메시지만 확인. DISCORD_OWNER_USER_ID가 보낸 것만 인정(보안 —
+# 다른 사람이 채널에 뭘 써도 자동화에 영향 없게).
+discord_poll_reply() {
+  local after_id="$1"
+  curl -sS --max-time 15 -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+    "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages?after=${after_id}&limit=50" 2>/dev/null \
+    | python3 -c "
+import sys, json
+owner_id = '$DISCORD_OWNER_USER_ID'
+try:
+    msgs = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+if not isinstance(msgs, list):
+    sys.exit(0)
+mine = [m for m in msgs if m.get('author', {}).get('id') == owner_id and m.get('content')]
+mine.sort(key=lambda m: m['id'])
+if mine:
+    print('\n'.join(m['content'] for m in mine))
+" 2>/dev/null
+}
+
+# 반환: 성공(0)이면 stdout에 답장 텍스트, 실패(1)면 타임아웃.
+wait_for_discord_reply() {
+  local wait_seconds="$1"
+  local since_id
+  since_id=$(discord_latest_message_id)
+  local deadline=$(( $(date +%s) + wait_seconds ))
+  echo "wait_for_discord_reply: 대기 시작 (최대 ${wait_seconds}s)"
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    local reply
+    reply=$(discord_poll_reply "$since_id")
+    if [ -n "$reply" ]; then
+      printf '%s' "$reply"
+      return 0
+    fi
+    sleep 30
+  done
+  return 1
+}
+
 write_tick_prompt() {
   cat > "$TICK_PROMPT_FILE" <<PROMPT
 너는 유루나비(YuruNavi) 프로젝트의 오케스트레이터다. 이건 밤새 반복 실행되는
@@ -182,6 +278,12 @@ STATUS: CONTINUE   ← 오늘 밤 작업이 아직 안 끝났음, 다음 틱이 
 STATUS: DONE       ← 오늘 밤 작업 전체가 끝났음
 STATUS: BLOCKED    ← 사람 판단이 필요해 더 진행 불가
 STATUS: STUCK      ← 같은 문제로 반복 실패, 더 시도해도 소용없음
+
+STATUS: BLOCKED를 쓰면 그 아래 내용이 그대로 사람 폰 디스코드 알림으로 전송되고,
+사람이 그 채널에 답장하면 다음 틱의 ${HANDOFF_FILE} 맨 아래에 "## 🙋 사용자 응답"
+섹션으로 그 답이 그대로 붙어서 넘어온다. 그러니 BLOCKED일 때는 막연히 "막혔음"이라고만
+쓰지 말고, 사람이 폰으로 봐도 바로 답할 수 있는 구체적인 질문(예/아니오, 또는 A/B 선택)
+형태로 명확하게 적어라.
 
 그 아래는 자유 형식(기존 loop/HANDOFF_*.md 관례처럼): 이번 틱에서 한 일(커밋
 해시 포함) / 현재 git 상태 / 다음 틱이 이어받을 정확한 할 일(번호 매겨서) /
@@ -259,8 +361,28 @@ while [ "$tick" -lt "$MAX_TICKS" ]; do
   # ---- 정지 조건 2: STATUS 명시적 종료 ----
   case "$status" in
     DONE) stop_reason="tick $tick: STATUS: DONE"; break ;;
-    BLOCKED) stop_reason="tick $tick: STATUS: BLOCKED"; break ;;
     STUCK) stop_reason="tick $tick: STATUS: STUCK"; break ;;
+    BLOCKED)
+      if discord_polling_available; then
+        echo "tick $tick: STATUS: BLOCKED — 디스코드 답장 대기 시작 (최대 ${BLOCKED_WAIT_SECONDS}s)"
+        notify_discord_blocked
+        if reply=$(wait_for_discord_reply "$BLOCKED_WAIT_SECONDS"); then
+          echo "tick $tick: 디스코드 답장 수신 — ${HANDOFF_FILE}에 반영 후 계속 진행"
+          {
+            echo ""
+            echo "## 🙋 사용자 응답 (디스코드, $(date '+%Y-%m-%d %H:%M:%S'))"
+            echo "$reply"
+          } >> "$HANDOFF_FILE"
+          continue
+        else
+          stop_reason="tick $tick: STATUS: BLOCKED — ${BLOCKED_WAIT_SECONDS}s 내 답장 없음"
+          break
+        fi
+      else
+        stop_reason="tick $tick: STATUS: BLOCKED (디스코드 봇 설정 없음 — 즉시 종료)"
+        break
+      fi
+      ;;
   esac
 
   # ---- 정지 조건 3: 연속 무진전 2틱 (HEAD 불변 AND 커밋 0 AND handoff 갱신 없음) ----
