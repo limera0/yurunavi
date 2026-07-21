@@ -8,9 +8,19 @@ lib/core, lib/modules/{map,route_planning,navigation,daylight_bar,settings,auth,
 lib/services, rust/, docker/
 
 ## 🚨 SYSTEM CONSTRAINTS
-- **Execution Mode:** Running via `--permission-mode auto`. Direct execution authorized.
+- **Execution Mode:** Running via `--permission-mode bypassPermissions`. Direct execution authorized.
 - **Scope:** Strictly locked to this repository (`yurunavi`). No external system modifications.
 - **Efficiency:** Maximize autonomy. Zero administrative or conversational overhead.
+
+## 🔗 무인 야간 실행 = tick 체인 (2026-07~)
+하룻밤 실행은 하나의 긴 세션이 아니라, `loop/run_night_auto.sh`가 순서대로
+실행하는 여러 개의 짧고 독립된 `claude -p` 세션("틱")의 연쇄다. 이유: 큰
+트랜스크립트 + 긴 단일 스트리밍 응답 조합이 서버쪽 mid-stream 실패를 유발하는
+알려진 문제 회피(anthropics/claude-code#51164).
+- 지금 이 세션은 직전 틱의 대화 기록을 전혀 갖고 있지 않다. 필요한 상태는 전부
+  파일에서 읽어라: 오늘 밤 작업 지시서 + `loop/.auto/handoff.md`.
+- "이전에 이미 했음" 같은 서술을 그대로 믿지 마라 — `git log`/`git show`로 직접 검증.
+- 이번 틱에서는 오늘 밤 작업 전체가 아니라 체크포인트 단위 하나만 진행해라.
 
 ## Hard rules (never violate)
 - NEVER commit secrets. All keys go in .env (which is gitignored).
@@ -25,7 +35,7 @@ lib/services, rust/, docker/
 ## 🔄 AUTONOMOUS TDD & GIT WORKFLOW
 You MUST follow this atomic iteration loop for every feature or fix. Do not bundle tasks.
 
-1. Orchestrator reads the night's task (from NIGHT_TASK.md).
+1. Orchestrator reads the night's task file passed in the prompt (dated `loop/HANDOFF_MMDD_*.md`-style task files; the stale root `NIGHT_TASK.md` is not the current convention).
 2. Break into small steps. Checkpoint commit.
 3. Delegate to flutter-coder or rust-coder.
 4. Run code-auditor. If FAIL, fix and re-audit (max 3 loops, then stop & report).
