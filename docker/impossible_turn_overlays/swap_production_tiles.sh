@@ -127,5 +127,8 @@ for desc, frm, to, kind, thresh in checks:
 PYEOF
 
 trap - ERR
-rm -rf "$CUSTOM_FILES/valhalla_tiles.old" "$CUSTOM_FILES/valhalla_tiles.tar.old"
+# valhalla_tiles.old의 내용물은 컨테이너(root)가 만든 것이라 호스트 rm -rf가
+# 권한 오류로 실패한다 (2026-07-21 실제 스왑에서 확인) — 같은 이미지로 root
+# 컨테이너를 띄워 지우면 조용히 끝난다.
+docker run --rm -v "$CUSTOM_FILES:/cf" alpine sh -c 'rm -rf /cf/valhalla_tiles.old /cf/valhalla_tiles.tar.old'
 echo "=== 완료 === 이전 타일 백업은 $BACKUP_TILES / $BACKUP_TAR / $BACKUP_PBF 에 보관됨"
