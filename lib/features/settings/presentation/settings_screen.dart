@@ -35,10 +35,19 @@ class SettingsScreen extends ConsumerWidget {
           const _SectionHeader(title: '지도 표기 언어'),
           _LanguageSelector(),
 
-          // ── Phase 2 이후 항목 (미구현) ────────────────────────────
+          // ── 주행 설정 ─────────────────────────────────────────────
           const _SectionHeader(title: '주행 설정'),
-          // TODO Phase 2: 도로 선호도
-          // TODO Phase 2: 내비뷰 설정
+          Consumer(builder: (ctx, ref, _) {
+            final headingUp = ref.watch(navHeadingUpProvider).value ?? true;
+            return SwitchListTile(
+              secondary: const Icon(Icons.navigation_outlined),
+              title: const Text('지도 방향'),
+              subtitle: Text(headingUp ? '헤딩업 (진행방향 위)' : '노스업 (북쪽 위)'),
+              value: headingUp,
+              onChanged: (v) => ref.read(navHeadingUpProvider.notifier).set(v),
+            );
+          }),
+          const Divider(height: 1),
           // TODO Phase 2: 안내 음성 / 안내 언어
 
           const _SectionHeader(title: '앱 설정'),

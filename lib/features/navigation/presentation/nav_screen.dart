@@ -439,7 +439,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // 기다리지 않고 흘려보내는 구조에서 발생).
         final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
         if (!_isManualMode && !_showCourseSheet) {
-          _recenter(loc, speedKmh: next.speedKmh, headingDeg: effectiveHeadingDeg);
+          final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
+          _recenter(loc,
+              speedKmh: next.speedKmh,
+              headingDeg: isNorthUp ? null : effectiveHeadingDeg,
+              forceBearingNorth: isNorthUp);
         }
         _ensureLocationMarker(effectiveHeadingDeg);
         unawaited(_maybeFetchAmbientPois());
@@ -962,7 +966,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   // headingDeg는 호출부가 _resolveHeading()으로 이미 확정한 값이어야 한다.
-  Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg}) async {
+  // forceBearingNorth=true 시 bearing을 0(북쪽)으로 고정하고 offset을 적용하지 않는다.
+  Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg, bool forceBearingNorth = false}) async {
     if (!_styleLoaded) return;
     // 3km/h 미만은 정차/저속으로 보고 줌을 갱신하지 않는다 — 정지 시 GPS
     // 속도 잡음(mpp가 0.238↔1.18처럼 튐)으로 줌이 진동하는 것을 방지.
@@ -999,7 +1004,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       }
     }
 
-    final brg = headingDeg ?? _lastHeadingDeg ?? 0.0;
+    final brg = forceBearingNorth ? 0.0 : (headingDeg ?? _lastHeadingDeg ?? 0.0);
     final update = ml.CameraUpdate.newCameraPosition(
         ml.CameraPosition(target: _toMl(camTarget), zoom: _navZoom, bearing: brg));
     if (animate) {
@@ -1462,10 +1467,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       final pos = ns?.pos;
       if (pos != null) {
         final speedKmh = ns?.speedKmh ?? 0;
+        final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
         _recenter(pos,
             animate: true,
             speedKmh: speedKmh,
-            headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+            headingDeg: isNorthUp ? null : _resolveHeading(speedKmh, ns?.headingDeg),
+            forceBearingNorth: isNorthUp);
       }
     });
   }
@@ -1589,10 +1596,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final pos = ns?.pos;
     if (pos != null) {
       final speedKmh = ns?.speedKmh ?? 0;
+      final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
       _recenter(pos,
           animate: true,
           speedKmh: speedKmh,
-          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+          headingDeg: isNorthUp ? null : _resolveHeading(speedKmh, ns?.headingDeg),
+          forceBearingNorth: isNorthUp);
     }
   }
 
@@ -1617,10 +1626,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final pos = ns?.pos;
     if (pos != null) {
       final speedKmh = ns?.speedKmh ?? 0;
+      final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
       _recenter(pos,
           animate: true,
           speedKmh: speedKmh,
-          headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+          headingDeg: isNorthUp ? null : _resolveHeading(speedKmh, ns?.headingDeg),
+          forceBearingNorth: isNorthUp);
     }
   }
 
@@ -2110,10 +2121,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     _recenterTimer?.cancel();
                     setState(() => _isManualMode = false);
                     final speedKmh = ns?.speedKmh ?? 0;
+                    final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
                     _recenter(pos,
                         animate: true,
                         speedKmh: speedKmh,
-                        headingDeg: _resolveHeading(speedKmh, ns?.headingDeg));
+                        headingDeg: isNorthUp ? null : _resolveHeading(speedKmh, ns?.headingDeg),
+                        forceBearingNorth: isNorthUp);
                   },
                 ),
               ],
