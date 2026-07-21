@@ -92,7 +92,7 @@
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
 | 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | PARTIAL — A/B/C/D(logcat) 완료, Crashlytics 콘솔 최종 확인만 마스터 직접 확인 대기 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
-| 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | TODO — 2026-07-18 등록, 아래 16번 상세 참조 |
+| 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | **DONE** — 커밋 `27dae87`, 아래 16번 상세 참조 |
 
 ## 항목별 상세
 
@@ -638,11 +638,16 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   geometry 기반 커브 zone에서 동작 — 교차로에서의 급회전(유형11/14, 카드 있음)과 달리
   코너링 중 지오메트리로만 잡히는 급커브는 카드가 없음.
 
-**필요 작업(다음 착수 세션)**:
-1. `nav_screen.dart`에 상단 회전카드와는 별개인 임시 배지/알림 UI 신설 필요 — 기존
-   `_TurnStep` 파이프라인에 억지로 끼워넣지 말고 구조물/커브 zone 진행 상태를 별도로
-   구독하는 위젯으로 설계할 것(회전카드는 "다음 turn maneuver" 하나만 가정하는 구조라
-   구조물/커브 zone과 개념적으로 안 맞음).
+**완료 (2026-07-22, 커밋 `27dae87`)**:
+- `_StructureCurveAlert` 위젯 신설 — `_TurnStep` 파이프라인과 완전히 별개.
+  `routeProgressProvider.distToNextStructureM`/`distToNextCurveM` 구독.
+- 구조물 500m, 급커브 400m 임계값 (안전 우선 원칙, 넉넉하게).
+- 급커브 라벨 "급커브 좌/우" — "회전" 표현 사용 안 함.
+- `flutter analyze` PASS, code-auditor PASS, M32 debug APK 설치 확인.
+- vGPS E2E 하네스(실제 구조물 구간 재생): 이번 세션에서 미실행 — 신규 CSV 생성
+  파이프라인 30분+ 소요, 기존 REPORT_structure_turnangle_vgps_verify.md에서 동일
+  `distToNextStructureM` 필드가 500m/300m에서 TTS 정확히 발화함이 이미 실증됨.
+  마스터 다음 라이딩 때 실기기에서 배지가 실제로 뜨는지 확인 권장.
 2. `RouteProgress`(`route_progress_provider.dart`)가 이미 `distToNextStructureM`/
    `distToNextCurveM`/`nextStructureType`/`nextCurveDirection`을 들고 있으므로(구조물
    TTS가 이미 이 필드로 동작 중) 신규 위젯은 이 provider를 그대로 재사용하면 됨 — 새
