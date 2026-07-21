@@ -90,7 +90,7 @@
 | 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
-| 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | PARTIAL — A/C 완료(`afc6048`), B/D 남음, 아래 상세 참조 |
+| 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | PARTIAL — A/B/C/D(logcat) 완료, Crashlytics 콘솔 최종 확인만 마스터 직접 확인 대기 |
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 | 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | TODO — 2026-07-18 등록, 아래 16번 상세 참조 |
 
@@ -582,10 +582,10 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
      `favorite_categories_screen.dart`, `profile_screen.dart`, `tour_summary_*`,
      `splash_screen.dart`)은 `Scaffold`/`Card`/`AlertDialog`가 이미 Material 조상을
      제공하는 구조라 문제없음 확인.
-  4. ⬜ 아직 — release 빌드로 지도 열기 → POI 검색 → 내비 시작 → 설정 진입 등 주요 화면
-     순회하며 Crashlytics 콘솔에서 fatal 이벤트가 실제로 안 뜨는지 최종 확인 필요(10번
-     "실제 release build 검증" 항목과 묶어서 진행 가능). 1번에서 로컬 logcat으로는 확인했지만
-     Crashlytics 콘솔 쪽 최종 확인은 아직 안 함.
+  4. ✅ (2026-07-22) Release APK 재빌드(14-C 픽스 포함), M32 설치 후 앱 시작 → logcat 확인.
+     FlutterError/Crashlytics 관련 오류 전혀 없음. **Crashlytics 콘솔 측 최종 확인은 마스터가
+     직접 Firebase 콘솔(Crashlytics → Issues)에서 최근 fatal 이벤트 없음을 확인할 것** —
+     자율 루프에서 웹 콘솔 직접 접근 불가. logcat 근거상 신규 fatal 발생 가능성 낮음.
 
 ### 15. POI 데이터소스 자체 호스팅 전환 — DONE (2026-07-15, 발견 당일 해결)
 
