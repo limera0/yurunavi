@@ -570,10 +570,8 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
      "계기" 문단의 157건도 실은 디버그 APK(1.0.1(2)) 테스트 중 발생한 것이었음(사용자가
      "디버그 APK로 단일 기기 테스트 중"이라 명시) — release 배포본에서 이 노이즈가 재현될
      가능성은 낮다는 뜻.
-  2. 위 근거로 **현재 세션 권고: `recordFlutterFatalError` 그대로 유지** (Firebase 공식
-     권장값과 일치, 실측상 release에서 오분류 위험 낮음). 다만 이건 정책 판단이라 코드
-     변경 없이 권고로만 기록 — 마스터 최종 확인 필요(B는 "결정 보류, 마스터 확인 대기"
-     상태로 둠, `recordFlutterFatalError` 코드는 손대지 않음).
+  2. ✅ (2026-07-21) **`recordFlutterFatalError` 유지 확정** — 마스터 결정. release 빌드에서
+     debug assert가 스트립되어 오분류 위험 없음, Firebase 공식 권장값과 일치. 코드 변경 없음.
   3. ✅ (2026-07-20) 전수 점검 완료 — `main_map_screen.dart`/`settings_screen.dart` 외
      `lib/features/{profile,tour_summary,auth,navigation}/presentation/` 전체 확인.
      **`main_map_screen.dart` 안에서 3건 추가 발견**: `_AddFavoriteSheet`/`_PlacesSheet`/
