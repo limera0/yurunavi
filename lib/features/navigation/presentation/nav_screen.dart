@@ -1738,6 +1738,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final isDay = daylightCycle?.isDay ?? true;
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
+    final progress = ref.watch(routeProgressProvider);
 
     ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
       final raw = _rawStyle;
@@ -2057,6 +2058,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
           ),
+
+          // ── 구조물/급커브 알림 배지 (회전카드와 완전히 별개 — 16번) ──────────
+          if (progress != null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 108,
+              left: 12,
+              right: 12,
+              child: Align(
+                alignment: Alignment.center,
+                child: _StructureCurveAlert(progress: progress, cs: cs),
+              ),
+            ),
 
           // ── 좌측 속도계 (상단 30% 높이, 네이버지도 배치 참고) ─────────────────
           Positioned(
@@ -2421,4 +2434,98 @@ class _TurnStep {
     if (s.endsWith('m')) return (s.substring(0, s.length - 1), 'm');
     return (s, '');
   }
+}
+
+/// 구조물(고가도로/터널/지하차도) 또는 지오메트리 감지 급커브가 앞에 있을 때
+/// 표시하는 알림 배지. [_TurnStep] 파이프라인(Valhalla maneuver)과 완전히 별개로
+/// [routeProgressProvider]를 직접 구독한다.
+///
+/// 표시 임계값(500 m / 400 m)은 안전 우선 원칙에 따라 넉넉하게 잡음.
+class _StructureCurveAlert extends StatelessWidget {
+  const _StructureCurveAlert({required this.progress, required this.cs});
+  final RouteProgress progress;
+  final ColorScheme cs;
+
+  static const _kStructThresholdM = 500.0;
+  static const _kCurveThresholdM  = 400.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final showStruct = progress.nextStructureType != null &&
+        progress.distToNextStructureM <= _kStructThresholdM;
+    final showCurve = progress.nextCurveDirection != null &&
+        progress.distToNextCurveM <= _kCurveThresholdM;
+
+    if (!showStruct && !showCurve) return const SizedBox.shrink();
+
+    // 더 가까운 쪽을 표시; 거리가 같으면 구조물 우선 (safety-priority)
+    if (showStruct &&
+        (!showCurve ||
+            progress.distToNextStructureM <= progress.distToNextCurveM)) {
+      return _badge(
+        icon: _structureIcon(progress.nextStructureType!),
+        label: progress.nextStructureType!.labelKo,
+        distM: progress.distToNextStructureM,
+        color: Colors.amber.shade800,
+      );
+    }
+    return _badge(
+      icon: Icons.warning_amber_rounded,
+      label: progress.nextCurveDirection == CurveDirection.left
+          ? '급커브 좌'
+          : '급커브 우',
+      distM: progress.distToNextCurveM,
+      color: Colors.deepOrange.shade700,
+    );
+  }
+
+  Widget _badge({
+    required IconData icon,
+    required String label,
+    required double distM,
+    required Color color,
+  }) {
+    final distStr = distM < 1000
+        ? '${distM.round()}m 앞'
+        : '${(distM / 1000).toStringAsFixed(1)}km 앞';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.93),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 20),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            distStr,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _structureIcon(StructureType type) => Icons.warning_amber_rounded;
 }
