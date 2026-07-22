@@ -783,20 +783,17 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     }
     _waypointMarkers = [];
     for (var i = 0; i < waypoints.length; i++) {
-      final name = i < names.length ? names[i] : null;
       final s = await c.addSymbol(ml.SymbolOptions(
         geometry: _toMl(waypoints[i]),
         iconImage: _kWpIcon,
         iconSize: _kWpIconSize,
         iconAnchor: 'bottom',
         zIndex: 5,
-        textField: name,
-        textSize: 12,
-        textOffset: const Offset(0, 1.4),
-        textAnchor: 'top',
-        textColor: '#212121',
-        textHaloColor: '#FFFFFF',
-        textHaloWidth: 1.2,
+        textField: '${i + 1}',
+        textSize: 11,
+        textColor: '#FFFFFF',
+        textOffset: const Offset(0, -2.1),
+        textAnchor: 'bottom',
       ));
       _waypointMarkers.add(s);
     }
