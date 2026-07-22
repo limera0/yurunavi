@@ -28,6 +28,7 @@ const POI_DB_PATH: &str = "/data/poi/poi.db";
 use axum::{
     extract::{Json, Query},
     http::StatusCode,
+    response::Html,
     routing::{get, post},
     Router,
 };
@@ -1055,6 +1056,145 @@ async fn handle_geocode_search(
     Ok(Json(Vec::new()))
 }
 
+// ── /privacy ───────────────────────────────────────────────────
+
+async fn handle_privacy() -> Html<&'static str> {
+    Html(PRIVACY_HTML)
+}
+
+const PRIVACY_HTML: &str = r#"<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>유루나비 개인정보처리방침</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans KR', sans-serif;
+         max-width: 800px; margin: 0 auto; padding: 24px 16px;
+         color: #212121; line-height: 1.7; font-size: 15px; }
+  h1 { font-size: 22px; border-bottom: 2px solid #008080; padding-bottom: 12px; }
+  h2 { font-size: 17px; margin-top: 32px; color: #004d4d; }
+  h3 { font-size: 15px; margin-top: 20px; color: #333; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+  th { background: #f0f0f0; }
+  li { margin-bottom: 6px; }
+  strong { color: #004d4d; }
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 32px 0; }
+  .notice { background: #fff8e1; border-left: 4px solid #ffb300;
+            padding: 12px 16px; margin: 20px 0; font-size: 13px; }
+  footer { margin-top: 40px; font-size: 12px; color: #888; }
+</style>
+</head>
+<body>
+<h1>유루나비(YuruNavi) 개인정보처리방침</h1>
+<p><strong>시행일자: 2026-07-11</strong> (최초 제정)</p>
+<p>유루나비(이하 "회사" 또는 "앱")는 이용자의 개인정보를 중요시하며, 「개인정보 보호법」 등 관련 법령을 준수합니다. 회사는 본 개인정보처리방침을 통해 이용자가 제공하는 개인정보가 어떠한 용도와 방식으로 이용되고 있으며, 개인정보 보호를 위해 어떠한 조치가 취해지고 있는지 알려드립니다.</p>
+
+<h2>1. 수집하는 개인정보 항목 및 수집 방법</h2>
+<h3>1-1. 위치정보</h3>
+<ul>
+  <li><strong>수집 항목</strong>: GPS 기반 정밀 위치정보(위도/경도), 이동 속도, 방향</li>
+  <li><strong>수집 방법</strong>: 앱 실행 중(포그라운드) 단말기 GPS를 통해 실시간 수집</li>
+  <li><strong>특이사항</strong>: 본 앱은 백그라운드 위치정보를 수집하지 않습니다(앱이 꺼져 있거나 화면이 꺼진 상태에서는 위치를 수집하지 않음).</li>
+</ul>
+<h3>1-2. 이용자가 직접 입력하는 정보</h3>
+<ul>
+  <li>닉네임, 인스타그램 계정(선택), 보유 오토바이 기종 등 프로필 정보</li>
+  <li>저장한 경로(즐겨찾기 코스) 정보</li>
+  <li>위 정보는 이용자의 <strong>단말기 내부에만 저장</strong>되며, 회사 서버로 전송되거나 수집되지 않습니다. 앱 삭제 시 함께 삭제됩니다.</li>
+</ul>
+<h3>1-3. 자동 수집 정보 (충돌 진단)</h3>
+<ul>
+  <li>앱 비정상 종료(크래시) 시 오류 로그, 단말기 모델명·OS 버전, 앱 버전 등 진단 정보를 Firebase Crashlytics(Google)를 통해 수집합니다. 이는 서비스 안정성 확보 목적이며, 이용자를 특정하는 개인 식별정보(이름, 연락처 등)는 포함하지 않습니다.</li>
+</ul>
+<h3>1-4. 회사가 운영하는 자체 서버로 전송되는 정보</h3>
+<ul>
+  <li>경로 탐색·지도 표시를 위해 GPS 좌표가 회사가 직접 운영하는 지도 타일·경로 탐색 서버(westinx.com 하위 도메인)로 전송됩니다. 이 서버는 외부 제3자가 아닌 회사가 직접 관리하며, 수신한 위치 정보를 경로 계산 응답 목적 외에 별도로 저장·분석·활용하지 않습니다. 다만 「위치정보의 보호 및 이용 등에 관한 법률」에 따라 개인위치정보의 수집·이용·제공사실 확인자료(요청 시각 등 최소한의 기록)는 6개월간 보관되며, 그 외 서비스 운영·보안을 위한 최소한의 서버 접속기록이 관련 법령에 따라 일정기간 보관될 수 있습니다.</li>
+</ul>
+
+<h2>2. 개인정보의 수집 및 이용 목적</h2>
+<ul>
+  <li>실시간 내비게이션 경로 안내 및 음성 안내 제공</li>
+  <li>사용자 맞춤 코스(재미있는 도로 우선) 추천</li>
+  <li>서비스 오류 진단 및 안정성 개선(크래시 리포팅)</li>
+  <li>저장된 프로필·경로 정보를 통한 개인화 기능 제공(단말기 내부 저장)</li>
+</ul>
+
+<h2>3. 개인정보의 보유 및 이용 기간</h2>
+<ul>
+  <li><strong>위치정보(경로 계산용 GPS 좌표)</strong>: 실시간 경로 계산에만 이용되며, 계산 완료 후 별도 데이터베이스에 저장하지 않습니다.</li>
+  <li><strong>개인위치정보 수집·이용·제공사실 확인자료</strong>: 관련 법령에 따라 6개월간 보관됩니다.</li>
+  <li><strong>프로필·저장 경로 정보</strong>: 단말기에 로컬 저장되며, 이용자가 앱을 삭제하거나 직접 삭제할 때까지 보관됩니다. 회사 서버에는 저장되지 않습니다.</li>
+  <li><strong>크래시 진단 정보</strong>: Firebase Crashlytics 정책에 따라 최대 90일간 보관 후 자동 삭제됩니다.</li>
+</ul>
+
+<h2>4. 개인정보의 제3자 제공</h2>
+<p>회사는 이용자의 개인정보를 원칙적으로 외부에 제공하지 않습니다. 다만 아래의 경우는 예외로 합니다.</p>
+<ul>
+  <li>이용자가 사전에 동의한 경우</li>
+  <li>법령의 규정에 의거하거나, 수사 목적으로 법령에 정해진 절차와 방법에 따라 수사기관의 요구가 있는 경우</li>
+</ul>
+
+<h2>5. 개인정보 처리의 위탁 및 국외 이전</h2>
+<p>서비스 안정성 확보를 위해 아래와 같이 개인정보(진단 정보) 처리 업무를 위탁하고 있으며, 이 과정에서 개인정보가 국외로 이전됩니다.</p>
+<table>
+  <tr><th>이전받는 자</th><th>이전되는 항목</th><th>이전 국가</th><th>이전 방법</th><th>이용목적 및 보유기간</th></tr>
+  <tr><td>Google LLC (Firebase Crashlytics)</td><td>크래시 로그, 단말기 모델명·OS 버전, 앱 버전 등 진단 정보</td><td>미국</td><td>앱 내 SDK를 통한 자동 전송</td><td>앱 크래시·오류 진단, 수집 후 최대 90일</td></tr>
+</table>
+<ul>
+  <li><strong>이전받는 자 연락처</strong>: Google LLC (https://firebase.google.com/support/privacy)</li>
+  <li><strong>이전 거부 방법 및 효과</strong>: 크래시 리포팅은 별도 동의 절차 없이 서비스 안정성 확보를 위해 필수적으로 사용되는 기능으로, 현재는 개별 거부 기능을 제공하지 않습니다. 거부를 원하실 경우 11번 연락처로 문의해 주시면 확인 후 안내해 드립니다(거부 시 크래시 진단 기능이 제한될 수 있습니다).</li>
+</ul>
+
+<h2>6. 이용자 및 법정대리인의 권리와 행사방법</h2>
+<p>이용자는 언제든지 다음의 권리를 행사할 수 있습니다.</p>
+<ul>
+  <li>단말기 내 저장된 프로필·경로 정보: 앱 삭제 또는 앱 내 초기화 기능을 통해 직접 삭제</li>
+  <li>위치정보 이용 동의 철회: 단말기 설정에서 앱의 위치 권한을 거부/취소</li>
+  <li>그 외 문의: 아래 11번 연락처를 통해 문의</li>
+</ul>
+<p>본 서비스는 만 14세 미만 아동을 대상으로 하지 않으며, 만 14세 미만 아동의 개인정보를 고의로 수집하지 않습니다.</p>
+
+<h2>7. 개인정보의 파기절차 및 방법</h2>
+<ul>
+  <li>단말기 로컬 저장 정보는 이용자의 앱 삭제 시 단말기 저장소에서 함께 삭제됩니다.</li>
+  <li>회사는 위치정보 자체(GPS 좌표값)를 별도 데이터베이스에 저장하지 않으므로 이에 대한 파기 대상 데이터가 발생하지 않습니다. 다만 3번에서 밝힌 개인위치정보 수집·이용·제공사실 확인자료는 보유기간(6개월) 경과 후 복구 불가능한 방법으로 지체 없이 파기합니다.</li>
+</ul>
+
+<h2>8. 개인정보 자동 수집 장치의 설치·운영 및 거부에 관한 사항</h2>
+<p>본 앱은 광고 목적의 쿠키·트래킹 SDK를 사용하지 않습니다. 크래시 리포팅(Firebase Crashlytics)만 사용하며, 이는 단말기 설정 또는 향후 제공될 앱 내 설정을 통해 비활성화할 수 있습니다.</p>
+
+<h2>9. 개인정보의 안전성 확보조치</h2>
+<ul>
+  <li><strong>기술적 조치</strong>: 단말기-서버 간 통신 구간 암호화(HTTPS), 자체 운영 서버에 대한 접근 권한 제한</li>
+  <li><strong>관리적 조치</strong>: 개인정보에 접근할 수 있는 인원을 최소화하여 운영</li>
+</ul>
+
+<h2>10. 위치정보 관련 특칙 (「위치정보의 보호 및 이용 등에 관한 법률」)</h2>
+<p>본 앱은 실시간 경로 안내를 위해 개인위치정보를 처리하는 위치기반서비스사업자로서, 동법에 따라 다음 사항을 안내합니다.</p>
+<ul>
+  <li><strong>8세 이하의 아동 등의 보호의무자 권리</strong>: 8세 이하의 아동, 피성년후견인 등 개인위치정보주체를 사실상 보호할 법률상 의무가 있는 자(보호의무자)가 이들의 생명·신체보호를 위해 개인위치정보의 이용 또는 제공에 동의하는 경우, 본인의 동의가 있는 것으로 봅니다.</li>
+  <li><strong>손해배상</strong>: 회사의 고의 또는 과실로 개인위치정보와 관련하여 이용자에게 손해가 발생한 경우, 이용자는 관련 법령이 정하는 바에 따라 손해배상을 청구할 수 있습니다.</li>
+  <li><strong>위치정보관리책임자</strong>: 아래 11번과 동일</li>
+</ul>
+
+<h2>11. 개인정보 보호책임자·위치정보관리책임자 및 문의처</h2>
+<ul>
+  <li><strong>담당자</strong>: 유루나비 개발자</li>
+  <li><strong>이메일</strong>: ceo@westinx.com</li>
+</ul>
+
+<h2>12. 고지의 의무</h2>
+<p>본 개인정보처리방침의 내용 추가, 삭제 및 수정이 있을 경우 시행일자 최소 7일 전부터 앱 내 공지사항 또는 본 문서를 통해 고지합니다.</p>
+
+<hr>
+<footer>
+  <p>본 문서는 Google Play 콘솔의 "데이터 보안(Data Safety)" 양식 작성 시 실제 수집 항목과 반드시 일치시켜야 합니다.</p>
+</footer>
+</body>
+</html>"#;
+
 // ── /health ────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -1077,6 +1217,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(handle_health))
+        .route("/privacy", get(handle_privacy))
         .route("/calc_route", post(handle_calc_route))
         .route("/score_route", post(handle_score_route))
         .route("/calc_winding_score", post(handle_winding))
