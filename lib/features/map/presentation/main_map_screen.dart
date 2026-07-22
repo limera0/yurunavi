@@ -1134,7 +1134,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     final origin = _origin ?? _lastKnown;
     if (origin == null) return;
     final dist = _haversineKm(origin, dest);
-    ref.read(mapInteractionProvider.notifier).setDestination(dest, dist);
+    ref.read(mapInteractionProvider.notifier).setDestination(dest, dist, snapshotOrigin: origin);
 
     final sw = LatLng(
       origin.latitude < dest.latitude ? origin.latitude : dest.latitude,

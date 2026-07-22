@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../models/poi.dart';
 import '../../navigation/providers/nav_state_provider.dart';
 import '../../../models/saved_place.dart';
+import '../models/route_stop.dart';
 import '../../../models/saved_route.dart';
 import '../../../models/user_profile.dart';
 import '../../../services/daylight_service.dart';
@@ -104,22 +105,18 @@ enum MapInteractionMode { idle, destinationSelected, waypointSelecting }
 
 class MapInteractionState {
   final MapInteractionMode mode;
-  final LatLng? destination;
-  final List<LatLng> waypoints; // 다중 경유지
-  final List<String?> waypointNames; // waypoints와 index-aligned 지명
+  final List<RouteStop> stops; // [출발지, 경유지..., 도착지] 통합 리스트
   final double distanceKm;
   final bool isLoading;
   final List<LatLng> routePolyline; // 선택된 카드의 경로 좌표
   final List<List<LatLng>> allRoutes; // 3카드 경로 전체 (Valhalla 3회 병렬 페치)
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
   final List<({double km, int mins, double windingScore})> allRouteMeta; // 각 경로의 거리·시간 메타
-  final String? destinationName; // POI 탭 지명
+  final String? destinationName; // POI 탭 지명 (비동기 해석 전용)
 
   const MapInteractionState({
     this.mode = MapInteractionMode.idle,
-    this.destination,
-    this.waypoints = const [],
-    this.waypointNames = const [],
+    this.stops = const [],
     this.distanceKm = 0,
     this.isLoading = false,
     this.routePolyline = const [],
@@ -129,14 +126,30 @@ class MapInteractionState {
     this.destinationName,
   });
 
+  // ── 편의 getter (기존 호출부 호환) ────────────────────────────────────────────
+
+  /// stops[0] — 명시적 출발지 (없으면 null, GPS _origin 로컬변수 사용)
+  LatLng? get origin => stops.isEmpty ? null : stops.first.latLng;
+
+  /// stops.last — 도착지 (stops 2개 이상일 때만)
+  LatLng? get destination => stops.length < 2 ? null : stops.last.latLng;
+
+  /// stops[1..last-1] — 중간 경유지 좌표 목록
+  List<LatLng> get waypoints => stops.length < 3
+      ? const []
+      : stops.sublist(1, stops.length - 1).map((s) => s.latLng).toList();
+
+  /// stops[1..last-1] — 중간 경유지 지명 목록
+  List<String?> get waypointNames => stops.length < 3
+      ? const []
+      : stops.sublist(1, stops.length - 1).map((s) => s.name).toList();
+
   /// 단일 경유지 편의 getter (기존 코드 호환)
   LatLng? get waypoint => waypoints.isEmpty ? null : waypoints.last;
 
   MapInteractionState copyWith({
     MapInteractionMode? mode,
-    LatLng? destination,
-    List<LatLng>? waypoints,
-    List<String?>? waypointNames,
+    List<RouteStop>? stops,
     double? distanceKm,
     bool? isLoading,
     List<LatLng>? routePolyline,
@@ -144,23 +157,29 @@ class MapInteractionState {
     int? selectedRouteIdx,
     List<({double km, int mins, double windingScore})>? allRouteMeta,
     String? destinationName,
-    bool clearDestination = false,
+    bool clearStops = false,
     bool clearWaypoints = false,
     bool clearRoute = false,
     bool clearDestinationName = false,
   }) {
+    List<RouteStop> resolvedStops;
+    if (clearStops) {
+      resolvedStops = const [];
+    } else if (clearWaypoints && this.stops.length >= 2) {
+      // 경유지만 제거: origin + destination 유지
+      resolvedStops = [this.stops.first, this.stops.last];
+    } else {
+      resolvedStops = stops ?? this.stops;
+    }
     return MapInteractionState(
       mode: mode ?? this.mode,
-      destination: clearDestination ? null : destination ?? this.destination,
-      waypoints: clearWaypoints ? [] : waypoints ?? this.waypoints,
-      waypointNames:
-          clearWaypoints ? [] : waypointNames ?? this.waypointNames,
+      stops: resolvedStops,
       distanceKm: distanceKm ?? this.distanceKm,
       isLoading: isLoading ?? this.isLoading,
-      routePolyline: clearRoute ? [] : routePolyline ?? this.routePolyline,
-      allRoutes: clearRoute ? [] : allRoutes ?? this.allRoutes,
+      routePolyline: clearRoute ? const [] : routePolyline ?? this.routePolyline,
+      allRoutes: clearRoute ? const [] : allRoutes ?? this.allRoutes,
       selectedRouteIdx: selectedRouteIdx ?? this.selectedRouteIdx,
-      allRouteMeta: clearRoute ? [] : allRouteMeta ?? this.allRouteMeta,
+      allRouteMeta: clearRoute ? const [] : allRouteMeta ?? this.allRouteMeta,
       destinationName: clearDestinationName ? null : destinationName ?? this.destinationName,
     );
   }
@@ -174,22 +193,53 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
   @override
   MapInteractionState build() => const MapInteractionState();
 
-  /// 목적지 확정 + 경로 카드 표시 모드로 전환
-  void setDestination(LatLng dest, double distKm) {
+  /// 목적지 확정 + 경로 카드 표시 모드로 전환.
+  /// [snapshotOrigin]: 목적지 선택 시점의 GPS 위치 — stops[0]으로 고정된다.
+  /// stops가 이미 2개 이상이면 기존 출발지(stops[0])를 유지하고 도착지만 교체.
+  void setDestination(LatLng dest, double distKm,
+      {LatLng? snapshotOrigin, String? name}) {
+    final List<RouteStop> newStops;
+    if (state.stops.length >= 2) {
+      // 출발지 유지, 도착지만 교체
+      newStops = [
+        ...state.stops.sublist(0, state.stops.length - 1),
+        RouteStop(latLng: dest, name: name),
+      ];
+    } else if (snapshotOrigin != null) {
+      // 최초 목적지 선택: GPS 위치를 출발지로 고정
+      newStops = [
+        RouteStop(latLng: snapshotOrigin, isCurrentLocation: true),
+        RouteStop(latLng: dest, name: name),
+      ];
+    } else {
+      // 출발지 미확보 상태 (드물지만 방어)
+      newStops = [RouteStop(latLng: dest, name: name)];
+    }
     state = state.copyWith(
+      stops: newStops,
       mode: MapInteractionMode.destinationSelected,
-      destination: dest,
       distanceKm: distKm,
     );
   }
 
-  /// 경유지 추가 (다중 경유지 지원)
+  /// stops[0]을 명시적으로 설정 (WaypointManagementSheet에서 커스텀 출발지 선택 시)
+  void setOrigin(LatLng origin, {String? name}) {
+    final stops = [...state.stops];
+    final originStop = RouteStop(latLng: origin, name: name, isCurrentLocation: false);
+    if (stops.isEmpty) {
+      state = state.copyWith(stops: [originStop]);
+    } else {
+      stops[0] = originStop;
+      state = state.copyWith(stops: stops);
+    }
+  }
+
+  /// 경유지 추가 — stops의 도착지 바로 앞에 삽입
   void addWaypoint(LatLng wp, {String? name}) {
-    state = state.copyWith(
-      waypoints: [...state.waypoints, wp],
-      waypointNames: [...state.waypointNames, name],
-      mode: MapInteractionMode.idle,
-    );
+    final stops = [...state.stops];
+    final insertIdx = stops.length >= 2 ? stops.length - 1 : stops.length;
+    stops.insert(insertIdx, RouteStop(latLng: wp, name: name));
+    state = state.copyWith(stops: stops, mode: MapInteractionMode.idle);
   }
 
   /// 단일 경유지 설정 (기존 API 호환)
@@ -200,12 +250,25 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
     state = state.copyWith(mode: MapInteractionMode.waypointSelecting);
   }
 
-  /// 경유지 제거
+  /// 경유지 제거 (idx: waypoints 기준 0-based → stops에서 idx+1)
   void removeWaypoint(int idx) {
-    final updatedPoints = [...state.waypoints]..removeAt(idx);
-    final updatedNames = [...state.waypointNames];
-    if (idx < updatedNames.length) updatedNames.removeAt(idx);
-    state = state.copyWith(waypoints: updatedPoints, waypointNames: updatedNames);
+    final stops = [...state.stops];
+    final stopsIdx = idx + 1; // stops[0]은 출발지
+    if (stopsIdx >= stops.length - 1) return; // 도착지는 제거 불가
+    stops.removeAt(stopsIdx);
+    state = state.copyWith(stops: stops);
+  }
+
+  /// stops 전체 순서 변경 (출발지·경유지·도착지 모두 재배치 가능)
+  void reorderStop(int oldIdx, int newIdx) {
+    final stops = [...state.stops];
+    if (oldIdx < 0 || oldIdx >= stops.length) return;
+    if (newIdx < 0 || newIdx >= stops.length) return;
+    // ReorderableListView delivers newIdx already past the gap when moving downward
+    if (newIdx > oldIdx) newIdx -= 1;
+    final stop = stops.removeAt(oldIdx);
+    stops.insert(newIdx, stop);
+    state = state.copyWith(stops: stops);
   }
 
   void setLoading(bool v) => state = state.copyWith(isLoading: v);
