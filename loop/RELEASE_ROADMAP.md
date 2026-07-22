@@ -235,10 +235,12 @@
   당겨서 해도 무방** — 다음 세션 판단에 맡김 (디자인 자산 없이도 서명/난독화만
   검증 가능하므로).
 
-### 11. 하드코딩 스타일 → 토큰 기반 전면 리팩터
-- 선행조건: 7번(뼈대) + 8번(팔레트 확정) 완료. 기존 `lib/features/*` 전 화면의
-  하드코딩된 `Colors.*`/`TextStyle` 리터럴을 7번 토큰 참조로 교체.
-- 규모가 커서 여러 커밋으로 분할 예정 (착수 세션에서 계획 수립).
+### 11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL
+- Phase 0~4 완료 (2026-07-22, `0b17048`~`2751048`, 상세: `MORNING_REPORT_0722_skin_infra.md`):
+  AppConfig URL 추상화, AppSkin 인터페이스, DefaultSkin, SkinProvider + call-site 교체
+  (`Color(0xFF008080)` 27건 → 0건), JSON 스킨 로더.
+- Phase 5(수익화 스캐폴딩·스킨 목록 UI)만 남음 — 선행조건: 8번(브랜드 방향성 확정).
+- 인라인 `TextStyle(...)` 116건(15파일)은 Phase 5와 함께 8번 이후 정리 권장.
 
 ### 12. 백엔드 인프라 IaC화 — DONE
 - 목표: 타일서버(tileserver-gl)와 `navi.westinx.com` 백엔드를 `docker/` 안에
