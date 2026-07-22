@@ -6,7 +6,8 @@ VS Code 세션과 완전히 무관하게 systemd로 상시 구동된다(westinx-
 이 봇은 그걸 원격에서 켜고/끄고/상태를 물어볼 수 있게 하는 얇은 제어 계층일
 뿐이다 — 별도의 LLM 호출이나 자체 판단 로직은 없다.
 
-명령(디스코드 DM 또는 지정 채널에서, DISCORD_OWNER_USER_ID 본인만):
+명령(디스코드 DM 또는 지정 길드(DISCORD_GUILD_ID) 내 어느 채널에서든,
+DISCORD_OWNER_USER_ID 본인만):
   !run <task_file>   loop/run_night_auto.sh <task_file> 를 백그라운드로 시작
   !status            현재 실행 중인지, 최근 handoff 상태, 최근 커밋 확인
   !stop              실행 중인 틱체인을 정지
@@ -49,7 +50,8 @@ def load_env() -> dict:
 
 ENV = load_env()
 BOT_TOKEN = ENV["DISCORD_BOT_TOKEN"]
-CHANNEL_ID = int(ENV["DISCORD_CHANNEL_ID"])
+CHANNEL_ID = int(ENV["DISCORD_CHANNEL_ID"])  # 상태 브로드캐스트(기동/야간루프 종료 알림) 기본 채널
+GUILD_ID = int(ENV["DISCORD_GUILD_ID"])
 OWNER_ID = int(ENV["DISCORD_OWNER_USER_ID"])
 
 intents = discord.Intents.default()
@@ -64,7 +66,7 @@ def is_authorized(message: discord.Message) -> bool:
         return False
     if isinstance(message.channel, discord.DMChannel):
         return True
-    return message.channel.id == CHANNEL_ID
+    return message.guild is not None and message.guild.id == GUILD_ID
 
 
 def running_pid() -> int | None:
