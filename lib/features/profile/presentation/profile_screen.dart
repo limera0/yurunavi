@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../models/bike_profile.dart';
 import '../../../models/user_profile.dart';
 import '../../../providers/app_providers.dart';
@@ -84,7 +85,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('프로필 설정'),
-        backgroundColor: const Color(0xFF008080),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         actions: [
           TextButton(
@@ -103,7 +104,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               children: [
                 const CircleAvatar(
                   radius: 48,
-                  backgroundColor: Color(0xFF008080),
+                  backgroundColor: AppColors.primary,
                   child: Icon(Icons.person, size: 56, color: Colors.white),
                 ),
                 Positioned(
@@ -154,7 +155,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('추가'),
                 style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF008080)),
+                    foregroundColor: AppColors.primary),
               ),
             ],
           ),
@@ -216,12 +217,12 @@ class _BikeCard extends StatelessWidget {
             const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
-              ? const Color(0xFF008080).withValues(alpha: 0.1)
+              ? AppColors.primary.withValues(alpha: 0.1)
               : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isSelected
-                ? const Color(0xFF008080)
+                ? AppColors.primary
                 : Colors.grey.shade200,
             width: isSelected ? 2 : 1,
           ),
@@ -236,7 +237,7 @@ class _BikeCard extends StatelessWidget {
           children: [
             Icon(
               Icons.two_wheeler,
-              color: isSelected ? const Color(0xFF008080) : Colors.grey,
+              color: isSelected ? AppColors.primary : Colors.grey,
               size: 28,
             ),
             const SizedBox(width: 12),
@@ -250,7 +251,7 @@ class _BikeCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
                       color: isSelected
-                          ? const Color(0xFF008080)
+                          ? AppColors.primary
                           : const Color(0xFF222222),
                     ),
                   ),
@@ -264,7 +265,7 @@ class _BikeCard extends StatelessWidget {
             ),
             if (isSelected)
               const Icon(Icons.check_circle,
-                  color: Color(0xFF008080), size: 20),
+                  color: AppColors.primary, size: 20),
             const SizedBox(width: 8),
             GestureDetector(
               onTap: onDelete,
@@ -352,7 +353,7 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF008080),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10)),
@@ -500,7 +501,7 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
         children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: const Color(0xFF008080),
+            backgroundColor: AppColors.primary,
             backgroundImage:
                 user.photoURL != null ? NetworkImage(user.photoURL!) : null,
             child: user.photoURL == null
@@ -590,7 +591,7 @@ class _LabeledField extends StatelessWidget {
             hintText: hint,
             prefixText: prefixText,
             prefixIcon:
-                Icon(icon, size: 18, color: const Color(0xFF008080)),
+                Icon(icon, size: 18, color: AppColors.primary),
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16, vertical: 12),
             border: OutlineInputBorder(
@@ -604,7 +605,7 @@ class _LabeledField extends StatelessWidget {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(
-                  color: Color(0xFF008080), width: 2),
+                  color: AppColors.primary, width: 2),
             ),
             filled: true,
             fillColor: Colors.grey.shade50,

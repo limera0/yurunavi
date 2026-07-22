@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../core/theme/app_theme.dart';
 import '../models/user_profile.dart';
 
 /// 상단 아이콘 클릭 시 나타나는 플로팅 프로필 카드
@@ -64,7 +66,7 @@ class _FloatingProfileCardState extends State<FloatingProfileCard>
                     children: [
                       const CircleAvatar(
                         radius: 22,
-                        backgroundColor: Color(0xFF008080),
+                        backgroundColor: AppColors.primary,
                         child:
                             Icon(Icons.person, size: 26, color: Colors.white),
                       ),
@@ -88,7 +90,7 @@ class _FloatingProfileCardState extends State<FloatingProfileCard>
                                 '@${widget.profile.instagramHandle}',
                                 style: const TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF008080),
+                                  color: AppColors.primary,
                                 ),
                               ),
                           ],
@@ -120,7 +122,7 @@ class _FloatingProfileCardState extends State<FloatingProfileCard>
                         child: Row(
                           children: [
                             const Icon(Icons.two_wheeler,
-                                size: 16, color: Color(0xFF008080)),
+                                size: 16, color: AppColors.primary),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(

@@ -1103,14 +1103,14 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 const SizedBox(height: 4),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.flag_outlined, color: Color(0xFF008080)),
+                  leading: const Icon(Icons.flag_outlined, color: AppColors.primary),
                   title: const Text('여기로 안내'),
                   onTap: () => Navigator.pop(context, _TapAction.destination),
                 ),
                 if (hasRoute)
                   ListTile(
                     leading: const Icon(Icons.add_location_alt_outlined,
-                        color: Color(0xFF008080)),
+                        color: AppColors.primary),
                     title: const Text('경유지 추가'),
                     subtitle: const Text('현재 경로에 경유지를 삽입합니다',
                         style: TextStyle(fontSize: 12)),
@@ -2533,7 +2533,7 @@ class _AddFavoriteSheetState extends ConsumerState<_AddFavoriteSheet> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF008080),
+                        backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(

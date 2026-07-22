@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_theme.dart';
+
 class DistanceOverlay extends StatelessWidget {
   final double distanceKm;
 
@@ -21,20 +23,20 @@ class DistanceOverlay extends StatelessWidget {
               offset: const Offset(0, 4),
             ),
           ],
-          border: Border.all(color: const Color(0xFF008080), width: 2),
+          border: Border.all(color: AppColors.primary, width: 2),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.straighten,
-                color: Color(0xFF008080), size: 20),
+                color: AppColors.primary, size: 20),
             const SizedBox(width: 8),
             Text(
               '${distanceKm.toStringAsFixed(0)} km',
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 20,
-                color: Color(0xFF008080),
+                color: AppColors.primary,
                 letterSpacing: 0.5,
               ),
             ),

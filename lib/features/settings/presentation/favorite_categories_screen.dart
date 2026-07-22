@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../models/saved_place.dart';
 import '../../map/providers/map_providers.dart';
 
@@ -47,7 +48,7 @@ class FavoriteCategoriesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('즐겨찾기 카테고리'),
-        backgroundColor: const Color(0xFF008080),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
@@ -88,7 +89,7 @@ class FavoriteCategoriesScreen extends ConsumerWidget {
                   final name = e.value;
                   return ListTile(
                     leading: const Icon(Icons.label_rounded,
-                        color: Color(0xFF008080)),
+                        color: AppColors.primary),
                     title: Text(name),
                     onTap: () => _renameCategory(context, ref, index, name),
                     trailing: IconButton(
@@ -145,7 +146,7 @@ class _CategoryEditDialogState extends State<_CategoryEditDialog> {
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF008080),
+            backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

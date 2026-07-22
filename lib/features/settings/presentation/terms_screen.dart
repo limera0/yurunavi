@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 /// 정적 이용약관 화면. `docs/terms_of_service.md`의 내용을 그대로 옮긴
 /// 일회성 화면으로, 마크다운 렌더링 패키지 없이 Dart 문자열로 하드코딩한다.
 class TermsScreen extends StatelessWidget {
@@ -127,7 +129,7 @@ class TermsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('이용약관'),
-        backgroundColor: const Color(0xFF008080),
+        backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
