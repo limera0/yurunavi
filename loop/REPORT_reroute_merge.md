@@ -33,13 +33,11 @@ ff1c474 refactor(nav): use _applyRouteGuidance on initial route
 | line ~109 | `late final List<_TurnStep>` → `late List<_TurnStep>` |
 | line ~141 | initState maneuver 블록 → `_applyRouteGuidance(widget.maneuvers)` 호출로 교체 |
 | line ~357 | `_applyRouteGuidance()` 메서드 신규 추가 |
-| line ~463 | `_reroute` 내 setState에 `_applyRouteGuidance(routes[selIdx].maneuvers)` + `_announceStep(0)` 추
-가 |
+| line ~463 | `_reroute` 내 setState에 `_applyRouteGuidance(routes[selIdx].maneuvers)` + `_announceStep(0)` 추가 |
 
 ### 0-5 겹침 판정: **독립 (충돌 없음)**
 - feat 변경 구간: `initState` 하단부(maneuver 변환), `_reroute` 내부
-- main 언어·마커 코드: `_rawStyle`/`_styleJson` 필드(line 56-57), 언어 로드 콜백(line ~179), `onStyleLoadedCall
-back`/`styleString`(line ~802-818)
+- main 언어·마커 코드: `_rawStyle`/`_styleJson` 필드(line 56-57), 언어 로드 콜백(line ~179), `onStyleLoadedCallback`/`styleString`(line ~802-818)
 - 두 영역은 텍스트상 분리. `_steps` 선언 변경(`final` 제거)만 같은 파일 내 근접하나 내용 충돌 없음.
 
 ### 0-6 드라이런
@@ -106,5 +104,4 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
 ## 변경 요약
 
-`_applyRouteGuidance()` 헬퍼 추출로 초기 진입과 재탐색 시 maneuver 리스트·stepIdx·announcedIdx 상태를 동일하게
-재설정. `_reroute()` 내 setState 후 `_announceStep(0)` 호출로 TTS 즉시 트리거.
+`_applyRouteGuidance()` 헬퍼 추출로 초기 진입과 재탐색 시 maneuver 리스트·stepIdx·announcedIdx 상태를 동일하게 재설정. `_reroute()` 내 setState 후 `_announceStep(0)` 호출로 TTS 즉시 트리거.
