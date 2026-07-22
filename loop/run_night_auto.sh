@@ -556,6 +556,13 @@ else
 fi
 
 check_verdict
+
+# D: Claude 진입점(loop/STATUS.md) 갱신 — 방금 생긴 커밋/리포트가 즉시 반영되게.
+# LLM을 안 쓰는 순수 추출이라 빠르고, 실패해도 실행 결과에 영향 없음(베스트 에포트).
+if [ -x loop/gen_status.sh ]; then
+  loop/gen_status.sh || echo "WARNING: gen_status.sh 실패 — STATUS.md가 최신이 아닐 수 있음"
+fi
+
 notify_discord
 
 echo "=== run_night_auto end $(date) === total_ticks=$tick stop_reason=[$stop_reason]"
