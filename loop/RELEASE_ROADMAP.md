@@ -87,7 +87,7 @@
 | 8 | 브랜드 방향성 확정 (컬러/타이포/무드) | 신규 | DEFERRED — 별도 세션(디자인 검토) |
 | 9 | 앱 아이콘 확정 | 신규 | DEFERRED — 8번 이후 |
 | 10 | 실제 release build 1회 실행·검증(설치/크기 포함) | 1급 | DEFERRED — 8~10 묶음으로 진행 |
-| 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | BLOCKED — 선행: 7+8 완료 |
+| 11 | 하드코딩 스타일 → 토큰 기반 전면 리팩터 | 신규(1급/2급) | **PARTIAL** — Phase 0~4 완료(2026-07-22): AppConfig URL 추상화 + AppSkin 인터페이스 + DefaultSkin + SkinProvider + JSON 로더. Color(0xFF008080) 0건 달성. Phase 5(수익화 스캐폴딩)는 8번 브랜드 확정 후. |
 | 12 | 백엔드 인프라 IaC화 (타일서버·navi 백엔드 docker화, 모니터링/백업) | 특급 | **DONE** |
 | 13 | 기능 갭 해소 (로그인, 투어 요약, POI, 백그라운드 내비, 설정 Phase2) | 2급 | **IN_PROGRESS** — 8개 하위항목으로 분해(아래). 13-1 DONE(`2d91e4d`), 13-2 DONE(`9393af3`), 13-3 DONE(로컬 MVP, `e7fb8ae`), 13-5 DONE(Android), 13-6 DONE(Google 로그인만), 13-4부터 진행 |
 | 14 | Crashlytics fatal 오분류 전수 감사 (배포 전 필수) | 1급 | PARTIAL — A/B/C/D(logcat) 완료, Crashlytics 콘솔 최종 확인만 마스터 직접 확인 대기 |
