@@ -1,0 +1,35 @@
+{
+  "id": "default",
+  "displayName": "기본",
+  "isPremium": false,
+  "colors": {
+    "brand": "#F28C28",
+    "onBrand": "#FFFFFF",
+    "brandLight": "#26F28C28",
+    "background": "#F9F7F2",
+    "surface": "#FFFFFF",
+    "surfaceVariant": "#F2F0EB",
+    "onSurface": "#1A2B3C",
+    "onSurfaceVariant": "#5A6A7A",
+    "danger": "#E53935",
+    "warning": "#FFB300",
+    "success": "#4CAF50",
+    "routeLine": "#F28C28",
+    "structureAlert": "#FF8F00",
+    "curveAlert": "#E64A19",
+    "speedometerBg": "#FFFFFF"
+  },
+  "motion": {
+    "fast": 150,
+    "standard": 300,
+    "slow": 600,
+    "pulse": 700
+  },
+  "shapes": {
+    "radiusXS": 8,
+    "radiusS": 14,
+    "radiusM": 16,
+    "radiusL": 20,
+    "radiusXL": 24
+  }
+}

@@ -55,6 +55,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/skins/
     - assets/voice_packs/
     - assets/config/guidance_profile.json
     - assets/data/kr_places.json
