@@ -37,6 +37,7 @@ import '../../tour_summary/presentation/tour_summary_list_screen.dart';
 import '../poi_feature_picker.dart';
 import '../poi_name_resolver.dart';
 import '../poi_category.dart';
+import 'waypoint_management_sheet.dart';
 
 export 'main_map_screen.dart';
 
@@ -1380,6 +1381,17 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     _syncWaypointMarkers(const [], const []); // unawaited — 경유지 핀 전체 제거
   }
 
+  void _showWaypointSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => WaypointManagementSheet(
+        onAddWaypoint: () => Navigator.pop(context),
+      ),
+    );
+  }
+
   void _startNavigation() {
     final state = ref.read(mapInteractionProvider);
     final dest = state.destination;
@@ -1815,6 +1827,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                       onSelect: _onRouteCardSelect,
                       onStart: _startNavigation,
                       onClose: _clearDestination,
+                      waypointCount: interaction.waypoints.length,
+                      onWaypointEntryTap: () => _showWaypointSheet(context),
                     ),
                   ),
               ],

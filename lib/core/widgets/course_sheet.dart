@@ -17,6 +17,12 @@ class CourseSheet extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onClose;
 
+  /// 경유지 수 (0이면 "+ 경유지 추가" 텍스트 버튼, 1 이상이면 "경유지 N개 · 편집" 칩)
+  final int waypointCount;
+
+  /// 경유지 진입점 탭 콜백 (null이면 버튼 미표시)
+  final VoidCallback? onWaypointEntryTap;
+
   const CourseSheet({
     super.key,
     required this.routeMeta,
@@ -24,6 +30,8 @@ class CourseSheet extends StatelessWidget {
     required this.onSelect,
     required this.onStart,
     required this.onClose,
+    this.waypointCount = 0,
+    this.onWaypointEntryTap,
   });
 
   static final _routes = [
@@ -74,6 +82,26 @@ class CourseSheet extends StatelessWidget {
               ),
             ),
           ),
+
+          // 경유지 진입점 (경유지 있으면 칩, 없으면 텍스트 버튼)
+          if (onWaypointEntryTap != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: waypointCount > 0
+                    ? ActionChip(
+                        avatar: const Icon(Icons.route, size: 16),
+                        label: Text('경유지 $waypointCount개 · 편집'),
+                        onPressed: onWaypointEntryTap,
+                      )
+                    : TextButton.icon(
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('경유지 추가'),
+                        onPressed: onWaypointEntryTap,
+                      ),
+              ),
+            ),
 
           // 3가지 경로 카드
           Padding(
