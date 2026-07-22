@@ -169,7 +169,7 @@
 - **검증**: `flutter clean` 후 재빌드 기준 analyze 0 issues, test 96/96, release 빌드
   성공(87.6MB, apksigner로 실제 release 키 서명 재확인).
 
-### 6. 개인정보처리방침 초안 + 호스팅 — PARTIAL
+### 6. 개인정보처리방침 초안 + 호스팅 — DONE
 - `docs/privacy_policy.md` 작성 완료 — 수집 항목(위치정보 포그라운드 전용, 로컬 저장
   프로필/경로, Firebase Crashlytics 진단정보), 자체 운영 서버(westinx.com) 전송 고지,
   제3자 제공 없음, 위탁(Firebase/Google), 이용자 권리, 만 14세 미만 미대상 등 포함.
@@ -191,6 +191,9 @@
     **위치기반서비스사업 신고**(방송통신위원회, 정부24 온라인 접수)가 필요할 가능성이
     높음 — 이건 사업자가 직접 진행해야 하는 행정 절차. 확실치 않다면 위치정보지원센터
     (lbsc.kr, 무료 상담) 문의 권장. 아직 미확인 상태로 남아있음.
+- **호스팅 완료 (2026-07-22, 커밋 `259360b`)**: `navi.westinx.com/privacy` — Axum `/privacy`
+  GET 라우트로 HTML 서빙. Play Console 개인정보처리방침 URL로 사용 가능.
+  연락처 `ceo@westinx.com` 사용 중.
 
 ### 7. 디자인 토큰 아키텍처 뼈대 — DONE
 - 기존 `lib/core/theme/app_theme.dart`(662줄, `AppColors`/`AppTextStyles`/
