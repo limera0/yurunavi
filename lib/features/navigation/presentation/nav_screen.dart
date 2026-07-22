@@ -2479,7 +2479,7 @@ class _StructureCurveAlert extends StatelessWidget {
         icon: _structureIcon(progress.nextStructureType!),
         label: progress.nextStructureType!.labelKo,
         distM: progress.distToNextStructureM,
-        color: Colors.amber.shade800,
+        color: const Color(0xFFFF8F00),
       );
     }
     return _badge(
@@ -2488,7 +2488,7 @@ class _StructureCurveAlert extends StatelessWidget {
           ? '급커브 좌'
           : '급커브 우',
       distM: progress.distToNextCurveM,
-      color: Colors.deepOrange.shade700,
+      color: const Color(0xFFE64A19),
     );
   }
 

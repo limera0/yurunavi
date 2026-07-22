@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/settings_providers.dart';
 import '../../../models/map_language.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'favorite_categories_screen.dart';
 import 'terms_screen.dart';
@@ -15,7 +16,7 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('설정'),
-        backgroundColor: const Color(0xFF008080),
+        backgroundColor: AppColors.secondary,
         foregroundColor: Colors.white,
       ),
       body: ListView(
@@ -108,7 +109,7 @@ class _LanguageSelector extends ConsumerWidget {
               title: Text(label),
               leading: Radio<MapLanguage>(
                 value: option,
-                activeColor: const Color(0xFF008080),
+                activeColor: Theme.of(context).colorScheme.primary,
               ),
               onTap: () =>
                   ref.read(mapLanguageProvider.notifier).setLanguage(option),
