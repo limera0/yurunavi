@@ -18,6 +18,7 @@ VS Code 세션과 완전히 무관하게 systemd로 상시 구동된다(westinx-
 import asyncio
 import json
 import os
+import shlex
 import signal
 from pathlib import Path
 
@@ -82,10 +83,47 @@ def running_pid() -> int | None:
     return pid
 
 
-async def cmd_run(message: discord.Message, task_file: str):
+# run_night_auto.sh 에 그대로 통과시킬 수 있는 옵션 화이트리스트.
+# (create_subprocess_exec는 셸을 안 거쳐 인젝션 위험은 없지만, 오타/실수 방지용으로 좁게 제한)
+ALLOWED_RUN_FLAGS = {
+    "--goal-gate", "--goal-gate-wait-seconds",
+    "--max-ticks", "--max-wall-seconds", "--tick-timeout",
+    "--blocked-wait-seconds", "--effort",
+}
+
+
+async def cmd_run(message: discord.Message, arg_str: str):
     if running_pid() is not None:
         await message.reply("이미 실행 중입니다. 먼저 `!stop` 하거나 `!status`로 확인하세요.")
         return
+
+    try:
+        tokens = shlex.split(arg_str)
+    except ValueError:
+        await message.reply("명령 파싱 실패 — 따옴표를 확인하세요.")
+        return
+    if not tokens:
+        await message.reply("작업 지시서 파일명이 필요합니다. 예: `!run HANDOFF_0722_night.md --goal-gate`")
+        return
+
+    task_file, extra_args = tokens[0], tokens[1:]
+
+    # 옵션 검증: 화이트리스트에 있는 플래그와 그 값만 허용.
+    i = 0
+    while i < len(extra_args):
+        flag = extra_args[i]
+        if flag not in ALLOWED_RUN_FLAGS:
+            await message.reply(f"허용되지 않은 옵션: `{flag}`. 사용 가능: {', '.join(sorted(ALLOWED_RUN_FLAGS))}")
+            return
+        if flag == "--goal-gate":
+            i += 1  # 값 없는 플래그
+        else:
+            # 값을 동반하는 플래그: 다음 토큰이 값으로 실제 존재해야 함(빠지면 자식이 set -u로 죽음)
+            if i + 1 >= len(extra_args) or extra_args[i + 1].startswith("--"):
+                await message.reply(f"옵션 `{flag}` 에는 값이 필요합니다. 예: `{flag} 20`")
+                return
+            i += 2
+
     task_path = LOOP_DIR / task_file
     if not task_path.exists():
         await message.reply(f"작업 지시서를 못 찾음: `{task_path}`")
@@ -94,14 +132,15 @@ async def cmd_run(message: discord.Message, task_file: str):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     log_f = open(RUN_LOG, "wb")
     proc = await asyncio.create_subprocess_exec(
-        str(RUNNER), task_file,
+        str(RUNNER), task_file, *extra_args,
         cwd=str(REPO),
         stdout=log_f,
         stderr=asyncio.subprocess.STDOUT,
         preexec_fn=os.setsid,
     )
     PID_FILE.write_text(str(proc.pid))
-    await message.reply(f"시작함: `{task_file}` (pid {proc.pid}). `!status`로 진행 확인 가능.")
+    opts = (" " + " ".join(extra_args)) if extra_args else ""
+    await message.reply(f"시작함: `{task_file}`{opts} (pid {proc.pid}). `!status`로 진행 확인 가능.")
 
     asyncio.create_task(_wait_and_report(proc, task_file))
 
@@ -163,6 +202,34 @@ async def cmd_stop(message: discord.Message):
         await message.reply("이미 종료된 것 같습니다.")
     if PID_FILE.exists():
         PID_FILE.unlink()
+
+
+async def cmd_wiki(message: discord.Message):
+    if running_pid() is not None:
+        await message.reply(
+            "야간루프 실행 중엔 위키 큐레이션을 돌리지 않습니다(같은 저장소 동시 작업 방지). "
+            "끝난 뒤 다시 시도하세요."
+        )
+        return
+    script = LOOP_DIR / "curate_wiki.sh"
+    if not script.exists():
+        await message.reply(f"스크립트를 못 찾음: `{script}`")
+        return
+    await message.reply("🗂️ 위키 큐레이션 시작 — `loop/WIKI_INDEX.md` 재정리 (몇 분 걸립니다).")
+    proc = await asyncio.create_subprocess_exec(
+        str(script),
+        cwd=str(REPO),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        preexec_fn=os.setsid,
+    )
+    asyncio.create_task(_wiki_report(message, proc))
+
+
+async def _wiki_report(message: discord.Message, proc: asyncio.subprocess.Process):
+    out, _ = await proc.communicate()
+    tail = (out.decode(errors="ignore").strip() or "(출력 없음)")[-1500:]
+    await message.reply(f"🗂️ 위키 큐레이션 종료(exit={proc.returncode}):\n```\n{tail}\n```")
 
 
 async def send_chunked(message: discord.Message, text: str):
@@ -232,9 +299,11 @@ async def handle_chat(message: discord.Message):
 
 HELP_TEXT = (
     "명령:\n"
-    "`!run <task_file>` — loop/ 안의 작업지시서로 야간루프 시작 (예: `!run HANDOFF_0722_night.md`)\n"
+    "`!run <task_file> [옵션]` — loop/ 작업지시서로 야간루프 시작 (예: `!run HANDOFF_0722_night.md --goal-gate`)\n"
+    "  옵션: `--goal-gate`(시작 전 목표 확인), `--max-ticks N`, `--tick-timeout N` 등\n"
     "`!status` — 실행 중인지, 최근 상태, 최근 커밋 확인\n"
     "`!stop` — 실행 중인 야간루프 정지\n"
+    "`!wiki` — RECON/REPORT를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션)\n"
     "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, `!run` 중엔 비활성)\n"
 )
 
@@ -263,6 +332,8 @@ async def on_message(message: discord.Message):
         await cmd_status(message)
     elif content == "!stop":
         await cmd_stop(message)
+    elif content == "!wiki":
+        await cmd_wiki(message)
     elif content.startswith("!"):
         await message.reply("모르는 명령입니다. `!help` 참고.")
     elif content:

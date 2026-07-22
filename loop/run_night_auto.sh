@@ -17,6 +17,8 @@
 #   --permission-mode MODE     claude -p 에 넘길 --permission-mode (기본 bypassPermissions)
 #   --effort LEVEL             claude -p 에 넘길 --effort (기본 high)
 #   --blocked-wait-seconds N   BLOCKED 상태에서 디스코드 답장 대기 상한 초 (기본 10800 = 3시간)
+#   --goal-gate                켜면 첫 틱 전에 오늘 목표를 디스코드로 확인받고 시작 (A: 목표 게이트)
+#   --goal-gate-wait-seconds N 목표 확인 답장 대기 상한 초 (기본 3600 = 1시간)
 #
 # 디스코드 연동 (.env, 없으면 조용히 생략):
 #   DISCORD_WEBHOOK_URL     — 종료/BLOCKED 알림 발송용
@@ -55,6 +57,8 @@ TICK_TIMEOUT=2700          # 45min — 틱 1회 하드 타임아웃(ECONNRESET �
 PERMISSION_MODE="bypassPermissions"
 EFFORT_LEVEL="high"
 BLOCKED_WAIT_SECONDS=10800  # 3h — BLOCKED 상태에서 디스코드 답장 기다리는 상한
+GOAL_GATE=0                 # A: 목표 게이트 (기본 off — 스코프 애매한 밤에만 --goal-gate로 켬)
+GOAL_GATE_WAIT_SECONDS=3600 # 1h — 목표 확인 답장 대기 상한
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -64,6 +68,8 @@ while [ $# -gt 0 ]; do
     --permission-mode) PERMISSION_MODE="$2"; shift 2 ;;
     --effort) EFFORT_LEVEL="$2"; shift 2 ;;
     --blocked-wait-seconds) BLOCKED_WAIT_SECONDS="$2"; shift 2 ;;
+    --goal-gate) GOAL_GATE=1; shift ;;
+    --goal-gate-wait-seconds) GOAL_GATE_WAIT_SECONDS="$2"; shift 2 ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
   esac
 done
@@ -108,6 +114,19 @@ handoff_status() {
 }
 
 file_mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+# B: 리포트에 달성도 판정 줄('목표 달성 판정')이 실제로 들어갔는지 검증.
+# 없으면 경고만 남긴다(무인 실행이라 강제 수정은 안 함 — 아침에 사람이 확인).
+check_verdict() {
+  local report_file
+  report_file=$(ls -t loop/MORNING_REPORT_${NIGHT_DATE}_*.md 2>/dev/null | head -n1)
+  [ -z "$report_file" ] && return 0
+  if grep -q "목표 달성 판정" "$report_file"; then
+    echo "check_verdict: 달성도 판정 줄 확인됨 ($report_file)"
+  else
+    echo "WARNING: $report_file 에 '목표 달성 판정' 줄 없음 — 규칙 B 미준수(리포트 확인 필요)"
+  fi
+}
 
 # 디스코드로 종료 알림 (베스트 에포트 — 실패해도 스크립트 흐름에 영향 없음).
 # 웹훅 URL은 .env에서만 읽음, 로그에도 URL 자체는 남기지 않음.
@@ -247,6 +266,93 @@ wait_for_discord_reply() {
   return 1
 }
 
+# ---- A: 목표 게이트 ----
+# 작업지시서에서 "오늘 목표"를 뽑는다: 'GOAL:' 로 시작하는 줄이 있으면 그걸,
+# 없으면 파일 앞부분(빈 줄 제외 800자)을 후보 목표로 본다.
+extract_goal() {
+  local g
+  g=$(grep -m1 -iE '^GOAL:' "$TASK_FILE" 2>/dev/null | sed -E 's/^[Gg][Oo][Aa][Ll]:[[:space:]]*//')
+  if [ -n "$g" ]; then
+    printf '%s' "$g"
+  else
+    grep -vE '^[[:space:]]*$' "$TASK_FILE" 2>/dev/null | head -c 800
+  fi
+}
+
+# 목표 확인 요청을 디스코드로 발송 (웹훅 재사용). $1 = 목표 텍스트.
+notify_discord_goal() {
+  [ -z "${DISCORD_WEBHOOK_URL:-}" ] && return 0
+  local payload
+  payload=$(python3 - "$GOAL_GATE_WAIT_SECONDS" "$1" <<'PYEOF'
+import json, sys
+wait_s, goal = sys.argv[1], sys.argv[2]
+hours = int(wait_s) / 3600
+lines = [
+    "🎯 오늘 목표 확인 (goal-gate) — 시작 전 확인 필요",
+    "",
+    goal[:1400],
+    "",
+    f"맞으면 'ok'/'진행'으로, 바꿀 게 있으면 그 내용을 답장하세요.",
+    f"(최대 {hours:.1f}시간 대기, 무응답이면 실행하지 않고 종료)",
+]
+print(json.dumps({"content": "\n".join(lines)[:1900]}))
+PYEOF
+)
+  curl -sS --max-time 15 -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>&1
+}
+
+# 답장이 "그대로 진행" 승인인지 판별 (승인이면 0, 보정 지시면 1).
+is_affirmative() {
+  python3 - "$1" <<'PYEOF'
+import sys
+reply = sys.argv[1].strip().lower()
+ok = {"ok", "okay", "go", "gogo", "yes", "y", "진행", "네", "예", "좋아", "좋아요", "시작", "ㄱㄱ", "ㅇㅇ", "그래"}
+sys.exit(0 if reply in ok else 1)
+PYEOF
+}
+
+# 첫 틱 전에 목표를 사람에게 확인받는다. 반환: 0=진행, 1=실행 중단(무응답/취소).
+run_goal_gate() {
+  local goal
+  goal=$(extract_goal)
+  echo "goal_gate: 후보 목표 추출 완료 (${#goal}자)"
+
+  if ! discord_polling_available || [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+    echo "goal_gate: 디스코드(웹훅/봇) 미설정 — 원격 확인 불가, 게이트 건너뛰고 진행"
+    return 0
+  fi
+
+  notify_discord_goal "$goal"
+  echo "goal_gate: 디스코드로 목표 발송, 답장 대기 (최대 ${GOAL_GATE_WAIT_SECONDS}s)"
+  local reply
+  if ! reply=$(wait_for_discord_reply "$GOAL_GATE_WAIT_SECONDS"); then
+    echo "goal_gate: ${GOAL_GATE_WAIT_SECONDS}s 내 답장 없음 — 목표 미확인, 실행하지 않고 종료"
+    return 1
+  fi
+
+  if is_affirmative "$reply"; then
+    echo "goal_gate: 목표 승인됨(수정 없음) — 진행"
+    {
+      echo ""
+      echo "## 🎯 오늘 목표 확정 (goal-gate, $(date '+%Y-%m-%d %H:%M:%S'))"
+      echo "사용자가 아래 목표를 그대로 승인함:"
+      echo "$goal"
+    } >> "$HANDOFF_FILE"
+  else
+    echo "goal_gate: 목표 보정 지시 수신 — handoff에 반영 후 진행"
+    {
+      echo ""
+      echo "## 🎯 오늘 목표 확정 (goal-gate, 사용자 보정, $(date '+%Y-%m-%d %H:%M:%S'))"
+      echo "원래 후보 목표:"
+      echo "$goal"
+      echo ""
+      echo "→ 사용자가 아래로 보정함 (이걸 우선하라):"
+      echo "$reply"
+    } >> "$HANDOFF_FILE"
+  fi
+  return 0
+}
+
 write_tick_prompt() {
   cat > "$TICK_PROMPT_FILE" <<PROMPT
 너는 유루나비(YuruNavi) 프로젝트의 오케스트레이터다. 이건 밤새 반복 실행되는
@@ -292,6 +398,10 @@ STATUS: BLOCKED를 쓰면 그 아래 내용이 그대로 사람 폰 디스코드
 ## STATUS: DONE / BLOCKED / STUCK 이면 지금 바로 loop/MORNING_REPORT_${NIGHT_DATE}_<주제>.md 를 써라
 - 대상 독자는 코드를 못 읽는 사람이다. 쉬운 말로, 뭐가 됐고 뭐가 막혔는지,
   검증 방법(커밋 해시/실행 방법)까지 적어라. 기존 loop/MORNING_REPORT_*.md 톤을 참고해라.
+- **[필수] 리포트에 반드시 아래 한 줄(달성도 판정, CLAUDE.md 규칙 B)을 포함해라:**
+  \`**목표 달성 판정:** 원래 목표: <오늘 목표 한 줄> / 달성: 예·부분·아니오 — <근거 한 줄>\`
+  이건 "무엇을 했나"가 아니라 "원래 목표를 실제로 달성했나"를 판정하는 줄이다.
+  handoff의 "🎯 오늘 목표 확정" 섹션이나 작업지시서의 목표와 대조해서 정직하게 판정해라.
 - STATUS: CONTINUE 면 MORNING_REPORT는 쓰지 마라 — 다음 틱이 이어간다.
 PROMPT
 }
@@ -313,9 +423,24 @@ write_final_report_prompt() {
 - 오늘 밤 무엇이 진행됐는지(커밋 해시 나열, 검증 방법)
 - 왜 여기서 멈췄는지
 - 남은 것 / 다음 밤 추천 작업
+- **[필수] 아래 한 줄(달성도 판정, CLAUDE.md 규칙 B)을 포함해라:**
+  \`**목표 달성 판정:** 원래 목표: <오늘 목표 한 줄> / 달성: 예·부분·아니오 — <근거 한 줄>\`
+  목표는 작업지시서(${TASK_FILE})나 handoff의 "🎯 오늘 목표 확정" 섹션에서 가져와 정직하게 판정.
 - 코드를 못 읽는 사람이 읽는 보고서다. 쉬운 말로 써라.
 PROMPT
 }
+
+# ---- A: 목표 게이트 (옵션, 첫 틱 전에 1회) ----
+if [ "$GOAL_GATE" -eq 1 ]; then
+  echo "--- goal gate start $(date) ---"
+  if ! run_goal_gate; then
+    stop_reason="목표 게이트: 사용자 확인 없이 실행 중단(무응답)"
+    echo "=== run_night_auto aborted (goal gate): $stop_reason ==="
+    notify_discord
+    echo "=== run_night_auto end $(date) === total_ticks=0 stop_reason=[$stop_reason]"
+    exit 0
+  fi
+fi
 
 while [ "$tick" -lt "$MAX_TICKS" ]; do
   elapsed=$(( $(date +%s) - run_start_epoch ))
@@ -430,6 +555,7 @@ else
   fi
 fi
 
+check_verdict
 notify_discord
 
 echo "=== run_night_auto end $(date) === total_ticks=$tick stop_reason=[$stop_reason]"
