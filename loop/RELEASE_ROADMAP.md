@@ -659,6 +659,53 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 **선행조건 없음** — 12번(백엔드) 완료 상태라 바로 착수 가능. 디자인 트랙(7~11번) 확정 전
 이라도 순수 기능이므로 진행 가능(단, 새 위젯이라 11번 스윕 대상에 포함시킬 것).
 
+---
+
+## 17번 — 경유지 관리 UI (투어링 라이더용)
+
+**상태**: DONE (2026-07-22)
+
+**브랜치**: `verify/ride-0711`
+
+**배경**: 투어링 라이더는 경로 자체가 목적. 경유지를 자유롭게 추가·삭제·순서변경하고
+출발지도 임의 장소로 설정할 수 있어야 함. 참조 UI: 네이버지도 경유지 편집 화면.
+
+### Phase 0 — stops 통합 아키텍처 마이그레이션 (커밋 `08e0e94`)
+- `lib/features/map/models/route_stop.dart` 신규: `RouteStop(latLng, name, isCurrentLocation)`
+- `MapInteractionState.stops: List<RouteStop>` 통합 리스트 (`[출발지, 경유지..., 도착지]`)
+- 기존 `destination`, `waypoints`, `waypointNames` → 계산 getter로 전환 (호출부 호환 유지)
+- `reorderStop(oldIdx, newIdx)` 신규 메서드 + ReorderableListView 인덱스 보정 포함
+- `setDestination(snapshotOrigin:)` 파라미터 추가 — GPS 스냅샷 저장
+- `flutter analyze` PASS, code-auditor PASS
+
+### Phase 1 — 경유지 포인터 숫자 표시 (커밋 `bb4b3ee`)
+- `_syncWaypointMarkers()`: textField = 순서 번호(1,2,3), 흰색, 포인터 원 중앙 오프셋(-2.1)
+- `flutter analyze` PASS
+
+### Phase 2 — WaypointManagementSheet (커밋 `26e5c4a`)
+- `lib/features/map/presentation/waypoint_management_sheet.dart` 신규
+- `DraggableScrollableSheet` (60%/90%/40%) + `ReorderableListView`
+- reorder/remove 후 즉시 `RoutingService.fetchRoutes` 재호출 + `mounted` guard
+- 출발지(파랑)/경유지(회색·삭제가능)/도착지(빨강) 아이콘 구분
+- code-auditor PASS (mounted 누락 버그 수정 포함)
+
+### Phase 3 — 검색 결과 출발지/경유지/목적지 선택 (커밋 `f6b021c`)
+- 주소 검색 탭 시 `_AddToRouteSheet("어디로 추가할까요?")` showModalBottomSheet
+- `setOrigin()` notifier 메서드 추가
+- 경유지 옵션은 destination 설정 후 활성화
+- `flutter analyze` PASS, code-auditor PASS
+
+### Phase 4 — 코스 시트 진입점 UI (커밋 `43b5c31`)
+- `CourseSheet`에 `waypointCount`/`onWaypointEntryTap` 파라미터 추가 (optional, nav_screen 호환)
+- 경유지 있으면 `ActionChip "경유지 N개·편집"`, 없으면 `TextButton "+ 경유지 추가"`
+- 탭 시 `WaypointManagementSheet` showModalBottomSheet (isScrollControlled: true)
+- `flutter analyze` PASS, code-auditor PASS
+
+### 미완료/알려진 한계
+- textOffset(-2.1) 미세조정: 실기기에서 pointer_yellow 아이콘 크기 확인 후 조정 필요
+- Phase 5 (수익화 스캐폴딩)은 8번(브랜드 방향성) 확정 후 별도 착수
+- 지도 우측 컨트롤 패널 경유지 뱃지는 미구현 (코스 시트 진입점으로 충분)
+
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
 - 착수 시: 상태 IN_PROGRESS + 체크포인트 커밋
