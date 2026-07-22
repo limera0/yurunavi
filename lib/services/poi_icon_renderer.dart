@@ -7,7 +7,7 @@ import '../models/poi.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POI 아이콘 래스터화
-// 원격 글리프 서버(tiles.westinx.com)는 Noto Sans만 서빙 — Material Icons
+// 원격 글리프 서버(AppConfig.instance.tileBaseUrl)는 Noto Sans만 서빙 — Material Icons
 // 코드포인트는 없어 SymbolLayer text-field로 직접 렌더링할 수 없다. 그래서
 // IconData를 dart:ui로 PNG 비트맵으로 그려 addImage에 등록해 iconImage로 쓴다.
 // ─────────────────────────────────────────────────────────────────────────────

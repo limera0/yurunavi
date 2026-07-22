@@ -5,6 +5,8 @@ import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
+import '../core/config/app_config.dart';
+
 /// GPS 포인트
 class GpsPoint {
   final double lat;
@@ -167,7 +169,7 @@ class NativeEngine {
   }
 
   // ── Rust HTTP 엔진 연결 (port 8003) ──────────────────────────────
-  static const _rustBase = 'https://navi.westinx.com';
+  static String get _rustBase => AppConfig.instance.naviBaseUrl;
 
   /// 경로 계산 — Rust HTTP 서버 우선, 실패 시 Dart fallback.
   ///

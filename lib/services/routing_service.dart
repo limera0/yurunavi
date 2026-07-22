@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../core/config/app_config.dart';
+
 /// Routing error categories surfaced to the UI.
 enum RoutingError {
   /// Network unreachable, DNS failure, connection refused, or timeout.
@@ -129,7 +131,7 @@ class RouteResult {
 /// 고속도로·자동차전용도로는 모든 코스에서 배제된다.
 /// 실패 시 [RoutingException] throw — 호출자가 처리.
 class RoutingService {
-  static const _valhallaBase = 'https://valhalla.westinx.com';
+  static String get _valhallaBase => AppConfig.instance.valhallaBaseUrl;
 
   // 코스별 실효속도 (근거: 네이버 실측 71km=118min=36km/h, 지방도+국도 혼합)
   // Valhalla 응답 time은 ~57-88km/h 낙관치이므로 거리 기반으로 재계산

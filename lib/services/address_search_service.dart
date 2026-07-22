@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../core/config/app_config.dart';
+
 import '../models/address_result.dart';
 
 /// 자체 호스팅 백엔드(navi.westinx.com)의 `/geocode/search` 엔드포인트를 통해
@@ -16,7 +18,7 @@ import '../models/address_result.dart';
 /// 던져 호출부가 "검색 결과 없음"과 "오류 발생"을 구분해 서로 다른 안내를 보여줄 수
 /// 있게 한다.
 class AddressSearchService {
-  static const _baseUrl = 'https://navi.westinx.com/geocode/search';
+  static String get _baseUrl => '${AppConfig.instance.naviBaseUrl}/geocode/search';
 
   Future<List<AddressResult>> search(String query) async {
     final trimmed = query.trim();

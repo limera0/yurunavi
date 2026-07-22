@@ -5,13 +5,15 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
+import '../core/config/app_config.dart';
+
 import '../models/poi.dart';
 
 /// 자체 호스팅 백엔드(navi.westinx.com)의 `/poi/nearby` 엔드포인트를 통해 5종 POI를
 /// 조회하고 오모테나시 목적지 스냅 로직을 수행하는 서비스. 카테고리 필터링 및 원본
 /// 데이터 오분류 필터링은 서버(데이터 적재 시점)에서 이미 처리되어 온다.
 class PoiService {
-  static const _poiBaseUrl = 'https://navi.westinx.com/poi/nearby';
+  static String get _poiBaseUrl => '${AppConfig.instance.naviBaseUrl}/poi/nearby';
 
   /// PoiType ↔ 서버 카테고리 문자열(snake_case) 매핑.
   static const Map<PoiType, String> _typeToCategory = {
