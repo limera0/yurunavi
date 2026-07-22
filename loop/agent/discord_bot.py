@@ -8,9 +8,11 @@ VS Code 세션과 완전히 무관하게 systemd로 상시 구동된다(westinx-
 
 명령(디스코드 DM 또는 지정 길드(DISCORD_GUILD_ID) 내 어느 채널에서든,
 DISCORD_OWNER_USER_ID 본인만):
-  !run <task_file>   loop/run_night_auto.sh <task_file> 를 백그라운드로 시작
+  !plan <자연어>     요청을 해석해 작업지시서를 새로 쓰고, 목표 확인(goal-gate) 후 실행
+  !run <task_file>   이미 있는 지시서로 loop/run_night_auto.sh 를 백그라운드로 시작
   !status            현재 실행 중인지, 최근 handoff 상태, 최근 커밋 확인
   !stop              실행 중인 틱체인을 정지
+  !wiki              loop/ 문서 색인(WIKI_INDEX.md) 재생성
   !help              명령 목록
   (그 외 일반 텍스트) — 그대로 claude -p 로 전달해 실제 대화/작업 수행.
   세션은 CHAT_SESSION_FILE에 저장해 재시작해도 대화가 이어짐.
@@ -21,6 +23,7 @@ import json
 import os
 import shlex
 import signal
+from datetime import datetime
 from pathlib import Path
 
 import discord
@@ -98,6 +101,13 @@ async def cmd_run(message: discord.Message, arg_str: str):
     if running_pid() is not None:
         await message.reply("이미 실행 중입니다. 먼저 `!stop` 하거나 `!status`로 확인하세요.")
         return
+    # !plan 이 지시서를 쓰는 중이거나 대화 요청이 처리 중이면 시작하지 않는다 —
+    # 그쪽이 끝나면서 자기 실행을 띄우면 러너가 둘이 되기 때문(반대 방향 TOCTOU 차단).
+    if chat_busy:
+        await message.reply(
+            "지금 `!plan` 지시서 작성 또는 대화 요청을 처리 중입니다. 끝난 뒤 다시 시도하세요."
+        )
+        return
 
     try:
         tokens = shlex.split(arg_str)
@@ -126,15 +136,28 @@ async def cmd_run(message: discord.Message, arg_str: str):
                 return
             i += 2
 
+    # 사용자가 'loop/' 를 붙여 써도 받아준다(도움말은 파일명만 안내하지만 둘 다 허용).
+    task_file = task_file[len("loop/"):] if task_file.startswith("loop/") else task_file
     task_path = LOOP_DIR / task_file
     if not task_path.exists():
         await message.reply(f"작업 지시서를 못 찾음: `{task_path}`")
         return
 
+    await _spawn_run(message, task_file, extra_args)
+
+
+async def _spawn_run(message: discord.Message, task_file: str, extra_args: list[str]):
+    """run_night_auto.sh 를 백그라운드로 띄우고 pid를 기록한다. (!run / !plan 공용)
+
+    task_file 은 loop/ 기준 파일명(예: HANDOFF_0722_x.md)으로 받되, 러너에는 반드시
+    리포 루트 기준 경로('loop/…')로 넘겨야 한다 — 러너가 `cd <repo>` 후
+    `[ -f "$TASK_FILE" ]` 로 검사하기 때문에 파일명만 넘기면 무조건
+    'FATAL: task file not found' 로 죽는다(2026-07-22 발견, 그 전까지 !run 은 동작한 적 없음).
+    """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     log_f = open(RUN_LOG, "wb")
     proc = await asyncio.create_subprocess_exec(
-        str(RUNNER), task_file, *extra_args,
+        str(RUNNER), f"loop/{task_file}", *extra_args,
         cwd=str(REPO),
         stdout=log_f,
         stderr=asyncio.subprocess.STDOUT,
@@ -234,6 +257,144 @@ async def _wiki_report(message: discord.Message, proc: asyncio.subprocess.Proces
     await message.reply(f"🗂️ 위키 큐레이션 종료(exit={proc.returncode}):\n```\n{tail}\n```")
 
 
+PLAN_TIMEOUT_SECONDS = 900  # 15min — 지시서 초안 1회 작성
+
+PLAN_PROMPT = """\
+너는 유루나비 프로젝트의 작업 계획자다. 아래 마스터의 자연어 요청을 받아, 무인 실행용
+작업 지시서 파일 하나를 만드는 것이 너의 유일한 임무다.
+
+## 마스터 요청
+{request}
+
+## 할 일
+1. 네 컨텍스트에 이미 주입된 loop/STATUS.md(현재 상태 + 미완료 릴리스 항목)를 근거로
+   이 요청이 어느 항목에 해당하는지 판단해라. 해당 항목이 있으면 거기 적힌 줄번호로
+   loop/RELEASE_ROADMAP.md의 **그 부분만** 읽어라(62KB 전체를 읽지 마라).
+2. loop/WIKI_INDEX.md를 grep해서 관련된 과거 조사/작업 문서가 있는지 확인하고, 있으면
+   지시서에 링크로 남겨라 — 같은 조사를 두 번 하지 않는 게 목적이다.
+3. loop/HANDOFF_{date}_<슬러그>.md 파일을 새로 써라. <슬러그>는 영문 소문자+언더스코어로
+   짧게(예: app_icon, privacy_policy).
+
+## 지시서 형식 (첫 줄은 반드시 GOAL:)
+GOAL: <이번 작업의 목표 한 줄 — 자동화가 이 줄을 뽑아 마스터에게 확인받는다>
+
+그 아래는 기존 loop/HANDOFF_*.md 관례를 따라라: 배경/근거(로드맵 항목 번호·줄번호, 관련
+과거 문서 링크) / 구체적 단계(번호 매겨서, 각 단계는 한 틱에 끝날 크기로) / 완료 판정 기준 /
+건드리지 말아야 할 것 / 막힐 만한 지점.
+
+## 금지
+- 코드를 고치지 마라. git 커밋/스테이징 하지 마라. 지시서 파일 하나만 써라.
+- 요청이 모호해 목표를 특정할 수 없으면 파일을 만들지 말고, 마지막 줄에 정확히
+  `NEED_CLARIFICATION: <되물을 질문 한 줄>` 만 출력해라.
+
+## 출력 형식
+마지막 줄에 정확히 아래 한 줄만 출력해라(다른 말 붙이지 마라):
+CREATED: <만든 파일명>
+"""
+
+
+async def cmd_plan(message: discord.Message, request: str):
+    """자연어 요청 → 작업지시서 초안 → goal-gate 확인과 함께 무인 실행 시작."""
+    global chat_busy
+
+    if running_pid() is not None:
+        await message.reply("야간루프가 이미 실행 중입니다. `!stop` 하거나 끝난 뒤 다시 시도하세요.")
+        return
+    if chat_busy:
+        await message.reply("이전 요청 아직 처리 중입니다. 끝나면 답 드릴게요.")
+        return
+    if not request:
+        await message.reply("무슨 작업인지 자연어로 적어주세요. 예: `!plan 앱 아이콘 확정 작업 해줘`")
+        return
+
+    chat_busy = True
+    thinking = await message.reply("🧭 지시서 초안 작성 중... (최대 15분)")
+    try:
+        prompt = PLAN_PROMPT.format(request=request, date=datetime.now().strftime("%m%d"))
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "-p", prompt,
+            "--output-format", "json",
+            "--permission-mode", "bypassPermissions",
+            cwd=str(REPO),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            preexec_fn=os.setsid,
+        )
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=PLAN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            os.killpg(proc.pid, signal.SIGKILL)
+            await thinking.edit(content="⏱️ 지시서 작성이 15분을 넘겨 중단했습니다.")
+            return
+
+        if proc.returncode != 0:
+            await thinking.edit(content=f"❌ 실행 실패(exit={proc.returncode}):\n```\n{err.decode()[-1200:]}\n```")
+            return
+        try:
+            result = json.loads(out.decode()).get("result", "")
+        except json.JSONDecodeError:
+            await thinking.edit(content="❌ 응답 파싱 실패:\n```\n" + out.decode()[-1200:] + "\n```")
+            return
+
+        lines = [ln.strip().strip("`").strip() for ln in result.splitlines()]
+
+        for ln in lines:
+            if ln.startswith("NEED_CLARIFICATION:"):
+                q = ln.split(":", 1)[1].strip()
+                await thinking.edit(
+                    content=f"❓ 요청이 모호해서 지시서를 못 만들었습니다.\n\n{q}\n\n"
+                            "답을 포함해서 `!plan` 을 다시 보내주세요."
+                )
+                return
+
+        created = next((ln.split(":", 1)[1].strip() for ln in lines if ln.startswith("CREATED:")), None)
+        if not created:
+            await thinking.edit(
+                content="❌ 지시서 파일명을 못 찾았습니다(`CREATED:` 줄 없음).\n```\n" + result[-1000:] + "\n```"
+            )
+            return
+
+        # 모델이 낸 문자열이므로 경로를 반드시 검증한다(loop/ 직속 HANDOFF_*.md 만 허용).
+        created = created[len("loop/"):] if created.startswith("loop/") else created
+        task_path = (LOOP_DIR / created).resolve()
+        if (task_path.parent != LOOP_DIR.resolve()
+                or task_path.suffix != ".md"
+                or not task_path.name.startswith("HANDOFF_")):
+            await thinking.edit(content=f"❌ 허용되지 않은 지시서 경로/이름: `{created}`")
+            return
+        if not task_path.exists():
+            await thinking.edit(content=f"❌ 지시서가 실제로 만들어지지 않았습니다: `{created}`")
+            return
+
+        goal = ""
+        for ln in task_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if ln.strip().startswith("GOAL:"):
+                goal = ln.split(":", 1)[1].strip()
+                break
+
+        # 지시서 작성에 최대 15분이 걸리므로, 그 사이 !run 으로 다른 실행이 시작됐을 수
+        # 있다. 여기서 다시 확인하지 않으면 러너가 두 개 동시에 돌아 같은 워킹트리에
+        # 서로의 미완성 변경을 커밋하는 사고가 난다(CLAUDE.md: 동시 세션이 브랜치 공유).
+        if running_pid() is not None:
+            await thinking.edit(content=(
+                f"📝 지시서는 저장했습니다: `{created}`\n"
+                f"🎯 목표: {goal or '(GOAL 줄 없음)'}\n\n"
+                "⚠️ 다만 지시서를 쓰는 동안 다른 실행이 먼저 시작돼서 이번엔 실행하지 않았습니다. "
+                f"끝난 뒤 `!run {created} --goal-gate` 로 시작하세요."
+            ))
+            return
+
+        await thinking.edit(content=(
+            f"📝 지시서 작성됨: `{created}`\n"
+            f"🎯 목표: {goal or '(GOAL 줄 없음 — 확인 필요)'}\n\n"
+            "이제 목표 확인(goal-gate)과 함께 실행합니다. 곧 목표를 다시 보내드릴 테니 "
+            "**맞으면 `ok`, 고칠 게 있으면 그대로 지시**해 주세요. 무응답이면 작업은 시작되지 않습니다."
+        ))
+        await _spawn_run(message, created, ["--goal-gate"])
+    finally:
+        chat_busy = False
+
+
 async def send_chunked(message: discord.Message, text: str):
     text = text.strip() or "(빈 응답)"
     for i in range(0, len(text), 1900):
@@ -301,12 +462,14 @@ async def handle_chat(message: discord.Message):
 
 HELP_TEXT = (
     "명령:\n"
-    "`!run <task_file> [옵션]` — loop/ 작업지시서로 야간루프 시작 (예: `!run HANDOFF_0722_night.md --goal-gate`)\n"
+    "`!plan <자연어 지시>` — 지시서를 알아서 쓰고 목표 확인 후 바로 실행\n"
+    "  예: `!plan 앱 아이콘 확정 작업 해줘` → 지시서 작성 → 목표 확인(ok/보정) → 무인 실행\n"
+    "`!run <task_file> [옵션]` — 이미 있는 지시서로 야간루프 시작 (예: `!run HANDOFF_0722_night.md --goal-gate`)\n"
     "  옵션: `--goal-gate`(시작 전 목표 확인), `--max-ticks N`, `--tick-timeout N` 등\n"
     "`!status` — 실행 중인지, 최근 상태, 최근 커밋 확인\n"
     "`!stop` — 실행 중인 야간루프 정지\n"
-    "`!wiki` — RECON/REPORT를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션)\n"
-    "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, `!run` 중엔 비활성)\n"
+    "`!wiki` — loop/ 문서를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션, 매일 04:10 자동)\n"
+    "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, 루프 실행 중엔 비활성)\n"
 )
 
 
@@ -328,6 +491,9 @@ async def on_message(message: discord.Message):
     content = message.content.strip()
     if content == "!help":
         await message.reply(HELP_TEXT)
+    elif content.startswith("!plan"):
+        # 지시서 작성에 몇 분 걸리므로 이벤트 루프를 막지 않게 태스크로 띄운다.
+        asyncio.create_task(cmd_plan(message, content[len("!plan"):].strip()))
     elif content.startswith("!run "):
         await cmd_run(message, content[len("!run "):].strip())
     elif content == "!status":
