@@ -42,6 +42,9 @@ export 'main_map_screen.dart';
 
 enum _TapAction { destination, waypoint }
 
+/// 검색 결과 "어디로 추가할까요?" 시트의 선택 결과
+enum _RouteAddAction { origin, waypoint, destination }
+
 class _TappedPoi {
   final String? name;
   final String? category;
@@ -981,8 +984,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
   }
 
   /// 검색시트(상호명/주소 검색 공통)에서 목적지 후보를 탭했을 때의 공통 처리 — GPS
-  /// 가드 → 확인시트(_showTapConfirmSheet) → _applyTapAction. `_handlePoiTap`(상호명
-  /// 검색 결과)과 `_handleAddressTap`(주소 검색 결과)이 이 헬퍼를 공유한다.
+  /// 가드 → "어디로 추가할까요?" 시트(_AddToRouteSheet) → 선택 액션 적용.
+  /// `_handlePoiTap`(상호명 검색 결과)과 `_handleAddressTap`(주소 검색 결과)이 이
+  /// 헬퍼를 공유한다.
   Future<void> _handleLocationTap({
     required LatLng location,
     required String name,
@@ -1005,31 +1009,48 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     if (interaction.isLoading) return;
 
     // 검색 결과(상호명/주소 공통)를 탭한 시점에 목적지 확정 전이라도 그 위치를
-    // 바로 보여준다 — 예전엔 "여기로 안내"까지 확정해야만(_applyDestination에서만)
-    // 카메라가 움직여, 확인시트를 닫기 전까진 검색한 곳이 어딘지 화면에서 전혀
-    // 알 수 없었다(2026-07-18 사용자 피드백). await하지 않는 fire-and-forget —
-    // 확인시트는 애니메이션 완료를 기다리지 않고 바로 뜬다.
+    // 바로 보여준다 — 예전엔 확인 후에야 카메라가 움직여, 시트를 닫기 전엔 어딘지
+    // 화면에서 전혀 알 수 없었다(2026-07-18 사용자 피드백). fire-and-forget — 시트는
+    // 카메라 애니메이션 완료를 기다리지 않고 바로 뜬다.
     _mlCtrl?.animateCamera(
       ml.CameraUpdate.newLatLngZoom(_toMl(location), 16.0),
     );
-    // 확인시트가 떠 있는 동안 정확히 어디를 검색했는지 보여주는 임시 초록 점 —
-    // await해서 확인시트가 뜨기 전에 실제로 존재하게 한다(카메라 팬은 fire-and-forget
-    // 이라도 되지만 이 마커는 그럴 필요가 없어 그냥 기다린다).
+    // 시트가 떠 있는 동안 정확히 어디를 검색했는지 보여주는 임시 초록 점 —
+    // await해서 시트가 뜨기 전에 실제로 존재하게 한다.
     await _ensureSearchPreviewMarker(location);
 
-    final hasRoute = _showCourseSheet;
-    final act = await _showTapConfirmSheet(
-      location,
-      _TappedPoi(name: name, category: category),
-      hasRoute,
+    final hasDest = ref.read(mapInteractionProvider).destination != null;
+    final act = await _showAddToRouteSheet(
+      location: location,
+      name: name,
+      hasDest: hasDest,
     );
     if (!mounted) return;
-    // 확인시트 결과(목적지 확정/경유지 추가/닫기)와 무관하게 임시 점은 여기서
-    // 무조건 지운다 — 실제 결과(빨간 목적지 핀/노란 경유지 핀 또는 아무것도 없음)가
-    // _applyTapAction에서 반영되기 직전에 지워야 같은 좌표에 두 마커가 겹쳐
+    // 시트 결과와 무관하게 임시 점은 무조건 지운다 — 실제 결과(빨간 목적지 핀/
+    // 노란 경유지 핀 또는 아무것도 없음)가 반영되기 직전에 지워야 마커가 겹쳐
     // 보이는 순간이 없다.
     await _removeSearchPreviewMarker();
-    await _applyTapAction(act, location, origin, preResolvedName: name);
+
+    if (act == null) return;
+    switch (act) {
+      case _RouteAddAction.origin:
+        ref.read(mapInteractionProvider.notifier).setOrigin(location, name: name);
+      case _RouteAddAction.waypoint:
+        ref.read(mapInteractionProvider.notifier).addWaypoint(location, name: name);
+        final dest = ref.read(mapInteractionProvider).destination;
+        if (dest != null) {
+          ref.read(mapInteractionProvider.notifier).setLoading(true);
+          try {
+            await _fetchAndStoreAllRoutes(origin, dest);
+          } finally {
+            if (mounted) {
+              ref.read(mapInteractionProvider.notifier).setLoading(false);
+            }
+          }
+        }
+      case _RouteAddAction.destination:
+        await _applyDestination(location, preResolved: name);
+    }
   }
 
   /// 주소 검색 결과 탭 → `_handleLocationTap` 공통 파이프라인 진입. `category`는
@@ -1123,6 +1144,23 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 검색 결과 탭 시 "어디로 추가할까요?" 시트를 표시한다.
+  /// 반환값: 사용자 선택(_RouteAddAction) 또는 null(닫기/취소).
+  Future<_RouteAddAction?> _showAddToRouteSheet({
+    required LatLng location,
+    required String name,
+    required bool hasDest,
+  }) {
+    return showModalBottomSheet<_RouteAddAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddToRouteSheet(
+        name: name,
+        hasDest: hasDest,
       ),
     );
   }
@@ -3249,6 +3287,146 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
           onTap: () => widget.onSelectDest(poi),
         );
       }).toList(),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 검색 결과 → 경로 추가 선택 시트
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 검색 결과 아이템 탭 시 "어디로 추가할까요?" 선택지를 보여주는 바텀시트.
+///
+/// - 출발지로 설정: [_RouteAddAction.origin] 반환
+/// - 경유지로 추가: [_RouteAddAction.waypoint] 반환 ([hasDest]가 true일 때만 활성)
+/// - 목적지로 설정: [_RouteAddAction.destination] 반환
+class _AddToRouteSheet extends StatelessWidget {
+  final String name;
+  /// 목적지가 이미 설정된 경우 true — 경유지 추가 버튼 활성화 여부 결정.
+  final bool hasDest;
+
+  const _AddToRouteSheet({
+    required this.name,
+    required this.hasDest,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '어디로 추가할까요?',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Divider(height: 1),
+              // 출발지로 설정
+              ListTile(
+                leading: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Colors.blue,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.trip_origin, color: Colors.white, size: 14),
+                ),
+                title: const Text('출발지로 설정'),
+                onTap: () => Navigator.pop(context, _RouteAddAction.origin),
+              ),
+              // 경유지로 추가
+              ListTile(
+                leading: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: hasDest ? Colors.grey.shade500 : Colors.grey.shade300,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.radio_button_unchecked,
+                    color: hasDest ? Colors.white : Colors.grey.shade400,
+                    size: 14,
+                  ),
+                ),
+                title: Text(
+                  '경유지로 추가',
+                  style: TextStyle(
+                    color: hasDest ? null : Colors.grey.shade400,
+                  ),
+                ),
+                subtitle: hasDest
+                    ? null
+                    : Text(
+                        '목적지를 먼저 설정해 주세요',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                onTap: hasDest
+                    ? () => Navigator.pop(context, _RouteAddAction.waypoint)
+                    : null,
+              ),
+              // 목적지로 설정
+              ListTile(
+                leading: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.flag, color: Colors.white, size: 14),
+                ),
+                title: const Text('목적지로 설정'),
+                onTap: () => Navigator.pop(context, _RouteAddAction.destination),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
