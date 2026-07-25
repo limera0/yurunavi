@@ -21,6 +21,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
+import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
 import '../../../services/native_engine.dart';
 import '../../../services/nav_foreground_service.dart';
@@ -2092,24 +2093,42 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
-          // ── 우측: Daylight + 컨트롤 (ETA 바 위에 위치) ──────────────────────
+          // ── 좌측: Daylight 바 (속도계 아래) ─────────────────────────────────
+          Positioned(
+            left: 12,
+            top: MediaQuery.of(context).size.height * 0.30 + 100,
+            bottom: 160,
+            child: DaylightBar(
+              progress: daylightProgress,
+              sunriseLabel: daylightCycle != null
+                  ? DateFormat('HH:mm').format(daylightCycle.topTime)
+                  : '--:--',
+              sunsetLabel: daylightCycle != null
+                  ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
+                  : '--:--',
+              isNightMode: !isDay,
+            ),
+          ),
+
+          // ── 우측: 주유소 버튼 + GPS 버튼 ──────────────────────────────────────
           Positioned(
             right: 12,
-            top: 200,
             bottom: 160,
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: DaylightBar(
-                    progress: daylightProgress,
-                    sunriseLabel: daylightCycle != null
-                        ? DateFormat('HH:mm').format(daylightCycle.topTime)
-                        : '--:--',
-                    sunsetLabel: daylightCycle != null
-                        ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
-                        : '--:--',
-                    isNightMode: !isDay,
-                  ),
+                _NavIconBtn(
+                  icon: Icons.local_gas_station,
+                  onTap: () {
+                    final pos = ref.read(navStateProvider)?.pos;
+                    if (pos == null) return;
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => _GasStationSheet(lat: pos.latitude, lon: pos.longitude),
+                    );
+                  },
                 ),
                 const SizedBox(height: 10),
                 _NavIconBtn(
@@ -2254,6 +2273,206 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
         ],
       ),
+      ),
+    );
+  }
+}
+
+// ── 주유소 바텀시트 ────────────────────────────────────────────────────
+
+class _GasStationSheet extends StatefulWidget {
+  final double lat;
+  final double lon;
+  const _GasStationSheet({required this.lat, required this.lon});
+
+  @override
+  State<_GasStationSheet> createState() => _GasStationSheetState();
+}
+
+class _GasStationSheetState extends State<_GasStationSheet> {
+  String _fuel = 'B027'; // B027=휘발유, D047=경유
+  late Future<List<GasStation>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = GasStationService.fetchNearby(lat: widget.lat, lon: widget.lon, fuel: _fuel);
+  }
+
+  void _switchFuel(String fuel) {
+    if (_fuel == fuel) return;
+    setState(() {
+      _fuel = fuel;
+      _future = GasStationService.fetchNearby(lat: widget.lat, lon: widget.lon, fuel: fuel);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 드래그 핸들
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: cs.outlineVariant,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // 타이틀 + 연료 토글
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Row(
+              children: [
+                Icon(Icons.local_gas_station, color: cs.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  '근처 최저가 주유소',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
+                ),
+                const Spacer(),
+                // 연료 토글 칩
+                _FuelChip(label: '휘발유', selected: _fuel == 'B027', onTap: () => _switchFuel('B027')),
+                const SizedBox(width: 6),
+                _FuelChip(label: '경유', selected: _fuel == 'D047', onTap: () => _switchFuel('D047')),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          // 결과 목록
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.45,
+            ),
+            child: FutureBuilder<List<GasStation>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                final stations = snapshot.data ?? [];
+                if (stations.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Center(
+                      child: Text(
+                        '5km 내 주유소 정보를 찾을 수 없습니다',
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: stations.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1, indent: 20),
+                  itemBuilder: (context, i) {
+                    final s = stations[i];
+                    final displayPrice = _fuel == 'D047' ? s.dieselPrice : s.price;
+                    return ListTile(
+                      dense: true,
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: cs.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${i + 1}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: cs.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        s.name,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${_distanceText(s.distanceM)}  •  ${s.brand.isNotEmpty ? s.brand : "기타"}',
+                        style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                      ),
+                      trailing: displayPrice != null
+                          ? Text(
+                              '${_formatPrice(displayPrice)}원',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: i == 0 ? cs.primary : cs.onSurface,
+                              ),
+                            )
+                          : Text('정보 없음', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+        ],
+      ),
+    );
+  }
+
+  static String _distanceText(double m) {
+    if (m < 1000) return '${m.toStringAsFixed(0)}m';
+    return '${(m / 1000).toStringAsFixed(1)}km';
+  }
+
+  static String _formatPrice(int price) {
+    final s = price.toString();
+    if (s.length <= 3) return s;
+    return '${s.substring(0, s.length - 3)},${s.substring(s.length - 3)}';
+  }
+}
+
+class _FuelChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _FuelChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? cs.primary : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected ? cs.onPrimary : cs.onSurfaceVariant,
+          ),
+        ),
       ),
     );
   }
