@@ -1056,6 +1056,247 @@ async fn handle_geocode_search(
     Ok(Json(Vec::new()))
 }
 
+// ── /gasstations/nearby (주유소 최저가) ─────────────────────────
+
+const MAX_GAS_RESULTS: usize = 20;
+
+#[derive(Deserialize)]
+struct GasStationsQuery {
+    lat: f64,
+    lon: f64,
+    #[serde(default = "default_fuel_code")]
+    fuel: String,
+    #[serde(default = "default_gas_radius_m")]
+    radius_m: f64,
+}
+
+fn default_fuel_code() -> String { "B027".to_string() }
+fn default_gas_radius_m() -> f64 { 5000.0 }
+
+#[derive(Serialize)]
+struct GasStationDto {
+    name: String,
+    brand: String,
+    address: String,
+    lat: f64,
+    lon: f64,
+    distance_m: f64,
+    price: Option<i32>,
+    diesel_price: Option<i32>,
+}
+
+fn meridional_arc(a: f64, e2: f64, lat_rad: f64) -> f64 {
+    let e4 = e2 * e2;
+    let e6 = e4 * e2;
+    a * ((1.0 - e2 / 4.0 - 3.0 * e4 / 64.0 - 5.0 * e6 / 256.0) * lat_rad
+        - (3.0 * e2 / 8.0 + 3.0 * e4 / 32.0 + 45.0 * e6 / 1024.0) * (2.0 * lat_rad).sin()
+        + (15.0 * e4 / 256.0 + 45.0 * e6 / 1024.0) * (4.0 * lat_rad).sin()
+        - (35.0 * e6 / 3072.0) * (6.0 * lat_rad).sin())
+}
+
+// Opinet 내부 GIS 좌표(커스텀 TM) → WGS84 (lat, lon)
+// TM 파라미터: lat_0=38°N, lon_0=128°E, k=1, FE=400,000m, FN=600,000m, WGS84 타원체
+// Snyder (1987) pp.63-65 TM 역변환 공식. pyproj(proj='tmerc') 출력으로 검증함.
+fn gis_to_wgs84(gis_x: f64, gis_y: f64) -> (f64, f64) {
+    let a = 6_378_137.0_f64;
+    let f = 1.0 / 298.257_223_563_f64;
+    let e2 = 2.0 * f - f * f;
+    let k0 = 1.0_f64;
+    let lat0 = 38.0_f64.to_radians();
+    let lon0 = 128.0_f64.to_radians();
+
+    let m0 = meridional_arc(a, e2, lat0);
+    let x = gis_x - 400_000.0;
+    let y = gis_y - 600_000.0;
+    let m1 = m0 + y / k0;
+
+    let mu = m1 / (a * (1.0 - e2 / 4.0 - 3.0 * e2 * e2 / 64.0 - 5.0 * e2 * e2 * e2 / 256.0));
+
+    let e1 = (1.0 - (1.0 - e2).sqrt()) / (1.0 + (1.0 - e2).sqrt());
+    let e1_2 = e1 * e1;
+    let e1_3 = e1_2 * e1;
+    let e1_4 = e1_3 * e1;
+
+    let phi1 = mu
+        + (3.0 * e1 / 2.0 - 27.0 * e1_3 / 32.0) * (2.0 * mu).sin()
+        + (21.0 * e1_2 / 16.0 - 55.0 * e1_4 / 32.0) * (4.0 * mu).sin()
+        + (151.0 * e1_3 / 96.0) * (6.0 * mu).sin()
+        + (1097.0 * e1_4 / 512.0) * (8.0 * mu).sin();
+
+    let sin_phi1 = phi1.sin();
+    let cos_phi1 = phi1.cos();
+    let tan_phi1 = phi1.tan();
+    let ep2 = e2 / (1.0 - e2);
+
+    let n1 = a / (1.0 - e2 * sin_phi1 * sin_phi1).sqrt();
+    let t1 = tan_phi1 * tan_phi1;
+    let c1 = ep2 * cos_phi1 * cos_phi1;
+    let r1 = a * (1.0 - e2) / (1.0 - e2 * sin_phi1 * sin_phi1).powf(1.5);
+    let d = x / (n1 * k0);
+    let d2 = d * d;
+
+    let lat = phi1
+        - (n1 * tan_phi1 / r1)
+            * (d2 / 2.0
+                - (5.0 + 3.0 * t1 + 10.0 * c1 - 4.0 * c1 * c1 - 9.0 * ep2) * d2 * d2 / 24.0
+                + (61.0 + 90.0 * t1 + 298.0 * c1 + 45.0 * t1 * t1 - 252.0 * ep2
+                    - 3.0 * c1 * c1)
+                    * d2 * d2 * d2 / 720.0);
+
+    let lon = lon0
+        + (d - (1.0 + 2.0 * t1 + c1) * d2 * d / 6.0
+            + (5.0 - 2.0 * c1 + 28.0 * t1 - 3.0 * c1 * c1 + 8.0 * ep2 + 24.0 * t1 * t1)
+                * d2 * d2 * d / 120.0)
+            / cos_phi1;
+
+    (lat.to_degrees(), lon.to_degrees())
+}
+
+async fn nominatim_region(
+    client: &reqwest::Client,
+    lat: f64,
+    lon: f64,
+) -> Option<(String, String)> {
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&accept-language=ko"
+    );
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "YuruNavi/1.0 (navi.westinx.com; ceo@westinx.com)")
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    let v: serde_json::Value = resp.json().await.ok()?;
+    let addr = &v["address"];
+
+    // 광역시(서울·부산 등): city=광역시명, borough=구명
+    if let (Some(city), Some(gu)) = (addr["city"].as_str(), addr["borough"].as_str()) {
+        return Some((city.to_string(), gu.to_string()));
+    }
+    // 도(경기·강원 등): province=도명, city 또는 county=시군명
+    if let Some(prov) = addr["province"].as_str() {
+        let sigungu = addr["city"]
+            .as_str()
+            .or_else(|| addr["county"].as_str())
+            .or_else(|| addr["town"].as_str())
+            .unwrap_or("");
+        if !sigungu.is_empty() {
+            return Some((prov.to_string(), sigungu.to_string()));
+        }
+    }
+    // 세종특별자치시 등 단층 광역자치단체
+    if let Some(city) = addr["city"].as_str() {
+        return Some((city.to_string(), String::new()));
+    }
+    None
+}
+
+fn parse_opinet_price(v: &serde_json::Value) -> Option<i32> {
+    v.as_str()?.trim().parse::<i32>().ok().filter(|&p| p > 0)
+}
+
+async fn fetch_opinet_region(
+    client: &reqwest::Client,
+    sido_nm: &str,
+    sigungu_nm: &str,
+) -> Option<Vec<serde_json::Value>> {
+    let params = [
+        ("BTN_DIV", "os_btn"),
+        ("SIDO_NM", sido_nm),
+        ("SIGUNGU_NM", sigungu_nm),
+        ("POLL_ALL", "all"),
+        ("NORM_YN", "on"),
+        ("SEARCH_MOD", "addr"),
+        ("LPG_YN", "N"),
+    ];
+    let resp = client
+        .post("https://www.opinet.co.kr/searRgPlaceAjax.do")
+        .header("Referer", "https://www.opinet.co.kr/searRgSelect.do")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
+        .form(&params)
+        .timeout(std::time::Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|e| eprintln!("[YuruNavi/Rust] /gasstations Opinet 요청 실패: {e}"))
+        .ok()?;
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| eprintln!("[YuruNavi/Rust] /gasstations Opinet 응답 파싱 실패: {e}"))
+        .ok()?;
+    Some(v["list"].as_array().cloned().unwrap_or_default())
+}
+
+async fn handle_gasstations_nearby(
+    Query(q): Query<GasStationsQuery>,
+) -> Result<Json<Vec<GasStationDto>>, StatusCode> {
+    if !(-90.0..=90.0).contains(&q.lat) || !(-180.0..=180.0).contains(&q.lon) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let radius_m = q.radius_m.clamp(100.0, 10_000.0);
+    let client = http_client();
+
+    let (sido, sigungu) = nominatim_region(client, q.lat, q.lon)
+        .await
+        .ok_or_else(|| {
+            eprintln!(
+                "[YuruNavi/Rust] /gasstations 역지오코딩 실패 lat={} lon={}",
+                q.lat, q.lon
+            );
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    let raw = fetch_opinet_region(client, &sido, &sigungu)
+        .await
+        .unwrap_or_default();
+
+    let center = GpsPoint { lat: q.lat, lng: q.lon };
+    let mut hits: Vec<(i32, f64, GasStationDto)> = raw
+        .iter()
+        .filter_map(|s| {
+            let gis_x = s["GIS_X_COOR"].as_f64()?;
+            let gis_y = s["GIS_Y_COOR"].as_f64()?;
+            let (lat, lon) = gis_to_wgs84(gis_x, gis_y);
+            let dist = haversine_m(&center, &GpsPoint { lat, lng: lon });
+            if dist > radius_m {
+                return None;
+            }
+            let gasoline = parse_opinet_price(&s["B027_P"]);
+            let diesel = parse_opinet_price(&s["D047_P"]);
+            let sort_price = match q.fuel.as_str() {
+                "D047" => diesel.unwrap_or(i32::MAX),
+                _ => gasoline.unwrap_or(i32::MAX),
+            };
+            Some((
+                sort_price,
+                dist,
+                GasStationDto {
+                    name: s["OS_NM"].as_str().unwrap_or("").to_string(),
+                    brand: s["POLL_DIV_CD"].as_str().unwrap_or("").to_string(),
+                    address: s["VAN_ADR"].as_str().unwrap_or("").to_string(),
+                    lat,
+                    lon,
+                    distance_m: (dist * 10.0).round() / 10.0,
+                    price: gasoline,
+                    diesel_price: diesel,
+                },
+            ))
+        })
+        .collect();
+
+    hits.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let dtos = hits.into_iter().take(MAX_GAS_RESULTS).map(|(_, _, d)| d).collect();
+    Ok(Json(dtos))
+}
+
 // ── /privacy ───────────────────────────────────────────────────
 
 async fn handle_privacy() -> Html<&'static str> {
@@ -1226,7 +1467,8 @@ async fn main() {
         .route("/is_off_route", post(handle_off_route))
         .route("/check_destination_reachable", post(handle_reachability))
         .route("/poi/nearby", get(handle_poi_nearby))
-        .route("/geocode/search", get(handle_geocode_search));
+        .route("/geocode/search", get(handle_geocode_search))
+        .route("/gasstations/nearby", get(handle_gasstations_nearby));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8003")
         .await
@@ -1767,5 +2009,30 @@ mod tests {
         // 제거 변형 하나만 반환하고 추가 삽입으로 뒤섞인 결과를 만들지 않는다.
         let variant = beon_variant("신창로55번길 12길 3").expect("번길 포함 — Some이어야 함");
         assert_eq!(variant, "신창로55길 12길 3");
+    }
+
+    // ── gis_to_wgs84: Opinet TM 역변환 ──
+
+    #[test]
+    fn gis_to_wgs84_converts_known_seoul_stations() {
+        // 2026-07-25 pyproj(proj='tmerc',lat_0=38,lon_0=128,k=1,x_0=400000,y_0=600000,ellps='WGS84')
+        // 역변환으로 검증한 실제 Opinet API 응답값 3건(서울 종로구·강남구)
+        let cases: &[(f64, f64, f64, f64)] = &[
+            // (gis_x, gis_y, expect_lat, expect_lon)
+            (311970.2, 554223.7, 37.5834, 127.0034), // 혜화주유소(종로구)
+            (315530.0, 542774.0, 37.4806, 127.0450), // 유진주유소(강남구)
+            (314126.0, 546815.0, 37.5168, 127.0286), // 신사현대주유소(강남구)
+        ];
+        for &(gx, gy, elat, elon) in cases {
+            let (lat, lon) = gis_to_wgs84(gx, gy);
+            assert!(
+                (lat - elat).abs() < 0.001,
+                "lat 오차 초과 gis=({gx},{gy}): got {lat:.5}, want {elat:.5}"
+            );
+            assert!(
+                (lon - elon).abs() < 0.001,
+                "lon 오차 초과 gis=({gx},{gy}): got {lon:.5}, want {elon:.5}"
+            );
+        }
     }
 }
