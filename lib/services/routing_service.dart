@@ -46,6 +46,8 @@ class ManeuverStep {
   /// Valhalla sign.exit_name_elements를 이어붙인 출구명 (예: "천호대교 북단").
   /// 없으면 null.
   final String? exitName;
+  /// Valhalla street_names 배열 (빈 리스트 디폴트).
+  final List<String> streetNames;
   const ManeuverStep({
     required this.type,
     required this.instruction,
@@ -54,6 +56,7 @@ class ManeuverStep {
     this.endShapeIdx = 0,
     this.roundaboutExitCount,
     this.exitName,
+    this.streetNames = const [],
   });
 }
 
@@ -854,6 +857,7 @@ class RoutingService {
           exitName: (m['sign']?['exit_name_elements'] as List?)
               ?.map((e) => (e as Map)['text'] as String? ?? '')
               .join(' '),
+          streetNames: ((m['street_names'] as List?)?.cast<String>() ?? []),
         ));
       }
       final legPts = _decodePolyline6(leg['shape'] as String? ?? '');

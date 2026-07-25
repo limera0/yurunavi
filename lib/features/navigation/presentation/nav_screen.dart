@@ -896,15 +896,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return '$h:$m 도착';
   }
 
-  static String _remainingText(int durationMin) {
-    if (durationMin <= 0) return '--';
-    if (durationMin >= 60) {
-      final h = durationMin ~/ 60;
-      final m = durationMin % 60;
-      return m > 0 ? '$h시간 $m분' : '$h시간';
-    }
-    return '$durationMin분';
-  }
 
   /// [_tourRecorder]를 종료하고, 최소 기준(60초/150m)을 만족하면 시작/종료
   /// 주소를 역지오코딩한 뒤 [TourLogService]에 저장한다. `_tourFinalizeStarted`로
@@ -1846,6 +1837,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
           ),
 
+          // ── 상태바 영역을 카드 배경색으로 덮어 지도가 보이지 않도록 (item 8) ──
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SizedBox(
+              height: MediaQuery.of(context).padding.top,
+              child: ColoredBox(color: cs.tertiary),
+            ),
+          ),
+
           // ── 수동모드 복귀 알림 ──────────────────────────────────────────────
           if (_isManualMode)
             Positioned(
@@ -2004,103 +2006,129 @@ class _NavScreenState extends ConsumerState<NavScreen>
           Positioned(
             top: 0,
             left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: GestureDetector(
-                onTap: () {
-                  if (_stepIdx < _steps.length - 1) {
-                    setState(() => _stepIdx++);
-                    _announceStep(_stepIdx);
-                  }
-                },
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: GestureDetector(
+              onTap: () {
+                if (_stepIdx < _steps.length - 1) {
+                  setState(() => _stepIdx++);
+                  _announceStep(_stepIdx);
+                }
+              },
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.62,
+                child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: cs.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
+                    color: cs.tertiary,
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(20),
+                      bottomRight: Radius.circular(20),
+                    ),
+                    boxShadow: const [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        blurRadius: 20,
-                        offset: const Offset(0, 4),
+                        color: Colors.black26,
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
                       ),
                     ],
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
+                  child: SafeArea(
+                    bottom: false,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        LinearProgressIndicator(
-                          value: (_stepIdx + 1) / _steps.length,
-                          backgroundColor: cs.outline,
-                          color: cs.tertiary,
-                          minHeight: 3,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        IntrinsicHeight(
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Container(
-                                width: 58,
-                                height: 58,
-                                decoration: BoxDecoration(
-                                  color: cs.tertiary,
-                                  borderRadius: BorderRadius.circular(16),
+                              // 아이콘박스: 폭 72, 배경 약간 어두운 느낌
+                              SizedBox(
+                                width: 72,
+                                child: ColoredBox(
+                                  color: cs.tertiary.withValues(alpha: 0.85),
+                                  child: Icon(upcoming.icon, color: Colors.white, size: 40),
                                 ),
-                                child: Icon(upcoming.icon, color: Colors.white, size: 30),
                               ),
-                              const SizedBox(width: 14),
+                              // 콘텐츠: 거리 + 도로명
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (_cardRemainingM > 0 || step.dist.isNotEmpty)
-                                      Builder(builder: (ctx) {
-                                        final raw = _cardRemainingM > 0
-                                            ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
-                                            : step.dist;
-                                        final parts = _TurnStep._splitDistStr(raw);
-                                        return RichText(
-                                          text: TextSpan(
-                                            children: [
-                                              TextSpan(
-                                                text: parts.$1,
-                                                style: TextStyle(
-                                                  color: cs.tertiary,
-                                                  fontSize: 38,
-                                                  fontWeight: FontWeight.w800,
-                                                  height: 1.1,
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (_cardRemainingM > 0 || step.dist.isNotEmpty)
+                                        Builder(builder: (ctx) {
+                                          final raw = _cardRemainingM > 0
+                                              ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                                              : step.dist;
+                                          final parts = _TurnStep._splitDistStr(raw);
+                                          return RichText(
+                                            text: TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text: parts.$1,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 36,
+                                                    fontWeight: FontWeight.w800,
+                                                    height: 1.1,
+                                                  ),
                                                 ),
-                                              ),
-                                              TextSpan(
-                                                text: parts.$2,
-                                                style: TextStyle(
-                                                  color: cs.tertiary,
-                                                  fontSize: 17,
-                                                  fontWeight: FontWeight.w700,
-                                                  height: 1.1,
+                                                TextSpan(
+                                                  text: parts.$2,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w700,
+                                                    height: 1.1,
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
+                                          );
+                                        }),
+                                      if (upcoming.streetNames.isNotEmpty)
+                                        Text(
+                                          upcoming.streetNames.first,
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(alpha: 0.85),
+                                            fontSize: 13,
                                           ),
-                                        );
-                                      }),
-                                    Text(
-                                      upcoming.label,
-                                      style: TextStyle(
-                                        color: cs.onSurface,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
+                        // 다음 이벤트 미리보기 (item 6)
+                        if (_stepIdx + 2 < _steps.length) ...[
+                          Divider(
+                            height: 1,
+                            color: Colors.white.withValues(alpha: 0.25),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                            child: Row(
+                              children: [
+                                Icon(_steps[_stepIdx + 2].icon, color: Colors.white70, size: 15),
+                                const SizedBox(width: 5),
+                                Text('다음', style: TextStyle(color: Colors.white.withValues(alpha: 0.54), fontSize: 11)),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    _steps[_stepIdx + 2].streetNames.firstOrNull ?? _steps[_stepIdx + 2].label,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -2201,91 +2229,97 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
           // ── 하단 ETA 바 ─────────────────────────────────────────────────────
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
+            bottom: 12,
+            left: 12,
+            right: 12,
+            child: DecoratedBox(
               decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                color: cs.tertiary,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 12,
+                    offset: Offset(0, -2),
+                  ),
+                ],
               ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 진행 프로그레스 바
+                  LinearProgressIndicator(
+                    value: (_stepIdx + 1) / _steps.length,
+                    backgroundColor: Colors.white.withValues(alpha: 0.25),
+                    color: Colors.white,
+                    minHeight: 7,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  // 정보 Row
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Builder(builder: (_) {
+                        final canReroute = navState?.pos != null && !_isRerouting;
+                        return Row(
                           children: [
+                            // 목적지명
+                            Expanded(
+                              child: Text(
+                                ref.watch(mapInteractionProvider).destinationName ?? '목적지',
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            // 도착시간
                             Text(
                               _etaText(_durationMin),
-                              style: TextStyle(
-                                color: cs.onSurface,
-                                fontSize: 22,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            Row(
-                              children: [
-                                Text(_remainingText(_durationMin), style: TextStyle(color: cs.tertiary, fontSize: 15, fontWeight: FontWeight.w600)),
-                                const SizedBox(width: 8),
-                                Text(routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
-                              ],
+                            const SizedBox(width: 6),
+                            // 남은거리
+                            Text(
+                              routeKm > 0 ? '${routeKm.toStringAsFixed(1)}km' : '--',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                            const SizedBox(width: 8),
+                            // 세로 구분선
+                            Container(width: 1, height: 32, color: Colors.white30),
+                            const SizedBox(width: 8),
+                            // 재검색 버튼
+                            GestureDetector(
+                              onTap: canReroute ? _openCourseSheet : null,
+                              child: Icon(
+                                Icons.alt_route,
+                                color: canReroute ? Colors.white : Colors.white38,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // 세로 구분선
+                            Container(width: 1, height: 32, color: Colors.white30),
+                            const SizedBox(width: 8),
+                            // 종료 버튼
+                            GestureDetector(
+                              onTap: () => _exitNav(),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 22,
+                              ),
                             ),
                           ],
-                        ),
-                      ),
-                      Container(width: 1, height: 40, color: cs.outline, margin: const EdgeInsets.symmetric(horizontal: 16)),
-                      Builder(builder: (_) {
-                        final canReroute = navState?.pos != null && !_isRerouting;
-                        final fg = canReroute
-                            ? cs.onSurface
-                            : cs.onSurface.withValues(alpha: 0.3);
-                        return GestureDetector(
-                          onTap: canReroute ? _openCourseSheet : null,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerHigh,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.alt_route, color: fg, size: 20),
-                                const SizedBox(height: 2),
-                                Text('재탐색',
-                                    style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ),
                         );
                       }),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: () => _exitNav(),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade900.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.close_rounded, color: Colors.white, size: 20),
-                              SizedBox(height: 2),
-                              Text('종료', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -2321,16 +2355,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
 
-          // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
-          // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
-          if (!isDay)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Container(
-                  color: Colors.black.withValues(alpha: 0.35),
-                ),
-              ),
-            ),
         ],
       ),
       ),
@@ -2726,7 +2750,8 @@ class _TurnStep {
   final String dist;
   final double rawDistKm; // GPS 거리 자동 진행용 원시 거리(km)
   final int type;
-  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0]);
+  final List<String> streetNames;
+  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0, this.streetNames = const []]);
 
   factory _TurnStep.fromManeuver(ManeuverStep m,
       {bool isFinalDestination = true, StructureType? nearbyStructure}) {
@@ -2737,6 +2762,7 @@ class _TurnStep {
       _formatDist(m.distanceKm),
       m.distanceKm,
       m.type,
+      m.streetNames,
     );
   }
 
