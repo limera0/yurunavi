@@ -10,8 +10,8 @@ class GasStation {
   final double lat;
   final double lon;
   final double distanceM;
-  final int? price;        // 휘발유(B027) 가격, 원
-  final int? dieselPrice;  // 경유(D047) 가격, 원
+  final int? price;         // 휘발유(B027) 가격, 원
+  final int? premiumPrice;  // 고급휘발유(B034) 가격, 원
 
   const GasStation({
     required this.name,
@@ -21,7 +21,7 @@ class GasStation {
     required this.lon,
     required this.distanceM,
     this.price,
-    this.dieselPrice,
+    this.premiumPrice,
   });
 
   factory GasStation.fromJson(Map<String, dynamic> j) => GasStation(
@@ -32,7 +32,7 @@ class GasStation {
     lon: (j['lon'] as num).toDouble(),
     distanceM: (j['distance_m'] as num).toDouble(),
     price: j['price'] as int?,
-    dieselPrice: j['diesel_price'] as int?,
+    premiumPrice: j['premium_price'] as int?,
   );
 }
 

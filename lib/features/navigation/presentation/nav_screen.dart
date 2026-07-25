@@ -192,6 +192,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // (통과 처리 시) null로 리셋.
   double? _waypointClosestDistM;
 
+  // 주유소 경유지 추가
+  GasStation? _selectedGasStation;
+  late List<LatLng> _liveWaypoints; // widget.waypoints 런타임 복사본 — 주유소 추가 시 갱신
+
   // 도착 감지
   bool _arrived = false;
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
@@ -325,6 +329,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
     _routePoints = List<LatLng>.of(widget.routePolyline);
     _durationMin = widget.durationMin;
+    _liveWaypoints = List<LatLng>.of(widget.waypoints);
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
     // Phase B: PiP 미니창. enterPipMode()는 액티비티가 아직 화면에 보이는 동안
@@ -741,7 +746,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       final routes = await RoutingService.fetchRoutes(
         origin: routeOrigin,
         destination: dest,
-        waypoints: widget.waypoints.sublist(_passedWaypointCount),
+        waypoints: _liveWaypoints.sublist(_passedWaypointCount),
       );
       if (mounted && routes.isNotEmpty) {
         final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx.clamp(0, routes.length - 1);
@@ -780,6 +785,39 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
       }
     }
+  }
+
+  // ── 주유소 경유지 추가 ──────────────────────────────────────────────────────
+
+  static double _haversineM(LatLng a, LatLng b) {
+    const r = 6371000.0;
+    const deg2rad = 0.017453292519943295;
+    final lat1 = a.latitude * deg2rad;
+    final lat2 = b.latitude * deg2rad;
+    final dlat = (b.latitude - a.latitude) * deg2rad;
+    final dlng = (b.longitude - a.longitude) * deg2rad;
+    final sinDlat = sin(dlat / 2);
+    final sinDlng = sin(dlng / 2);
+    final h = sinDlat * sinDlat + cos(lat1) * cos(lat2) * sinDlng * sinDlng;
+    return 2 * r * asin(sqrt(h));
+  }
+
+  void _addGasStationWaypoint(GasStation s) {
+    final currentPos = ref.read(navStateProvider)?.pos;
+    if (currentPos == null) return;
+    final stationLoc = LatLng(s.lat, s.lon);
+    final stationDist = _haversineM(currentPos, stationLoc);
+    // 현위치 기준 거리 오름차순으로 이미 통과하지 않은 경유지들 사이에 삽입
+    int insertIdx = _liveWaypoints.length;
+    for (int i = _passedWaypointCount; i < _liveWaypoints.length; i++) {
+      if (stationDist < _haversineM(currentPos, _liveWaypoints[i])) {
+        insertIdx = i;
+        break;
+      }
+    }
+    _liveWaypoints.insert(insertIdx, stationLoc);
+    setState(() => _selectedGasStation = null);
+    _reroute(currentPos, silent: true);
   }
 
   Future<void> _initTts() async {
@@ -2126,7 +2164,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
                       context: context,
                       isScrollControlled: true,
                       backgroundColor: Colors.transparent,
-                      builder: (_) => _GasStationSheet(lat: pos.latitude, lon: pos.longitude),
+                      builder: (_) => _GasStationSheet(
+                        lat: pos.latitude,
+                        lon: pos.longitude,
+                        onSelected: (s) {
+                          setState(() => _selectedGasStation = s);
+                          _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(
+                            ml.LatLng(s.lat, s.lon), 14,
+                          ));
+                        },
+                      ),
                     );
                   },
                 ),
@@ -2261,6 +2308,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
 
+          // ── 주유소 선택 카드 ────────────────────────────────────────────────────
+          if (_selectedGasStation != null)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _GasStationSelectionCard(
+                station: _selectedGasStation!,
+                onAddWaypoint: () => _addGasStationWaypoint(_selectedGasStation!),
+                onClose: () => setState(() => _selectedGasStation = null),
+              ),
+            ),
+
           // ── 야간 디밍 오버레이 (EENT 후 ~ 익일 BMNT) ──────────────────────────
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
           if (!isDay)
@@ -2283,14 +2343,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
 class _GasStationSheet extends StatefulWidget {
   final double lat;
   final double lon;
-  const _GasStationSheet({required this.lat, required this.lon});
+  final void Function(GasStation) onSelected;
+  const _GasStationSheet({required this.lat, required this.lon, required this.onSelected});
 
   @override
   State<_GasStationSheet> createState() => _GasStationSheetState();
 }
 
 class _GasStationSheetState extends State<_GasStationSheet> {
-  String _fuel = 'B027'; // B027=휘발유, D047=경유
+  String _fuel = 'B027'; // B027=휘발유, B034=고급휘발유
   late Future<List<GasStation>> _future;
 
   @override
@@ -2344,7 +2405,7 @@ class _GasStationSheetState extends State<_GasStationSheet> {
                 // 연료 토글 칩
                 _FuelChip(label: '휘발유', selected: _fuel == 'B027', onTap: () => _switchFuel('B027')),
                 const SizedBox(width: 6),
-                _FuelChip(label: '경유', selected: _fuel == 'D047', onTap: () => _switchFuel('D047')),
+                _FuelChip(label: '고급휘발유', selected: _fuel == 'B034', onTap: () => _switchFuel('B034')),
               ],
             ),
           ),
@@ -2382,8 +2443,12 @@ class _GasStationSheetState extends State<_GasStationSheet> {
                   separatorBuilder: (_, _) => const Divider(height: 1, indent: 20),
                   itemBuilder: (context, i) {
                     final s = stations[i];
-                    final displayPrice = _fuel == 'D047' ? s.dieselPrice : s.price;
+                    final displayPrice = _fuel == 'B034' ? s.premiumPrice : s.price;
                     return ListTile(
+                      onTap: () {
+                        Navigator.pop(context);
+                        widget.onSelected(s);
+                      },
                       dense: true,
                       leading: Container(
                         width: 36,
@@ -2471,6 +2536,81 @@ class _FuelChip extends StatelessWidget {
             fontSize: 12,
             fontWeight: FontWeight.w600,
             color: selected ? cs.onPrimary : cs.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── 주유소 선택 하단 카드 ──────────────────────────────────────────────────────
+
+class _GasStationSelectionCard extends StatelessWidget {
+  final GasStation station;
+  final VoidCallback onAddWaypoint;
+  final VoidCallback onClose;
+  const _GasStationSelectionCard({
+    required this.station,
+    required this.onAddWaypoint,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 12, offset: const Offset(0, -2))],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.local_gas_station, color: cs.primary, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      station.name,
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                station.address,
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: onAddWaypoint,
+                      child: const Text('경유지로 설정'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton(
+                    onPressed: onClose,
+                    child: const Text('닫기'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

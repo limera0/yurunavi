@@ -1082,7 +1082,7 @@ struct GasStationDto {
     lon: f64,
     distance_m: f64,
     price: Option<i32>,
-    diesel_price: Option<i32>,
+    premium_price: Option<i32>,
 }
 
 fn meridional_arc(a: f64, e2: f64, lat_rad: f64) -> f64 {
@@ -1266,9 +1266,9 @@ async fn handle_gasstations_nearby(
                 return None;
             }
             let gasoline = parse_opinet_price(&s["B027_P"]);
-            let diesel = parse_opinet_price(&s["D047_P"]);
+            let premium = parse_opinet_price(&s["B034_P"]);
             let sort_price = match q.fuel.as_str() {
-                "D047" => diesel.unwrap_or(i32::MAX),
+                "B034" => premium.unwrap_or(i32::MAX),
                 _ => gasoline.unwrap_or(i32::MAX),
             };
             Some((
@@ -1282,7 +1282,7 @@ async fn handle_gasstations_nearby(
                     lon,
                     distance_m: (dist * 10.0).round() / 10.0,
                     price: gasoline,
-                    diesel_price: diesel,
+                    premium_price: premium,
                 },
             ))
         })
