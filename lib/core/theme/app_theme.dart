@@ -38,6 +38,9 @@ class AppColors {
   // Daylight bar
   static const sunrise = Color(0xFFFFB300);
   static const sunset = Color(0xFF5C6BC0);
+
+  // 내비 카드 배경 — 스킨에서 별도 관리 (tertiary와 독립)
+  static const navCard = Color(0xFF9481C4); // muted lavender
 }
 
 // ── Course line color (index = MapInteractionState.selectedRouteIdx) ────────
