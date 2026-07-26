@@ -80,12 +80,13 @@ class RoutingConfig {
       'span_min_length': 1000,
       'uturn_penalty': 70,
     },
-    // 국도: 고속도로만 회피, 나머지 class_factors 없음 — 가장 짧은 국도 경로 우선.
-    // 2026-07-26 실측: class_factors 세부 가중치가 tipping point를 유발해
-    // 서울-호산 369km 고착. '0':100 단독 사용 시 349km(지방도 323km 대비 +8%),
-    // 서울-춘천 94km(지방도 128km 대비 -26%) 달성.
+    // 국도: 고속도로만 회피, trunk는 최소 불이익 — 가장 짧은 국도 경로 우선.
+    // use_highways:0.0은 수도권에서 trunk급 접근 도로까지 차단해 수원/안산→호산
+    // 경로가 393km(서울 동북부 우회)로 폭등하는 문제 발생.
+    // 0.2로 완화 시 안산 334km·서울 306km (Valhalla는 OSM access 태그로
+    // 자동차전용도로를 별도 차단하므로 법적 금지 도로는 진입 불가).
     {
-      'use_highways': 0.0,
+      'use_highways': 0.2,
       'use_ferry': 0.0,
       'use_tolls': 0.0,
       'class_factors': {
