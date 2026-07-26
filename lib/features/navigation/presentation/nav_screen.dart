@@ -2008,56 +2008,50 @@ class _NavScreenState extends ConsumerState<NavScreen>
           Positioned(
             top: MediaQuery.of(context).padding.top,
             left: 0,
-            child: GestureDetector(
-              onTap: () {
-                if (_stepIdx < _steps.length - 1) {
-                  setState(() => _stepIdx++);
-                  _announceStep(_stepIdx);
-                }
-              },
-              child: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.62,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: AppColors.navCard,
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(20),
-                      bottomRight: Radius.circular(20),
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 12,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: SafeArea(
-                    bottom: false,
-                    top: false,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // 진행 프로그레스 바 (상단 카드 최상단)
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(0)),
-                          child: LinearProgressIndicator(
-                            value: (_stepIdx + 1) / _steps.length,
-                            backgroundColor: Colors.white.withValues(alpha: 0.20),
-                            color: Colors.white.withValues(alpha: 0.70),
-                            minHeight: 5,
-                          ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // (A) 메인 상단 카드
+                GestureDetector(
+                  onTap: () {
+                    if (_stepIdx < _steps.length - 1) {
+                      setState(() => _stepIdx++);
+                      _announceStep(_stepIdx);
+                    }
+                  },
+                  child: SizedBox(
+                    width: MediaQuery.of(context).size.width * 0.62,
+                    child: Container(
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        color: cs.surface,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                          topRight: Radius.circular(20),
                         ),
-                        IntrinsicHeight(
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 12,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: SafeArea(
+                        bottom: false,
+                        top: false,
+                        child: IntrinsicHeight(
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // 아이콘박스: 폭 88, 배경 약간 어두운 느낌
+                              // 아이콘박스: 폭 114
                               SizedBox(
-                                width: 88,
+                                width: 114,
                                 child: ColoredBox(
-                                  color: AppColors.navCard.withValues(alpha: 0.82),
-                                  child: Icon(upcoming.icon, color: Colors.white, size: 54),
+                                  color: cs.surfaceContainerHigh,
+                                  child: Icon(upcoming.icon, color: cs.primary, size: 70),
                                 ),
                               ),
                               // 콘텐츠: 거리 + 도로명
@@ -2079,18 +2073,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                               children: [
                                                 TextSpan(
                                                   text: parts.$1,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 44,
+                                                  style: TextStyle(
+                                                    color: cs.onSurface,
+                                                    fontSize: 53,
                                                     fontWeight: FontWeight.w800,
                                                     height: 1.1,
                                                   ),
                                                 ),
                                                 TextSpan(
                                                   text: parts.$2,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 20,
+                                                  style: TextStyle(
+                                                    color: cs.onSurface,
+                                                    fontSize: 24,
                                                     fontWeight: FontWeight.w700,
                                                     height: 1.1,
                                                   ),
@@ -2103,8 +2097,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                         Text(
                                           upcoming.streetNames.first,
                                           style: TextStyle(
-                                            color: Colors.white.withValues(alpha: 0.85),
-                                            fontSize: 18,
+                                            color: cs.onSurfaceVariant,
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
                                           ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
@@ -2116,37 +2111,55 @@ class _NavScreenState extends ConsumerState<NavScreen>
                             ],
                           ),
                         ),
-                        // 다음 이벤트 미리보기
-                        if (_stepIdx + 2 < _steps.length) ...[
-                          Divider(
-                            height: 1,
-                            color: Colors.white.withValues(alpha: 0.25),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                            child: Row(
-                              children: [
-                                Icon(_steps[_stepIdx + 2].icon, color: Colors.white70, size: 22),
-                                const SizedBox(width: 8),
-                                Text('다음', style: TextStyle(color: Colors.white.withValues(alpha: 0.54), fontSize: 14)),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    _steps[_stepIdx + 2].streetNames.firstOrNull ?? _steps[_stepIdx + 2].label,
-                                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
+                // (B) 다음 이벤트 별개 카드
+                if (_stepIdx + 2 < _steps.length)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: SizedBox(
+                      width: MediaQuery.of(context).size.width * 0.62 * 0.70,
+                      child: Container(
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(20),
+                            bottomRight: Radius.circular(20),
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 8,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                          child: Row(
+                            children: [
+                              Icon(_steps[_stepIdx + 2].icon, color: cs.onSurface, size: 33),
+                              const SizedBox(width: 8),
+                              Text('다음', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 21, fontWeight: FontWeight.bold)),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  _steps[_stepIdx + 2].streetNames.firstOrNull ?? _steps[_stepIdx + 2].label,
+                                  style: TextStyle(color: cs.onSurface, fontSize: 21, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
 
@@ -2250,95 +2263,110 @@ class _NavScreenState extends ConsumerState<NavScreen>
             bottom: 12,
             left: 12,
             right: 12,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 12,
-                    offset: Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
-                  child: Builder(builder: (_) {
-                    final canReroute = navState?.pos != null && !_isRerouting;
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        // ── 재탐색 버튼 (왼쪽) ──
-                        GestureDetector(
-                          onTap: canReroute ? _openCourseSheet : null,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.alt_route, size: 26,
-                                    color: canReroute ? cs.onSurface : cs.onSurface.withValues(alpha: 0.35)),
-                                const SizedBox(height: 2),
-                                Text('재탐색', style: TextStyle(fontSize: 11, color: canReroute ? cs.onSurfaceVariant : cs.onSurface.withValues(alpha: 0.3))),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Container(width: 1, height: 44, color: cs.outline.withValues(alpha: 0.4)),
-                        // ── 중앙 정보 (목적지 + ETA + 거리) ──
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  ref.watch(mapInteractionProvider).destinationName ?? '목적지',
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 12,
+                      offset: Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 최상단 진행 바
+                    LinearProgressIndicator(
+                      value: (_stepIdx + 1) / _steps.length,
+                      backgroundColor: cs.primaryContainer,
+                      color: cs.primary,
+                      minHeight: 12,
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(0, 14, 0, 14),
+                        child: Builder(builder: (_) {
+                          final canReroute = navState?.pos != null && !_isRerouting;
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // ── 재탐색 버튼 (왼쪽) ──
+                              GestureDetector(
+                                onTap: canReroute ? _openCourseSheet : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.alt_route, size: 26,
+                                          color: canReroute ? cs.onSurface : cs.onSurface.withValues(alpha: 0.35)),
+                                      const SizedBox(height: 2),
+                                      Text('재탐색', style: TextStyle(fontSize: 11, color: canReroute ? cs.onSurfaceVariant : cs.onSurface.withValues(alpha: 0.3))),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Text(
-                                      _etaText(_durationMin),
-                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: cs.onSurface),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      routeKm > 0 ? '${routeKm.toStringAsFixed(1)} km' : '--',
-                                      style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-                                    ),
-                                  ],
+                              ),
+                              Container(width: 1, height: 44, color: cs.outline.withValues(alpha: 0.4)),
+                              // ── 중앙 정보 (목적지 + ETA + 거리) ──
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        ref.watch(mapInteractionProvider).destinationName ?? '목적지',
+                                        style: TextStyle(fontSize: 21, fontWeight: FontWeight.normal, color: cs.onSurface),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Text(
+                                            _etaText(_durationMin),
+                                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: cs.onSurface),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            routeKm > 0 ? '${routeKm.toStringAsFixed(1)} km' : '--',
+                                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Container(width: 1, height: 44, color: cs.outline.withValues(alpha: 0.4)),
-                        // ── 종료 버튼 (오른쪽) ──
-                        GestureDetector(
-                          onTap: () => _exitNav(),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.close_rounded, size: 26, color: cs.error),
-                                const SizedBox(height: 2),
-                                Text('종료', style: TextStyle(fontSize: 11, color: cs.error)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }),
+                              ),
+                              Container(width: 1, height: 44, color: cs.outline.withValues(alpha: 0.4)),
+                              // ── 종료 버튼 (오른쪽) ──
+                              GestureDetector(
+                                onTap: () => _exitNav(),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.close_rounded, size: 26, color: cs.error),
+                                      const SizedBox(height: 2),
+                                      Text('종료', style: TextStyle(fontSize: 11, color: cs.error)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -2980,22 +3008,22 @@ class _CompassBtn extends StatelessWidget {
                   children: [
                     Positioned(top: 5, left: 0, right: 0,
                       child: Text('N', textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: cs.error, height: 1))),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.error, height: 1))),
                     Positioned(bottom: 5, left: 0, right: 0,
                       child: Text('S', textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, height: 1))),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))),
                     Positioned(top: 0, bottom: 0, right: 6,
                       child: Column(mainAxisAlignment: MainAxisAlignment.center,
-                          children: [Text('E', style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, height: 1))])),
+                          children: [Text('E', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))])),
                     Positioned(top: 0, bottom: 0, left: 6,
                       child: Column(mainAxisAlignment: MainAxisAlignment.center,
-                          children: [Text('W', style: TextStyle(fontSize: 9, color: cs.onSurfaceVariant, height: 1))])),
+                          children: [Text('W', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))])),
                   ],
                 ),
               ),
             ),
             // 고정 화살표 (항상 위를 가리킴)
-            Icon(Icons.navigation_rounded, size: 22, color: cs.tertiary),
+            Icon(Icons.navigation_rounded, size: 16, color: cs.tertiary),
           ],
         ),
       ),
