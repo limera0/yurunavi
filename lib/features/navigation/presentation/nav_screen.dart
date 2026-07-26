@@ -322,6 +322,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       statusBarIconBrightness: Brightness.dark,
       systemNavigationBarColor: Color(0xFFF8F4F0),
       systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
     ));
     _pulseCtrl = AnimationController(
       vsync: this,
@@ -2046,12 +2047,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // 아이콘박스: 폭 114
+                              // 아이콘박스: 폭 80 (30% 축소)
                               SizedBox(
-                                width: 114,
+                                width: 80,
                                 child: ColoredBox(
-                                  color: cs.surfaceContainerHigh,
-                                  child: Icon(upcoming.icon, color: cs.primary, size: 70),
+                                  color: cs.surface,
+                                  child: Icon(
+                                    upcoming.icon,
+                                    color: cs.primary,
+                                    size: 60,
+                                    shadows: [
+                                      Shadow(blurRadius: 4, color: cs.primary.withValues(alpha: 0.9)),
+                                      Shadow(blurRadius: 8, color: cs.primary.withValues(alpha: 0.6)),
+                                    ],
+                                  ),
                                 ),
                               ),
                               // 콘텐츠: 거리 + 도로명
@@ -2318,26 +2327,28 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 14),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Text(
                                         ref.watch(mapInteractionProvider).destinationName ?? '목적지',
-                                        style: TextStyle(fontSize: 21, fontWeight: FontWeight.normal, color: cs.onSurface),
+                                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.normal, color: cs.onSurface),
+                                        textAlign: TextAlign.center,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       const SizedBox(height: 4),
                                       Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
                                         children: [
                                           Text(
                                             _etaText(_durationMin),
-                                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: cs.onSurface),
+                                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: cs.onSurface),
                                           ),
                                           const SizedBox(width: 10),
                                           Text(
                                             routeKm > 0 ? '${routeKm.toStringAsFixed(1)} km' : '--',
-                                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant),
+                                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant),
                                           ),
                                         ],
                                       ),
