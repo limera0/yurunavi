@@ -1752,6 +1752,16 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           ),
 
           // ══════════════════════════════════════════════════════
+          // LAYER 3.5 · Left Daylight bar
+          // ══════════════════════════════════════════════════════
+          Positioned(
+            left: 12,
+            top: 200,
+            bottom: 120,
+            child: _LeftDaylightBar(),
+          ),
+
+          // ══════════════════════════════════════════════════════
           // LAYER 4 · Right panel  (Daylight + map controls)
           // ══════════════════════════════════════════════════════
           Positioned(
@@ -2070,11 +2080,39 @@ class _HeaderIcon extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Right Panel  (Daylight bar + compass + zoom controls)
-// 와이어프레임: 일출 아이콘·라벨 → 세로 게이지 바 → 일몰 아이콘·라벨 → 나침반 → + → 슬라이더 → -
+// Left Daylight bar  (좌측 배치 전용 래퍼)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _RightPanel extends ConsumerWidget {
+class _LeftDaylightBar extends ConsumerWidget {
+  const _LeftDaylightBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final daylightCycle = ref.watch(daylightCycleProvider);
+    final daylightProgress = daylightCycle?.progress ?? 0.5;
+    final isDay = daylightCycle?.isDay ?? true;
+    final topLabel = daylightCycle != null
+        ? DateFormat('HH:mm').format(daylightCycle.topTime)
+        : '--:--';
+    final bottomLabel = daylightCycle != null
+        ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
+        : '--:--';
+
+    return DaylightBar(
+      progress: daylightProgress,
+      sunriseLabel: topLabel,
+      sunsetLabel: bottomLabel,
+      isNightMode: !isDay,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Right Panel  (compass + zoom controls)
+// 와이어프레임: 나침반 → + → 슬라이더 → -
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RightPanel extends StatelessWidget {
   final bool showCourseSheet;
   final VoidCallback onRecenter;
   final VoidCallback onZoomIn;
@@ -2088,18 +2126,7 @@ class _RightPanel extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final daylightCycle = ref.watch(daylightCycleProvider);
-    final daylightProgress = daylightCycle?.progress ?? 0.5;
-    final isDay = daylightCycle?.isDay ?? true;
-
-    final topLabel = daylightCycle != null
-        ? DateFormat('HH:mm').format(daylightCycle.topTime)
-        : '--:--';
-    final bottomLabel = daylightCycle != null
-        ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
-        : '--:--';
-
+  Widget build(BuildContext context) {
     // 코스 시트가 올라왔을 때 패널 하단 여유 조절
     final bottomPad = showCourseSheet ? 220.0 : 60.0;
 
@@ -2109,18 +2136,6 @@ class _RightPanel extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── 공용 DaylightBar (메인/내비 동일 위젯) ──────────
-          Flexible(
-            child: DaylightBar(
-              progress: daylightProgress,
-              sunriseLabel: topLabel,
-              sunsetLabel: bottomLabel,
-              isNightMode: !isDay,
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
           // ── 내 위치 복귀 ────────────────────────────────────
           _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter),
 
