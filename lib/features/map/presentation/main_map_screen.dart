@@ -1756,8 +1756,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           // ══════════════════════════════════════════════════════
           Positioned(
             left: 12,
-            top: 200,
-            bottom: 120,
+            top: MediaQuery.of(context).size.height * 0.30 + 100,
+            bottom: 160,
             child: _LeftDaylightBar(),
           ),
 

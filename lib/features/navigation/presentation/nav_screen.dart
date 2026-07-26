@@ -289,6 +289,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // true가 되고, PIP가 닫히거나(onPipExited) 사용자가 앱으로 복귀(onPipMaximised)하면
   // false로 되돌아온다. build()가 이 플래그로 전체 UI ↔ 컴팩트 뷰를 스위칭한다.
   bool _isInPip = false;
+  // 포그라운드 서비스 알림 표시 시 onUserLeaveHint 조기 발화 방지용 — initState
+  // 진입 후 2초 뒤에 true가 되며, 그 전에는 _maybeEnterPip()가 no-op.
+  bool _pipReady = false;
   AndroidPIP? _pip;
   static const MethodChannel _pipHintChannel =
       MethodChannel('com.westinx.yurunavi/nav_pip_hint');
@@ -358,6 +361,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _pipHintChannel.setMethodCallHandler((call) async {
         if (call.method == 'onUserLeaveHint') await _maybeEnterPip();
       });
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _pipReady = true);
+      });
     }
     // TTS 초기화 + 첫 안내
     _initTts();
@@ -391,6 +397,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 콜백이 _isInPip을 되돌린다. PiP 미지원 기기(API<26 등)에서 enterPipMode()를
   /// 호출하면 안전하지 않을 수 있어 isPipAvailable로 먼저 확인한다.
   Future<void> _maybeEnterPip() async {
+    if (!_pipReady) return;
     final pip = _pip;
     if (pip == null ||
         widget.destination == null ||
@@ -2214,7 +2221,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
           // ── 우측: 나침반 + 주유소 버튼 + GPS 버튼 ──────────────────────────────────────
           Positioned(
             right: 12,
-            bottom: 160,
+            bottom: 245,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2262,6 +2269,26 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         headingDeg: isNorthUp ? null : _resolveHeading(speedKmh, ns?.headingDeg),
                         forceBearingNorth: isNorthUp);
                   },
+                ),
+              ],
+            ),
+          ),
+
+          // ── 우측 하단: 줌 버튼 세트 ──────────────────────────────────────
+          Positioned(
+            right: 12,
+            bottom: 125,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ZoomBtn(
+                  icon: Icons.add,
+                  onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
+                ),
+                const SizedBox(height: 4),
+                _ZoomBtn(
+                  icon: Icons.remove,
+                  onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
                 ),
               ],
             ),
@@ -2985,6 +3012,31 @@ class _StructureCurveAlert extends StatelessWidget {
   }
 
   IconData _structureIcon(StructureType type) => Icons.warning_amber_rounded;
+}
+
+class _ZoomBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _ZoomBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 6)],
+        ),
+        child: Icon(icon, color: cs.onSurface, size: 22),
+      ),
+    );
+  }
 }
 
 class _CompassBtn extends StatelessWidget {

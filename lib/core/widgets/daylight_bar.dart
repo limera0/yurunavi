@@ -47,32 +47,6 @@ class DaylightBar extends StatelessWidget {
         : AppColors.secondary.withValues(alpha: 0.12);
     final sunriseColor = isNight ? cs.onSurfaceVariant : AppColors.sunrise;
     final sunsetColor = isNight ? cs.tertiary : AppColors.sunset;
-    final handleBorder = isNight ? cs.tertiary : AppColors.primary;
-    final handleInner = isNight ? cs.surface : Colors.white;
-
-    final gradient = isNight
-        ? const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1A237E), // 자정 남색
-              Color(0xFF3949AB), // 새벽 남색
-              Color(0xFF5C6BC0), // 여명 연남
-              Color(0xFFFFD54F), // 일출 황금
-            ],
-            stops: [0.0, 0.3, 0.7, 1.0],
-          )
-        : const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFFFD54F), // 일출 황금
-              Color(0xFFFFB300), // 정오
-              Color(0xFF90CAF9), // 황혼 파랑
-              Color(0xFF1A237E), // 일몰 심야
-            ],
-            stops: [0.0, 0.45, 0.75, 1.0],
-          );
 
     return Container(
       width: 38,
@@ -128,26 +102,16 @@ class DaylightBar extends StatelessWidget {
                         height: totalH,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(3),
-                          gradient: gradient,
+                          color: isNight ? const Color(0xFF1A237E) : const Color(0xFFFFF59D),
                         ),
                       ),
                       Positioned(
-                        top: handleY.clamp(0.0, totalH - 16),
-                        left: -5,
-                        child: Container(
-                          width: 16,
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: handleInner,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: handleBorder, width: 2.5),
-                            boxShadow: [
-                              BoxShadow(
-                                color: handleBorder.withValues(alpha: 0.4),
-                                blurRadius: 6,
-                              ),
-                            ],
-                          ),
+                        top: handleY.clamp(0.0, totalH - 24),
+                        left: -9,  // 6px 바를 기준으로 24px 아이콘 센터 맞춤 (-9 = (6-24)/2)
+                        child: Icon(
+                          isNight ? Icons.nightlight_round : Icons.wb_sunny_rounded,
+                          size: 24,
+                          color: isNight ? const Color(0xFFFFF9C4) : const Color(0xFFFFB300),
                         ),
                       ),
                     ],
