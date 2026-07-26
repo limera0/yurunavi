@@ -157,7 +157,8 @@ class RoutingService {
     'use_ferry': 0.0,
     'class_factors': {
       '0': 100,   // motorway: 고속도로 회피
-      '1': 100,   // trunk: 자동차전용 회피
+      // '1' trunk 제거: use_highways:0.0이 이미 trunk 회피 처리 — 이중 패널티가
+      // 580km 우회의 원인이었음 (loop/RECON_costing_national.md 및 2026-07-26 실측)
       '2': 3.0,   // primary: 국도 일부 허용 (시골길 6→폴백 3)
       '3': 1.0,   // secondary: 지방도 중립
       '4': 0.7,   // tertiary: 시군도 선호
@@ -177,7 +178,7 @@ class RoutingService {
     'use_ferry': 0.0,
     'class_factors': {
       '0': 100,   // motorway: 고속도로 회피
-      '1': 100,   // trunk: 자동차전용 회피
+      // '1' trunk 제거 (이유: _ruralBalancedOpts 동일)
       '2': 1.0,   // primary: 국도 일부 허용 (지방도 2.0→폴백 1.0)
       '3': 0.6,   // secondary: 지방도 선호 유지(다소 완화)
       '4': 1.3,   // tertiary: 시군도 다소 회피
@@ -281,6 +282,9 @@ class RoutingService {
     final costingOptions = <Map<String, dynamic>>[
       // 시골길: 생활도로·비포장 선호, top_speed 제한 → 간선도로 자연 회피
       // use_ferry:0.0 — 한국 도선/나룻배는 오토바이 탑승 불가 경우 많음
+      // 2026-07-26 실측 조정: '1'(trunk) 제거 — use_highways:0.0이 trunk 회피를
+      // 충분히 처리하며, class_factor 100 이중 패널티가 580km 우회의 원인이었음.
+      // primary 6·secondary 2.5·터널/교량 3.0으로 완화해 305km 실측 달성.
       {
         'use_highways': 0.0,
         'use_ferry': 0.0,
@@ -288,22 +292,23 @@ class RoutingService {
         'use_tracks': 0.15,
         'top_speed': 40,
         'class_factors': {
-          '0': 100,   // motorway: 고속도로 회피
-          '1': 100,   // trunk: 자동차전용 회피
-          '2': 10,    // primary: 일반국도 회피
-          '3': 4,     // secondary: 지방도 회피
+          '0': 100,   // motorway: 고속도로 회피 (법적 절대 금지)
+          '2': 6,     // primary: 일반국도 회피
+          '3': 2.5,   // secondary: 지방도 회피
           '4': 0.5,   // tertiary: 시군도 선호
-          '5': 1.3,   // unclassified: 소로 약한 회피
-          '6': 1.4,   // residential: 마을길 약한 회피
-          '7': 1.6,   // service: 농로 약한 회피
+          '5': 1.2,   // unclassified: 소로 약한 회피
+          '6': 1.3,   // residential: 마을길 약한 회피
+          '7': 1.5,   // service: 농로 약한 회피
         },
-        'curvature_penalty': 3.0,
-        'long_bridge_factor': 6.0,
-        'long_tunnel_factor': 6.0,
+        'curvature_penalty': 2.0,
+        'long_bridge_factor': 3.0,
+        'long_tunnel_factor': 3.0,
         'span_min_length': 300,
         'uturn_penalty': 50,
       },
       // 지방도로: 중간 설정, 주요 국도 의존 낮춤
+      // 2026-07-26 실측 조정: '1'(trunk) 제거, 터널/교량 5.0→2.0
+      // 서울-호산 323km 달성 (Naver 지방도 309km 대비 +4.5%)
       {
         'use_highways': 0.0,
         'use_ferry': 0.0,
@@ -311,7 +316,6 @@ class RoutingService {
         'use_tracks': 0.2,
         'class_factors': {
           '0': 100,   // motorway: 고속도로 회피
-          '1': 100,   // trunk: 자동차전용 회피
           '2': 2.0,   // primary: 일반국도 약한 회피
           '3': 0.3,   // secondary: 지방도 선호
           '4': 1.1,   // tertiary: 시군도 약한 회피
@@ -320,16 +324,14 @@ class RoutingService {
           '7': 3.0,   // service: 농로 회피
         },
         'curvature_penalty': 0.5,
-        'long_bridge_factor': 5.0,
-        'long_tunnel_factor': 5.0,
+        'long_bridge_factor': 2.0,
+        'long_tunnel_factor': 2.0,
         'span_min_length': 1000,
         'uturn_penalty': 70,
       },
       // 국도: 주요도로 선호, 생활도로·트랙·고속도로·유료도로 회피
-      // 'shortest' 제거: motorcyclecost.cc EdgeCost()가 shortest_일 때
-      // class_factors/use_highways/use_tolls/curvature/bridge/tunnel factor를
-      // 전부 건너뛰고 순수 거리비용만 반환 — 이 코스가 자동차전용도로(trunk)를
-      // 36% 섞어 쓰던 원인이었음 (loop/RECON_costing_national.md 참조).
+      // 2026-07-26: '1'(trunk) 제거 + secondary 1.2→0.9
+      // trunk은 use_highways:0.0으로 충분히 회피됨.
       {
         'use_highways': 0.0,
         'use_ferry': 0.0,
@@ -337,10 +339,9 @@ class RoutingService {
         'use_tracks': 0.0,
         'use_tolls': 0.0,
         'class_factors': {
-          '0': 100,   // motorway: 고속도로 회피
-          '1': 100,   // trunk: 자동차전용 회피
+          '0': 100,   // motorway: 고속도로 회피 (법적 절대 금지)
           '2': 0.3,   // primary: 일반국도 강한 선호
-          '3': 1.2,   // secondary: 지방도 기준
+          '3': 0.9,   // secondary: 지방도 약한 허용
           '4': 2.0,   // tertiary: 시군도 회피
           '5': 4.0,   // unclassified: 소로 강한 회피
           '6': 5.0,   // residential: 마을길 강한 회피
