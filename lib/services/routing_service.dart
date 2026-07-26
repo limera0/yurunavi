@@ -329,23 +329,16 @@ class RoutingService {
         'span_min_length': 1000,
         'uturn_penalty': 70,
       },
-      // 국도: 주요도로 선호, 생활도로·트랙·고속도로·유료도로 회피
-      // 2026-07-26: '1'(trunk) 제거 + secondary 1.2→0.9
-      // trunk은 use_highways:0.0으로 충분히 회피됨.
+      // 국도: 고속도로만 회피, 나머지 class_factors 없음 — 가장 짧은 국도 경로 우선.
+      // 2026-07-26 실측: class_factors 세부 가중치가 tipping point를 유발해
+      // 서울-호산 369km 고착. '0':100 단독 사용 시 349km(지방도 323km 대비 +8%),
+      // 서울-춘천 94km(지방도 128km 대비 -26%) 달성.
       {
         'use_highways': 0.0,
         'use_ferry': 0.0,
-        'use_living_streets': 0.0,
-        'use_tracks': 0.0,
         'use_tolls': 0.0,
         'class_factors': {
           '0': 100,   // motorway: 고속도로 회피 (법적 절대 금지)
-          '2': 0.3,   // primary: 일반국도 강한 선호
-          '3': 0.9,   // secondary: 지방도 약한 허용
-          '4': 2.0,   // tertiary: 시군도 회피
-          '5': 4.0,   // unclassified: 소로 강한 회피
-          '6': 5.0,   // residential: 마을길 강한 회피
-          '7': 8.0,   // service: 농로 강한 회피
         },
         'curvature_penalty': 0.0,
         'long_bridge_factor': 1.0,
