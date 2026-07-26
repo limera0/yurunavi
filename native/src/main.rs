@@ -1447,6 +1447,21 @@ async fn handle_health() -> Json<HealthResp> {
     Json(HealthResp { status: "ok" })
 }
 
+// ── Routing config ─────────────────────────────────────────────
+
+const ROUTING_CONFIG_PATH: &str = "/data/routing-config/routing.json";
+const ROUTING_CONFIG_DEFAULT: &str = r#"{"version":1,"profiles":[{"use_highways":0.0,"use_ferry":0.0,"use_living_streets":1.0,"use_tracks":0.15,"top_speed":40,"class_factors":{"0":100,"2":6,"3":2.5,"4":0.5,"5":1.2,"6":1.3,"7":1.5},"curvature_penalty":2.0,"long_bridge_factor":3.0,"long_tunnel_factor":3.0,"span_min_length":300,"uturn_penalty":50},{"use_highways":0.0,"use_ferry":0.0,"use_living_streets":0.5,"use_tracks":0.2,"class_factors":{"0":100,"2":2.0,"3":0.3,"4":1.1,"5":1.8,"6":2.2,"7":3.0},"curvature_penalty":0.5,"long_bridge_factor":2.0,"long_tunnel_factor":2.0,"span_min_length":1000,"uturn_penalty":70},{"use_highways":0.0,"use_ferry":0.0,"use_tolls":0.0,"class_factors":{"0":100},"curvature_penalty":0.0,"long_bridge_factor":1.0,"long_tunnel_factor":1.0,"uturn_penalty":120}]}"#;
+
+async fn handle_routing_config() -> impl axum::response::IntoResponse {
+    let body = tokio::fs::read_to_string(ROUTING_CONFIG_PATH)
+        .await
+        .unwrap_or_else(|_| ROUTING_CONFIG_DEFAULT.to_string());
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+}
+
 // ── Main ───────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -1468,7 +1483,8 @@ async fn main() {
         .route("/check_destination_reachable", post(handle_reachability))
         .route("/poi/nearby", get(handle_poi_nearby))
         .route("/geocode/search", get(handle_geocode_search))
-        .route("/gasstations/nearby", get(handle_gasstations_nearby));
+        .route("/gasstations/nearby", get(handle_gasstations_nearby))
+        .route("/routing-config", get(handle_routing_config));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8003")
         .await

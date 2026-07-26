@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/config/app_config.dart';
+import '../../../core/config/routing_config.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../map/presentation/main_map_screen.dart';
 import '../../map/providers/map_providers.dart';
@@ -50,6 +52,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;
     await _requestPermissions();
+    if (!mounted) return;
+    await RoutingConfig.loadRemote(AppConfig.instance.naviBaseUrl);
     if (!mounted) return;
     _goToMain();
   }

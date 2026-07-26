@@ -37,3 +37,6 @@ services:
       # POI SQLite DB (native/src/bin/ingest_poi.rs가 분기별로 재적재). 읽기 전용 마운트 —
       # /poi/nearby가 여는 파일이며 없어도 서버 자체는 뜬다(해당 라우트만 503).
       - /data/poi:/data/poi:ro
+      # 라우팅 코스팅 파라미터 JSON — 앱 재배포 없이 서버에서 파라미터 수정 가능.
+      # /routing-config 엔드포인트가 이 경로에서 읽음. 파일 없으면 내장 기본값 사용.
+      - /data/routing-config:/data/routing-config:ro
