@@ -1254,7 +1254,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _navPoiLayerId,
       const ml.SymbolLayerProperties(
         iconImage: ['get', 'poiIcon'],
-        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconSize: 0.52, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
         iconAllowOverlap: true,
         iconAnchor: 'center',
         textField: ['get', 'name'],

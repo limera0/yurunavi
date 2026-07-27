@@ -118,6 +118,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // 위 검색용 소스/레이어와 완전히 다른 식별자 — 서로 독립적으로 갱신된다.
   static const _ambientPoiSourceId = 'poi-ambient-source';
   static const _ambientPoiLayerId = 'poi-ambient-layer';
+  // 즐겨찾기 전용 레이어 — ambient POI 레이어 위에 금색 별 아이콘으로 렌더링된다.
+  static const _favPoiSourceId = 'poi-fav-source';
+  static const _favPoiLayerId  = 'poi-fav-layer';
+  static const _kFavPoiIcon    = 'poi-icon-favorite';
 
   bool _locLayerReady = false;
   ml.Symbol? _destMarker;
@@ -512,7 +516,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       _poiLayerId,
       const ml.SymbolLayerProperties(
         iconImage: ['get', 'poiIcon'],
-        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconSize: 0.52, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
         iconAllowOverlap: true,
         iconAnchor: 'center',
         textField: ['get', 'name'],
@@ -547,7 +551,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       _ambientPoiLayerId,
       const ml.SymbolLayerProperties(
         iconImage: ['get', 'poiIcon'],
-        iconSize: 0.4, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
+        iconSize: 0.52, // 96px 원본 기준 실사용 크기 — 실기기 확인 후 추가 조정
         iconAllowOverlap: true,
         iconAnchor: 'center',
         textField: ['get', 'name'],
@@ -567,6 +571,56 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   void _updateAmbientPoiLayer(List<Poi> pois) {
     if (!_styleLoaded) return;
     _mlCtrl?.setGeoJsonSource(_ambientPoiSourceId, _buildPoiGeoJson(pois));
+  }
+
+  // ── 즐겨찾기 POI 레이어 ────────────────────────────────────────────────────
+
+  Map<String, dynamic> _buildFavPoiGeoJson(List<FavoritePlace> favs) => {
+    'type': 'FeatureCollection',
+    'features': favs
+        .map((f) => {
+              'type': 'Feature',
+              'geometry': {
+                'type': 'Point',
+                'coordinates': [f.lng, f.lat],
+              },
+              'properties': <String, dynamic>{
+                'poiIcon': _kFavPoiIcon,
+                'name': f.name,
+              },
+            })
+        .toList(),
+  };
+
+  Future<void> _initFavPoiLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addGeoJsonSource(_favPoiSourceId, _buildFavPoiGeoJson(const []));
+    await ctrl.addSymbolLayer(
+      _favPoiSourceId,
+      _favPoiLayerId,
+      const ml.SymbolLayerProperties(
+        iconImage: ['get', 'poiIcon'],
+        iconSize: 0.52,
+        iconAllowOverlap: true,
+        iconAnchor: 'center',
+        textField: ['get', 'name'],
+        textFont: ['Noto Sans Regular'],
+        textSize: 11,
+        textOffset: [0, 1.6],
+        textAnchor: 'top',
+        textColor: '#212121',
+        textHaloColor: '#FFFFFF',
+        textHaloWidth: 1.2,
+        textAllowOverlap: false,
+        textOptional: true,
+      ),
+    );
+  }
+
+  void _updateFavPoiLayer(List<FavoritePlace> favs) {
+    if (!_styleLoaded) return;
+    _mlCtrl?.setGeoJsonSource(_favPoiSourceId, _buildFavPoiGeoJson(favs));
   }
 
   /// 현재 줌 레벨에서 노출 대상인 카테고리를 계산하고, 필요 시(카테고리 변경 시
@@ -1501,6 +1555,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     ref.listen<List<Poi>>(poiListProvider, (prev, next) {
       _updatePoiLayer(next);
     });
+    ref.listen<AsyncValue<List<FavoritePlace>>>(
+      favoritePlacesProvider,
+      (_, next) => _updateFavPoiLayer(next.value ?? const []),
+    );
     final isOnline = ref.watch(isOnlineProvider);
     final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
@@ -1566,10 +1624,36 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             onMapCreated: (c) {
               _mlCtrl = c;
               c.onFeatureTapped.add((point, coords, id, layerId, annotation) {
-                if (layerId != _ambientPoiLayerId && layerId != _poiLayerId) {
+                if (layerId != _ambientPoiLayerId &&
+                    layerId != _poiLayerId &&
+                    layerId != _favPoiLayerId) {
                   return;
                 }
                 final tapLoc = LatLng(coords.latitude, coords.longitude);
+                if (layerId == _favPoiLayerId) {
+                  // 즐겨찾기 POI 탭 — 가장 가까운 즐겨찾기를 확인시트로 넘긴다.
+                  final favs =
+                      ref.read(favoritePlacesProvider).value ?? const [];
+                  if (favs.isEmpty) return;
+                  FavoritePlace? nearestFav;
+                  var bestDist = double.infinity;
+                  for (final f in favs) {
+                    final d = PoiService.haversineMeters(
+                        tapLoc, LatLng(f.lat, f.lng));
+                    if (d < bestDist) {
+                      bestDist = d;
+                      nearestFav = f;
+                    }
+                  }
+                  if (nearestFav != null) {
+                    unawaited(_handleLocationTap(
+                      location: LatLng(nearestFav.lat, nearestFav.lng),
+                      name: nearestFav.name,
+                      category: nearestFav.category,
+                    ));
+                  }
+                  return;
+                }
                 final candidates = layerId == _ambientPoiLayerId
                     ? _ambientPois
                     : ref.read(poiListProvider);
@@ -1636,6 +1720,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 );
                 await _mlCtrl!.addImage('poi-icon-${type.name}', bytes);
               }
+              // 즐겨찾기 전용 아이콘 — 금색 별
+              await _mlCtrl!.addImage(
+                _kFavPoiIcon,
+                await renderPoiIconPng(Icons.star, const Color(0xFFFFD600)),
+              );
               // 검색 결과 탭 시 보여주는 임시 초록 점 — POI 아이콘과 같은 이유로
               // 스타일 재주입마다 다시 등록해야 한다.
               await _mlCtrl!.addImage(
@@ -1648,6 +1737,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               if (pois.isNotEmpty) _updatePoiLayer(pois);
               // 13-1b: 검색 시트와 무관한 상시 표시 POI 레이어
               await _initAmbientPoiLayer();
+              // 즐겨찾기 POI 레이어 — ambient 위에 그려지도록 마지막에 추가
+              await _initFavPoiLayer();
+              final favs = ref.read(favoritePlacesProvider).value ?? const [];
+              if (favs.isNotEmpty) _updateFavPoiLayer(favs);
             },
             onMapClick: (point, latLng) {
               _onMapTap(
