@@ -21,6 +21,7 @@ DISCORD_OWNER_USER_ID 본인만):
 import asyncio
 import json
 import os
+import re
 import shlex
 import signal
 from datetime import datetime
@@ -38,6 +39,13 @@ RUN_LOG = STATE_DIR / "agent_run_current.log"
 HANDOFF = STATE_DIR / "handoff.md"
 CHAT_SESSION_FILE = STATE_DIR / "discord_chat_session_id.txt"
 CHAT_TIMEOUT_SECONDS = 1800
+
+# 디스코드 첨부(이미지/PDF/텍스트 등) 저장 규칙.
+# archive HDD(sdb, /archive) 밑 프로젝트별 폴더 — 이 repo가 아니라 별도 디스크라
+# git 오염이 없다. 새 프로젝트 봇은 PROJECT 상수만 바꾸면 된다.
+PROJECT = "yurunavi"
+UPLOAD_ROOT = Path("/archive/discord") / PROJECT
+MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024  # 50MB — 디스코드 기본 첨부 한도 수준
 
 
 def load_env() -> dict:
@@ -86,6 +94,58 @@ def running_pid() -> int | None:
     except PermissionError:
         return pid
     return pid
+
+
+def _safe_name(name: str) -> str:
+    """첨부 파일명을 안전하게 정리한다. 경로 구분자/traversal 제거, 한글 등은 보존(\\w+UNICODE)."""
+    name = os.path.basename(name or "file")
+    name = re.sub(r"[^\w.\-]", "_", name, flags=re.UNICODE)
+    return name.strip("._") or "file"
+
+
+async def save_attachments(message: discord.Message) -> list[Path]:
+    """OWNER가 올린 첨부를 /archive/discord/<project>/ 에 yymmddhhmmss_<원본명> 으로 저장.
+
+    저장된 로컬 경로 리스트를 반환한다. 크기 초과/저장 실패는 건너뛰고 사용자에게 알린다.
+    (is_authorized 로 OWNER 메시지만 여기 도달하므로 임의 파일 업로드 위험은 없다.)
+    """
+    if not message.attachments:
+        return []
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+    for att in message.attachments:
+        if att.size and att.size > MAX_ATTACHMENT_BYTES:
+            await message.reply(
+                f"⚠️ 첨부 `{att.filename}` 가 너무 큽니다({att.size // 1024 // 1024}MB > 50MB) — 건너뜀."
+            )
+            continue
+        ts = datetime.now().strftime("%y%m%d%H%M%S")
+        dest = UPLOAD_ROOT / f"{ts}_{_safe_name(att.filename)}"
+        # 같은 초에 동명 파일이 또 오면(드묾) 덮어쓰지 않게 카운터를 붙인다.
+        base, n = dest, 1
+        while dest.exists():
+            dest = base.with_name(f"{base.stem}_{n}{base.suffix}")
+            n += 1
+        try:
+            await att.save(dest)
+            saved.append(dest)
+        except Exception as e:  # noqa: BLE001 — 개별 첨부 실패가 전체를 막지 않게
+            await message.reply(f"⚠️ 첨부 `{att.filename}` 저장 실패: {e}")
+    return saved
+
+
+def _augment_prompt(text: str, paths: list[Path]) -> str:
+    """claude -p 프롬프트에 첨부 로컬 경로 블록을 덧붙인다. Read 도구가 이미지/PDF/텍스트를
+    직접 렌더링하므로, 경로만 알려주면 모델이 열어서 실제 내용을 본다."""
+    text = (text or "").strip()
+    if not paths:
+        return text
+    block = "\n".join(f"- {p}" for p in paths)
+    note = (
+        "\n\n[첨부파일 — Read 도구로 열어서 확인해라. 이미지/PDF/텍스트 모두 Read로 직접 볼 수 있다]\n"
+        + block
+    )
+    return (text or "(본문 없음 — 첨부파일을 열어보고 무엇을 원하는지 판단해라)") + note
 
 
 # run_night_auto.sh 에 그대로 통과시킬 수 있는 옵션 화이트리스트.
@@ -303,14 +363,20 @@ async def cmd_plan(message: discord.Message, request: str):
     if chat_busy:
         await message.reply("이전 요청 아직 처리 중입니다. 끝나면 답 드릴게요.")
         return
-    if not request:
-        await message.reply("무슨 작업인지 자연어로 적어주세요. 예: `!plan 앱 아이콘 확정 작업 해줘`")
-        return
 
     chat_busy = True
     thinking = await message.reply("🧭 지시서 초안 작성 중... (최대 15분)")
     try:
-        prompt = PLAN_PROMPT.format(request=request, date=datetime.now().strftime("%m%d"))
+        # 첨부(스크린샷 등)가 있으면 저장해 경로를 요청에 덧붙인다 — 본문 없이 이미지만
+        # 보낸 !plan 도 허용(모델이 이미지를 Read 로 보고 작업을 특정).
+        attach_paths = await save_attachments(message)
+        if not request and not attach_paths:
+            await thinking.edit(
+                content="무슨 작업인지 자연어로 적어주세요. 예: `!plan 앱 아이콘 확정 작업 해줘`"
+            )
+            return
+        request_aug = _augment_prompt(request, attach_paths)
+        prompt = PLAN_PROMPT.format(request=request_aug, date=datetime.now().strftime("%m%d"))
         proc = await asyncio.create_subprocess_exec(
             "claude", "-p", prompt,
             "--output-format", "json",
@@ -418,8 +484,10 @@ async def handle_chat(message: discord.Message):
     chat_busy = True
     thinking = await message.reply("🤔 처리 중...")
     try:
+        attach_paths = await save_attachments(message)
+        prompt = _augment_prompt(message.content, attach_paths)
         cmd = [
-            "claude", "-p", message.content,
+            "claude", "-p", prompt,
             "--output-format", "json",
             "--permission-mode", "bypassPermissions",
         ]
@@ -470,6 +538,8 @@ HELP_TEXT = (
     "`!stop` — 실행 중인 야간루프 정지\n"
     "`!wiki` — loop/ 문서를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션, 매일 04:10 자동)\n"
     "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, 루프 실행 중엔 비활성)\n"
+    "📎 이미지/파일을 첨부하면 자동 저장 후 클로드가 열어봅니다 — `!plan`에 스크린샷을 "
+    "붙여 버그 수정을 맡기거나, 그냥 이미지만 올려 물어봐도 됩니다.\n"
 )
 
 
@@ -504,7 +574,8 @@ async def on_message(message: discord.Message):
         await cmd_wiki(message)
     elif content.startswith("!"):
         await message.reply("모르는 명령입니다. `!help` 참고.")
-    elif content:
+    elif content or message.attachments:
+        # 본문 텍스트가 있거나, 텍스트 없이 이미지/파일만 올린 경우도 대화로 처리.
         asyncio.create_task(handle_chat(message))
 
 
