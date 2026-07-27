@@ -2239,7 +2239,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 _CompassBtn(
-                  headingDeg: ref.watch(navStateProvider)?.headingDeg ?? 0,
+                  headingDeg: () {
+                    final isNorthUp = !(ref.watch(navHeadingUpProvider).value ?? true);
+                    if (isNorthUp) return 0.0;
+                    return _resolveHeading(navState?.speedKmh ?? 0, navState?.headingDeg) ?? 0.0;
+                  }(),
                   onTap: _tapCompass,
                 ),
                 const SizedBox(height: 10),
