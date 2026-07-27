@@ -81,7 +81,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   static const _kOffRouteM = 50.0;      // 코리도 이탈 임계(최근접 세그먼트 거리)
   static const _kArrivalM = 25.0;       // 도착 반경(폴리라인 잔여)
   // bridge zone 진입점 기준, 이 거리 이내에 갈림길 maneuver가 있으면 "선택 필요 다리"로 판정.
-  static const _kForkBridgeBufferM = 200.0;
+  static const _kForkBridgeBufferM = 20.0;
 
   static const _distance = Distance();
 
