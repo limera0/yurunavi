@@ -2876,7 +2876,8 @@ class _TurnStep {
       case 4: case 5: case 6: return Icons.flag_rounded;
       case 8: case 17: case 22: return Icons.straight_rounded;
       case 9: case 18: case 23: return Icons.turn_slight_right;
-      case 10: case 20: case 26: case 27: return Icons.turn_right_rounded;
+      case 10: case 20: return Icons.turn_right_rounded;
+      case 26: case 27: return Icons.roundabout_right_rounded; // 원형교차로 진입/진출
       case 11: return Icons.turn_right_rounded;
       case 12: case 13: return Icons.u_turn_right_rounded;
       case 14: return Icons.turn_left_rounded;
