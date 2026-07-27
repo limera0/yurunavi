@@ -63,6 +63,11 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // 온-루트 결과가 없을 때만 폴백으로 사용된다 — 온-루트가 항상 우선.
   Map<int, StructureType> _offRouteStructureByManeuverIdx = const {};
 
+  // bridge zone 인덱스 중 "갈림길이 있는" 것만 alert 대상으로 필터링하기 위한 집합.
+  // null = 비자명 maneuver가 하나도 없어 필터 비활성(모든 bridge 표시).
+  // 빈 Set = maneuver는 있지만 bridge 인근에 갈림길 없음(모든 bridge 억제).
+  Set<int>? _forkBridgeZoneIndices;
+
   /// [_exitStructureByManeuverIdx]의 읽기 전용 노출.
   Map<int, StructureType> get exitStructureByManeuverIdx =>
       _exitStructureByManeuverIdx;
@@ -75,6 +80,8 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   static const _kSnapWindow = 50;       // 앞쪽 탐색 세그먼트 수
   static const _kOffRouteM = 50.0;      // 코리도 이탈 임계(최근접 세그먼트 거리)
   static const _kArrivalM = 25.0;       // 도착 반경(폴리라인 잔여)
+  // bridge zone 진입점 기준, 이 거리 이내에 갈림길 maneuver가 있으면 "선택 필요 다리"로 판정.
+  static const _kForkBridgeBufferM = 200.0;
 
   static const _distance = Distance();
 
@@ -298,11 +305,39 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       if (type != null) map[i] = type;
     }
     _exitStructureByManeuverIdx = map;
+    _forkBridgeZoneIndices = _computeForkBridgeZoneIndices();
+  }
+
+  /// bridge zone 중 갈림길이 있는 것의 인덱스 집합을 반환한다.
+  /// 비자명 maneuver(type != 0/2/4)가 하나도 없으면 null을 반환해 필터를 비활성화한다.
+  /// null = 모든 bridge 표시, 빈 Set = 인근 갈림길이 없어 모든 bridge 억제.
+  Set<int>? _computeForkBridgeZoneIndices() {
+    if (_cumFromStartM.isEmpty || _zones.isEmpty) return null;
+    final hasNonTrivial = _maneuvers.any(
+        (m) => m.type != 0 && m.type != 2 && m.type != 4);
+    if (!hasNonTrivial) return null; // 비자명 maneuver 없음 — 필터 비활성
+    final result = <int>{};
+    for (int i = 0; i < _maneuvers.length; i++) {
+      final m = _maneuvers[i];
+      if (m.type == 0 || m.type == 2 || m.type == 4) continue;
+      final mBeginM =
+          _cumFromStartM[m.beginShapeIdx.clamp(0, _cumFromStartM.length - 1)];
+      for (int z = 0; z < _zones.length; z++) {
+        if (_zones[z].type != StructureType.bridge) continue;
+        final zBeginM = _cumFromStartM[
+            _zones[z].beginShapeIdx.clamp(0, _cumFromStartM.length - 1)];
+        if ((mBeginM - zBeginM).abs() <= _kForkBridgeBufferM) {
+          result.add(z);
+        }
+      }
+    }
+    return result;
   }
 
   /// snap 세그먼트 기준, 아직 지나지 않은 다음 구조물(zone) 인덱스.
   /// _zones는 buildStructureZones 계약에 따라 beginShapeIdx 오름차순 정렬됨.
   /// 모두 지났거나(또는 비어 있으면) -1.
+  // ignore: unused_element
   int _nextZoneIdxFor(int seg) {
     for (int i = 0; i < _zones.length; i++) {
       if (_zones[i].endShapeIdx > seg) return i;
@@ -317,16 +352,26 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   /// 정확하다. 세그먼트 시작점만 쓰면 세그먼트 길이만큼 과대평가된다.
   ({int idx, double distM, StructureType? type}) _structureFieldsFor(
       int seg, double traveledM) {
-    final idx = _nextZoneIdxFor(seg);
-    if (idx < 0) return (idx: -1, distM: double.infinity, type: null);
-    final cumBegin = _cumFromStartM.isEmpty
-        ? 0.0
-        : _cumFromStartM[_clampIdx(_zones[idx].beginShapeIdx)];
-    return (
-      idx: idx,
-      distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
-      type: _zones[idx].type,
-    );
+    for (int i = 0; i < _zones.length; i++) {
+      final zone = _zones[i];
+      if (zone.endShapeIdx <= seg) continue; // 이미 지난 zone
+      // bridge: _forkBridgeZoneIndices가 non-null이면 갈림길 있는 경우만 alert.
+      // null = 비자명 maneuver 없음 → 필터 비활성, 모든 bridge 표시.
+      if (zone.type == StructureType.bridge &&
+          _forkBridgeZoneIndices != null &&
+          !_forkBridgeZoneIndices!.contains(i)) {
+        continue;
+      }
+      final cumBegin = _cumFromStartM.isEmpty
+          ? 0.0
+          : _cumFromStartM[_clampIdx(zone.beginShapeIdx)];
+      return (
+        idx: i,
+        distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
+        type: zone.type,
+      );
+    }
+    return (idx: -1, distM: double.infinity, type: null);
   }
 
   /// snap 세그먼트 기준, 아직 지나지 않은 다음 급커브(curve) 인덱스.
