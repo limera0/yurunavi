@@ -2081,10 +2081,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                     upcoming.icon,
                                     color: cs.primary,
                                     size: 60,
-                                    shadows: [
-                                      Shadow(blurRadius: 4, color: cs.primary.withValues(alpha: 0.9)),
-                                      Shadow(blurRadius: 8, color: cs.primary.withValues(alpha: 0.6)),
-                                    ],
                                   ),
                                 ),
                               ),
