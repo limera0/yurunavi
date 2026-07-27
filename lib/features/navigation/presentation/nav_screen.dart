@@ -1535,6 +1535,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _tapCompass() {
     _compassNorthTimer?.cancel();
     ref.read(navHeadingUpProvider.notifier).set(false); // 노스업 전환
+    // 수동 모드(팬/줌)에서는 GPS 틱이 _recenter를 스킵하므로
+    // 현재 카메라 위치·줌을 유지한 채 bearing만 북쪽(0°)으로 직접 회전.
+    if (_isManualMode) {
+      _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(0));
+    }
     _compassNorthTimer = Timer(const Duration(seconds: 10), () {
       if (!mounted) return;
       ref.read(navHeadingUpProvider.notifier).set(true); // 헤딩업 복귀
