@@ -12,6 +12,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
@@ -611,9 +612,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<_TurnStep> _buildTurnSteps(List<ManeuverStep> maneuvers) {
     if (maneuvers.isEmpty) {
       return const [
-        _TurnStep(Icons.play_arrow_rounded, '경로 안내 시작', '', 0),
-        _TurnStep(Icons.straight_rounded,   '직진',         '', 0),
-        _TurnStep(Icons.flag_rounded,        '목적지 도착',  '', 0),
+        _TurnStep('assets/images/nav_icons/nav_straight.svg', '경로 안내 시작', '', 0),
+        _TurnStep('assets/images/nav_icons/nav_straight.svg', '직진',           '', 0),
+        _TurnStep('assets/images/nav_icons/nav_straight.svg', '목적지 도착',    '', 0),
       ];
     }
     // 마지막 maneuver만 실제 최종 목적지 — _handleVoice 상단 주석 참조.
@@ -1777,7 +1778,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(upcoming.icon, color: Colors.white, size: 40),
+                SvgPicture.asset(upcoming.svgAsset, width: 40, height: 40),
                 const SizedBox(height: 6),
                 Text(
                   upcoming.label,
@@ -2077,10 +2078,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                 width: 80,
                                 child: ColoredBox(
                                   color: cs.surface,
-                                  child: Icon(
-                                    upcoming.icon,
-                                    color: cs.primary,
-                                    size: 60,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: SvgPicture.asset(upcoming.svgAsset, width: 60, height: 60),
                                   ),
                                 ),
                               ),
@@ -2171,7 +2171,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                           child: Row(
                             children: [
-                              Icon(_steps[_stepIdx + 2].icon, color: cs.onSurface, size: 33),
+                              SvgPicture.asset(_steps[_stepIdx + 2].svgAsset, width: 33, height: 33),
                               const SizedBox(width: 8),
                               Text('다음', style: TextStyle(color: cs.onSurfaceVariant, fontSize: 21, fontWeight: FontWeight.bold)),
                               const SizedBox(width: 4),
@@ -2849,18 +2849,18 @@ class _NavIconBtn extends StatelessWidget {
 }
 
 class _TurnStep {
-  final IconData icon;
+  final String svgAsset;
   final String label;
   final String dist;
   final double rawDistKm; // GPS 거리 자동 진행용 원시 거리(km)
   final int type;
   final List<String> streetNames;
-  const _TurnStep(this.icon, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0, this.streetNames = const []]);
+  const _TurnStep(this.svgAsset, this.label, this.dist, [this.rawDistKm = 0.0, this.type = 0, this.streetNames = const []]);
 
   factory _TurnStep.fromManeuver(ManeuverStep m,
       {bool isFinalDestination = true, StructureType? nearbyStructure}) {
     return _TurnStep(
-      _iconForType(m.type),
+      _svgAssetForType(m.type, m.roundaboutExitCount),
       _labelForType(
           m.type, m.roundaboutExitCount, isFinalDestination, nearbyStructure),
       _formatDist(m.distanceKm),
@@ -2870,21 +2870,31 @@ class _TurnStep {
     );
   }
 
-  static IconData _iconForType(int type) {
+  static const _svgBase = 'assets/images/nav_icons/';
+
+  static String _svgAssetForType(int type, [int? roundaboutExitCount]) {
     switch (type) {
-      case 1: case 2: case 3: return Icons.play_arrow_rounded;
-      case 4: case 5: case 6: return Icons.flag_rounded;
-      case 8: case 17: case 22: return Icons.straight_rounded;
-      case 9: case 18: case 23: return Icons.turn_slight_right;
-      case 10: case 20: return Icons.turn_right_rounded;
-      case 26: case 27: return Icons.roundabout_right_rounded; // 원형교차로 진입/진출
-      case 11: return Icons.turn_right_rounded;
-      case 12: case 13: return Icons.u_turn_right_rounded;
-      case 14: return Icons.turn_left_rounded;
-      case 15: case 21: return Icons.turn_left_rounded;
-      case 16: case 19: case 24: return Icons.turn_slight_left;
-      case 25: return Icons.straight_rounded;
-      default: return Icons.straight_rounded;
+      case 10: case 20:
+        return '${_svgBase}nav_right.svg';
+      case 11:
+        return '${_svgBase}nav_sharp_right.svg';
+      case 12: case 13:
+        return '${_svgBase}nav_uturn.svg';
+      case 14:
+        return '${_svgBase}nav_sharp_left.svg';
+      case 15: case 21:
+        return '${_svgBase}nav_left.svg';
+      case 9: case 18: case 23:
+        return '${_svgBase}nav_fork_right.svg';
+      case 16: case 19: case 24:
+        return '${_svgBase}nav_fork_left.svg';
+      case 26: case 27:
+        final exit = roundaboutExitCount ?? 0;
+        if (exit == 1) return '${_svgBase}nav_roundabout_right.svg';
+        if (exit == 3) return '${_svgBase}nav_roundabout_left.svg';
+        return '${_svgBase}nav_roundabout_straight.svg';
+      default:
+        return '${_svgBase}nav_straight.svg';
     }
   }
 
