@@ -1161,15 +1161,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                           ],
                         ),
                       ),
-                      // 실제 POI(이름이 있는 장소)를 확인 중일 때만 즐겨찾기 등록을
-                      // 허용 — 지도 빈 곳을 무심코 탭한 좌표까지 굳이 저장 대상으로
-                      // 노출하지 않는다.
-                      if (poi != null)
-                        _FavoriteStarButton(
-                          lat: tapped.latitude,
-                          lng: tapped.longitude,
-                          initialName: title,
-                        ),
+                      _FavoriteStarButton(
+                        lat: tapped.latitude,
+                        lng: tapped.longitude,
+                        initialName: poi?.name ?? '',
+                      ),
                     ],
                   ),
                 ),
