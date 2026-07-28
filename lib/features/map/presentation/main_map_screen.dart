@@ -41,7 +41,7 @@ import 'waypoint_management_sheet.dart';
 
 export 'main_map_screen.dart';
 
-enum _TapAction { destination, waypoint }
+enum _TapAction { destination, waypoint, origin }
 
 /// 검색 결과 "어디로 추가할까요?" 시트의 선택 결과
 enum _RouteAddAction { origin, waypoint, destination }
@@ -1001,6 +1001,19 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     LatLng origin, {
     String? preResolvedName,
   }) async {
+    if (act == _TapAction.origin) {
+      ref.read(mapInteractionProvider.notifier).setOrigin(loc, name: preResolvedName);
+      final dest = ref.read(mapInteractionProvider).destination;
+      if (dest != null) {
+        ref.read(mapInteractionProvider.notifier).setLoading(true);
+        try {
+          await _fetchAndStoreAllRoutes(loc, dest);
+        } finally {
+          if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
+        }
+      }
+      return;
+    }
     if (act == _TapAction.waypoint) {
       ref.read(mapInteractionProvider.notifier)
           .addWaypoint(loc, name: preResolvedName);
@@ -1171,6 +1184,15 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                 ),
                 const SizedBox(height: 4),
                 const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    width: 20, height: 20,
+                    decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
+                    child: const Icon(Icons.trip_origin, color: Colors.white, size: 14),
+                  ),
+                  title: const Text('출발지로 설정'),
+                  onTap: () => Navigator.pop(context, _TapAction.origin),
+                ),
                 ListTile(
                   leading: const Icon(Icons.flag_outlined, color: AppColors.primary),
                   title: const Text('여기로 안내'),
