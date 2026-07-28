@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
+import 'address_search_sheet.dart';
 
 /// 경유지 관리 바텀 시트.
 ///
 /// [DraggableScrollableSheet]로 감싸 초기 60% / 최대 90% / 최소 40% 로 표시.
 /// stops 배열을 [ReorderableListView]로 나열하고, 순서 변경 / 경유지 삭제 후
 /// [RoutingService.fetchRoutes]로 즉시 경로를 재계산한다.
+/// "＋ 경유지 추가" 버튼은 인라인으로 [AddressSearchSheet]를 열어 결과를 바로 추가한다.
 class WaypointManagementSheet extends ConsumerStatefulWidget {
-  /// "＋ 경유지 추가" 버튼 탭 시 호출되는 콜백 (시트를 닫고 지도로 복귀).
-  final VoidCallback? onAddWaypoint;
-
-  const WaypointManagementSheet({super.key, this.onAddWaypoint});
+  const WaypointManagementSheet({super.key});
 
   @override
   ConsumerState<WaypointManagementSheet> createState() =>
@@ -102,7 +102,7 @@ class _WaypointManagementSheetState
                 .removeWaypoint(waypointIdx);
             _recalculate();
           },
-          onAddWaypoint: widget.onAddWaypoint,
+          onRecalculate: _recalculate,
         );
       },
     );
@@ -118,7 +118,7 @@ class _SheetBody extends ConsumerWidget {
   final String Function(int idx, int total) stopLabel;
   final void Function(int oldIdx, int newIdx) onReorder;
   final void Function(int waypointIdx) onRemove;
-  final VoidCallback? onAddWaypoint;
+  final Future<void> Function()? onRecalculate;
 
   const _SheetBody({
     required this.scrollController,
@@ -127,7 +127,7 @@ class _SheetBody extends ConsumerWidget {
     required this.stopLabel,
     required this.onReorder,
     required this.onRemove,
-    this.onAddWaypoint,
+    this.onRecalculate,
   });
 
   @override
@@ -268,7 +268,20 @@ class _SheetBody extends ConsumerWidget {
               top: 4,
             ),
             child: TextButton.icon(
-              onPressed: onAddWaypoint,
+              onPressed: () async {
+                final result = await showModalBottomSheet<
+                    ({LatLng latLng, String name})>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => const AddressSearchSheet(),
+                );
+                if (result != null && context.mounted) {
+                  ref
+                      .read(mapInteractionProvider.notifier)
+                      .addWaypoint(result.latLng, name: result.name);
+                  await onRecalculate?.call();
+                }
+              },
               icon: const Icon(Icons.add),
               label: const Text('경유지 추가'),
             ),

@@ -1458,9 +1458,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => WaypointManagementSheet(
-        onAddWaypoint: () => Navigator.pop(context),
-      ),
+      builder: (_) => const WaypointManagementSheet(),
     );
   }
 
