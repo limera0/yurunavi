@@ -75,6 +75,8 @@
     "tunnel_approach": "{dist}미터 앞 터널로 진입합니다",
     "tunnel_imminent": "곧 터널입니다",
     "underpass_approach": "{dist}미터 앞 지하차도로 진입합니다",
-    "underpass_imminent": "곧 지하차도입니다"
+    "underpass_imminent": "곧 지하차도입니다",
+    "rear_camera_approach": "후면카메라 감지, 단속 임계점에 카운트 스타트!",
+    "rear_camera_final_countdown": "단속 임계점까지 50미터! 사! 삼! 이! 일!"
   }
 }

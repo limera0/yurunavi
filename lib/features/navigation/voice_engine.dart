@@ -270,8 +270,9 @@ class CurveVoiceEngine {
       _immediatePoint = null;
       return const [];
     }
-    final event =
-        direction == CurveDirection.left ? 'sharp_turn_left' : 'sharp_turn_right';
+    final event = direction == CurveDirection.left
+        ? 'sharp_turn_left'
+        : 'sharp_turn_right';
     final imminentM = profile.imminentForEvent(event);
     if (zoneIdx != _zoneIdx) {
       _zoneIdx = zoneIdx;
@@ -312,5 +313,55 @@ class CurveVoiceEngine {
     _zoneIdx = -1;
     _pendingPoints = [];
     _immediatePoint = null;
+  }
+}
+
+/// 후면단속카메라(18번) 접근/사후구간 음성 안내.
+///
+/// 다른 Voice Engine과 달리 카메라에는 고유 인덱스가 없다 —
+/// route_progress_provider의 후면카메라 추적은 구조물/커브 zone처럼
+/// maneuver나 geometry 상의 인덱스에 묶이지 않고 GPS 직선거리로 "가장 가까운
+/// 카메라"를 매 tick 재평가하는 방식이라 StructureVoiceEngine의 zoneIdx 같은
+/// 식별자를 붙일 수 없다. 대신 "이번 접근 사이클에서 이미 안내했는지"를
+/// 불리언 플래그 2개(150m/50m)로 추적하고, distM이 다시 150m 초과 +
+/// inPostZone=false(완전 idle)로 돌아가는 순간 리셋해 다음 카메라에서
+/// 재발화되게 한다.
+class RearCameraVoiceEngine {
+  /// [CameraApproachGauge.kThresholdM](rear_camera_gauge.dart)과 동일한 값.
+  /// 이 파일은 순수 Dart 로직이라 Flutter 위젯 파일을 import하지 않고 값만
+  /// 복제한다 — 값이 바뀌면 양쪽 다 갱신해야 한다.
+  static const double kApproachAnnounceM = 150.0;
+  static const double kFinalAnnounceM = 50.0;
+
+  bool _approachAnnounced = false;
+  bool _finalAnnounced = false;
+
+  List<SpeakIntent> onProgress(double distM, bool inPostZone) {
+    final active = inPostZone || distM <= kApproachAnnounceM;
+    if (!active) {
+      // 완전히 idle로 복귀(추적 카메라 없음) — 다음 카메라를 위해 리셋.
+      _approachAnnounced = false;
+      _finalAnnounced = false;
+      return const [];
+    }
+    final out = <SpeakIntent>[];
+    if (!inPostZone) {
+      // 사후구간에서는 재차 거리가 늘었다 줄었다 해도 새 안내를 내지 않는다
+      // (요구사항: 50m 안내는 접근 사이클 중 1회뿐).
+      if (!_approachAnnounced && distM <= kApproachAnnounceM) {
+        _approachAnnounced = true;
+        out.add(const SpeakIntent('rear_camera_approach', {}));
+      }
+      if (!_finalAnnounced && distM <= kFinalAnnounceM) {
+        _finalAnnounced = true;
+        out.add(const SpeakIntent('rear_camera_final_countdown', {}));
+      }
+    }
+    return out;
+  }
+
+  void reset() {
+    _approachAnnounced = false;
+    _finalAnnounced = false;
   }
 }

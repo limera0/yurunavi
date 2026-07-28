@@ -222,6 +222,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   VoiceEngine? _voiceEngine;
   StructureVoiceEngine? _structureVoiceEngine;
   CurveVoiceEngine? _curveVoiceEngine;
+  RearCameraVoiceEngine? _rearCameraVoiceEngine;
   ExitLandmarkService? _landmarkService;
 
   // progress 구독
@@ -605,6 +606,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _vps?.speak(it.key, vars: it.vars);
       debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} curve=${prog.curveZoneIdx}');
     }
+    final rearCameraIntents = _rearCameraVoiceEngine!
+        .onProgress(prog.distToNextCameraM, prog.inPostZone);
+    for (final it in rearCameraIntents) {
+      _vps?.speak(it.key, vars: it.vars);
+      debugPrint('YNAV_TTS key=${it.key} camDist=${prog.distToNextCameraM.toStringAsFixed(0)}');
+    }
   }
 
   /// maneuvers로부터 카드 목록을 만든다. exit(20/21) maneuver는
@@ -867,6 +874,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _voiceEngine = VoiceEngine(_profile!, landmarkService: _landmarkService);
     _structureVoiceEngine = StructureVoiceEngine(_profile!);
     _curveVoiceEngine = CurveVoiceEngine(_profile!);
+    _rearCameraVoiceEngine = RearCameraVoiceEngine();
     _announceStep(0);
   }
 
