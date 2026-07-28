@@ -39,9 +39,11 @@ import '../../settings/providers/settings_providers.dart';
 import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
+import '../models/rear_camera.dart';
 import '../tour_recorder.dart';
 import '../voice_engine.dart';
 import '../../route/offset_origin.dart';
+import 'rear_camera_gauge.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
 /// The real position arrives from the GPS stream below.
@@ -859,6 +861,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _vps = await VoicePackService.load('assets/voice_packs/default_ko.json', _tts!);
     _profile = await GuidanceProfile.load('assets/config/guidance_profile.json');
     _landmarkService = await ExitLandmarkService.load('assets/data/kr_places.json');
+    // 후면단속카메라(18번) — 경로와 무관한 정적 전체 목록을 1회 로드해 주입.
+    // route_progress_provider._advance()가 다음 GPS fix부터 이 목록으로 판정한다.
+    ref.read(routeProgressProvider.notifier).setRearCameras(await RearCamera.loadAll());
     _voiceEngine = VoiceEngine(_profile!, landmarkService: _landmarkService);
     _structureVoiceEngine = StructureVoiceEngine(_profile!);
     _curveVoiceEngine = CurveVoiceEngine(_profile!);
@@ -1820,6 +1825,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final cs = Theme.of(context).colorScheme;
     final routeKm = _polylineKm(widget.routePolyline);
     final progress = ref.watch(routeProgressProvider);
+    // 후면단속카메라(18번) 게이지 활성 여부 — 접근구간(150m 이내) + 사후구간
+    // 전체. 활성 중엔 좌측 속도계가 게이지로 변신하고 DaylightBar를 숨긴다.
+    final cameraGaugeActive = progress != null &&
+        (progress.inPostZone ||
+            progress.distToNextCameraM <= CameraApproachGauge.kThresholdM);
+    final cameraOverSpeed = progress != null &&
+        progress.inPostZone &&
+        (navState?.speedKmh ?? 0) > progress.nextCameraSpeedKmh;
 
     ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
       final raw = _rawStyle;
@@ -2206,31 +2219,38 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
 
           // ── 좌측 속도계 (상단 30% 높이, 네이버지도 배치 참고) ─────────────────
+          // 후면단속카메라 접근/사후구간(18번)엔 이 자리에서 속도계 대신
+          // RearCameraGaugeSwitcher가 접근 웨지·사후 SLOW 링으로 변신한다.
           Positioned(
             left: 12,
             top: MediaQuery.of(context).size.height * 0.30,
             child: ScaleTransition(
               scale: _pulseAnim,
-              child: _Speedometer(speedKmh: navState?.speedKmh ?? 0, firstFixReceived: navState?.firstFix ?? false),
+              child: RearCameraGaugeSwitcher(
+                progress: progress,
+                speedKmh: navState?.speedKmh ?? 0,
+                firstFixReceived: navState?.firstFix ?? false,
+              ),
             ),
           ),
 
-          // ── 좌측: Daylight 바 (속도계 아래) ─────────────────────────────────
-          Positioned(
-            left: 12,
-            top: MediaQuery.of(context).size.height * 0.30 + 100,
-            bottom: 160,
-            child: DaylightBar(
-              progress: daylightProgress,
-              sunriseLabel: daylightCycle != null
-                  ? DateFormat('HH:mm').format(daylightCycle.topTime)
-                  : '--:--',
-              sunsetLabel: daylightCycle != null
-                  ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
-                  : '--:--',
-              isNightMode: !isDay,
+          // ── 좌측: Daylight 바 (속도계 아래, 카메라 게이지 활성 중엔 숨김) ──────
+          if (!cameraGaugeActive)
+            Positioned(
+              left: 12,
+              top: MediaQuery.of(context).size.height * 0.30 + 100,
+              bottom: 160,
+              child: DaylightBar(
+                progress: daylightProgress,
+                sunriseLabel: daylightCycle != null
+                    ? DateFormat('HH:mm').format(daylightCycle.topTime)
+                    : '--:--',
+                sunsetLabel: daylightCycle != null
+                    ? DateFormat('HH:mm').format(daylightCycle.bottomTime)
+                    : '--:--',
+                isNightMode: !isDay,
+              ),
             ),
-          ),
 
           // ── 우측: 나침반 + 주유소 버튼 + GPS 버튼 ──────────────────────────────────────
           Positioned(
@@ -2458,6 +2478,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 onClose: () => setState(() => _selectedGasStation = null),
               ),
             ),
+
+          // ── 후면단속카메라 사후구간 과속 경고 오버레이 (18번, Stack 최상단) ────
+          Positioned.fill(
+            child: SpeedWarningOverlay(active: cameraOverSpeed),
+          ),
 
         ],
       ),
@@ -2816,6 +2841,123 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// 좌측 속도계 ↔ 후면단속카메라 게이지(18번) 전환 스위처.
+///
+/// - idle(카메라 무관): 기존 88×88 [_Speedometer].
+/// - approach(distToNextCameraM <= 150 && !inPostZone): 176×176
+///   [CameraApproachGauge]. idle→approach 전환은 [AnimatedSize]로 심플
+///   스케일업(88→176)한다 — 좌측 위치(Positioned left/top)는 고정.
+/// - post(inPostZone): 176×176 [CameraPostZoneGauge]. approach→post로
+///   바뀌는 순간(inPostZone false→true) [CameraTransitionFlash]를 게이지
+///   내부에 짧게 얹는다.
+/// - 다시 idle로 돌아가면 176→88 스케일다운.
+///
+/// 클래스명이 public인 이유: nav_screen.dart 전체를 마운트하지 않고도
+/// (rear_camera_gauge.dart의 위젯들과 동일하게) 위젯 테스트에서 직접
+/// import해 상태머신(특히 mount 시점 플래시 오탐)을 검증하기 위해서다.
+class RearCameraGaugeSwitcher extends StatefulWidget {
+  final RouteProgress? progress;
+  final double speedKmh;
+  final bool firstFixReceived;
+  const RearCameraGaugeSwitcher({
+    super.key,
+    required this.progress,
+    required this.speedKmh,
+    required this.firstFixReceived,
+  });
+
+  @override
+  State<RearCameraGaugeSwitcher> createState() => _RearCameraGaugeSwitcherState();
+}
+
+enum _CamGaugeMode { idle, approach, post }
+
+class _RearCameraGaugeSwitcherState extends State<RearCameraGaugeSwitcher> {
+  bool _showFlash = false;
+  late bool _wasInPostZone;
+
+  @override
+  void initState() {
+    super.initState();
+    // didUpdateWidget()은 위젯이 처음 마운트될 때는 호출되지 않으므로
+    // (initState+build만 호출) 여기서 초기값을 시드해야 한다. 시드하지
+    // 않으면 이미 inPostZone=true인 상태로 새로 생성된 위젯(예: 앱
+    // 재시작/화면 복귀 시 라이더가 마침 사후구간 안에 있는 경우)이 다음
+    // GPS tick의 didUpdateWidget에서 "false→true 전환"으로 오인되어
+    // CameraTransitionFlash가 허위 재생된다.
+    _wasInPostZone = widget.progress?.inPostZone ?? false;
+  }
+
+  _CamGaugeMode get _mode {
+    final p = widget.progress;
+    if (p == null) return _CamGaugeMode.idle;
+    if (p.inPostZone) return _CamGaugeMode.post;
+    if (p.distToNextCameraM <= CameraApproachGauge.kThresholdM) {
+      return _CamGaugeMode.approach;
+    }
+    return _CamGaugeMode.idle;
+  }
+
+  @override
+  void didUpdateWidget(covariant RearCameraGaugeSwitcher old) {
+    super.didUpdateWidget(old);
+    final nowPost = widget.progress?.inPostZone ?? false;
+    if (nowPost && !_wasInPostZone) {
+      // 0m 도달 순간(2-2) — 플래시를 얹는다. onComplete에서 스스로 제거된다.
+      _showFlash = true;
+    }
+    _wasInPostZone = nowPost;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mode = _mode;
+
+    Widget content;
+    switch (mode) {
+      case _CamGaugeMode.idle:
+        content = _Speedometer(
+          speedKmh: widget.speedKmh,
+          firstFixReceived: widget.firstFixReceived,
+        );
+        break;
+      case _CamGaugeMode.approach:
+        content = CameraApproachGauge(
+          key: const ValueKey('camera_approach_gauge'),
+          distanceM: widget.progress!.distToNextCameraM,
+        );
+        break;
+      case _CamGaugeMode.post:
+        final p = widget.progress!;
+        final remaining = (p.nextCameraPostZoneM - p.distToNextCameraM)
+            .clamp(0.0, p.nextCameraPostZoneM.toDouble());
+        content = CameraPostZoneGauge(
+          key: const ValueKey('camera_post_zone_gauge'),
+          remainingM: remaining,
+        );
+        break;
+    }
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topLeft,
+      child: Stack(
+        alignment: Alignment.topLeft,
+        children: [
+          content,
+          if (_showFlash)
+            CameraTransitionFlash(
+              onComplete: () {
+                if (mounted) setState(() => _showFlash = false);
+              },
+            ),
+        ],
+      ),
     );
   }
 }

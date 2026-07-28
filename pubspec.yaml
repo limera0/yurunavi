@@ -62,3 +62,11 @@ flutter:
     - assets/data/kr_places.json
     - assets/data/rear_cameras.json
     - assets/images/nav_icons/
+
+  # DSEG7 (OFL 라이선스, keshikan) — 후면단속카메라 게이지 7세그먼트 LED 숫자.
+  # 출처/라이선스 원문: assets/fonts/DSEG-LICENSE.txt
+  fonts:
+    - family: DSEG7Classic
+      fonts:
+        - asset: assets/fonts/DSEG7Classic-Bold.ttf
+          weight: 700
