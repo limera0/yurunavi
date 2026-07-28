@@ -60,4 +60,5 @@ flutter:
     - assets/voice_packs/
     - assets/config/guidance_profile.json
     - assets/data/kr_places.json
+    - assets/data/rear_cameras.json
     - assets/images/nav_icons/
