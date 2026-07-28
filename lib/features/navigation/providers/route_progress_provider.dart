@@ -2,8 +2,10 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import '../../../services/poi_service.dart' show PoiService;
 import '../../../services/routing_service.dart'
     show RoutingService, ManeuverStep, StructureType, StructureZone, CurveDirection, SharpCurveZone;
+import '../models/rear_camera.dart';
 import 'nav_state_provider.dart';
 
 @immutable
@@ -20,6 +22,11 @@ class RouteProgress {
   final int curveZoneIdx;       // _curves 인덱스, "현재 안내 대상 급커브" 식별. 없으면 -1
   final double distToNextCurveM; // snap → 다음 급커브 진입(beginShapeIdx)까지 누적. 없으면 ∞
   final CurveDirection? nextCurveDirection; // 다음 급커브 방향. 없으면 null
+  final double distToNextCameraM; // GPS 직선거리 기준 추적 중인 후면단속카메라까지(또는 통과 후엔
+                                   // 통과 지점으로부터의) 거리. 추적 대상 없으면 ∞.
+  final int nextCameraSpeedKmh;   // 추적 중인 카메라의 제한속도. 없으면 0.
+  final int nextCameraPostZoneM;  // 추적 중인 카메라의 사후구간 범위. 없으면 0.
+  final bool inPostZone;          // 카메라를 통과해 사후구간(postZoneM 이내) 안에 있는 상태.
   const RouteProgress({
     required this.snapIdx,
     required this.activeStepIdx,
@@ -33,6 +40,10 @@ class RouteProgress {
     required this.curveZoneIdx,
     required this.distToNextCurveM,
     required this.nextCurveDirection,
+    required this.distToNextCameraM,
+    required this.nextCameraSpeedKmh,
+    required this.nextCameraPostZoneM,
+    required this.inPostZone,
   });
 }
 
@@ -68,6 +79,16 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // 빈 Set = maneuver는 있지만 bridge 인근에 갈림길 없음(모든 bridge 억제).
   Set<int>? _forkBridgeZoneIndices;
 
+  // 후면단속카메라 전체 목록. 경로(route)와 무관한 정적 데이터라 setRoute와
+  // 별개로 setRearCameras(앱/내비 시작 시 1회)로 주입된다.
+  List<RearCamera> _cameras = const [];
+
+  // 현재 접근 중이거나(전방) 막 통과해 사후구간을 추적 중인(후방) 카메라.
+  // structureZone/curveZone과 달리 GPS 직선거리+헤딩 기반 판정이라 route
+  // geometry 인덱스가 아닌 카메라 자체를 틱 간에 들고 있어야 통과 순간
+  // 전방→후방 전환을 놓치지 않는다.
+  RearCamera? _trackedCamera;
+
   /// [_exitStructureByManeuverIdx]의 읽기 전용 노출.
   Map<int, StructureType> get exitStructureByManeuverIdx =>
       _exitStructureByManeuverIdx;
@@ -82,6 +103,13 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   static const _kArrivalM = 25.0;       // 도착 반경(폴리라인 잔여)
   // bridge zone 진입점 기준, 이 거리 이내에 갈림길 maneuver가 있으면 "선택 필요 다리"로 판정.
   static const _kForkBridgeBufferM = 20.0;
+  // 후면단속카메라 1차 후보 필터 반경(전방 탐색). 게이지 표시 임계(150m)보다
+  // 넉넉히 잡아 접근 초기부터 안정적으로 같은 카메라를 추적한다.
+  static const _kCameraSearchM = 600.0;
+  // 카메라 방위각과 진행 헤딩의 최대 허용 편차(전방 판정).
+  static const _kCameraAngleToleranceDeg = 70.0;
+  // 이 편차를 넘으면 "후방 전환(통과)"으로 판정.
+  static const _kCameraBehindAngleDeg = 90.0;
 
   static const _distance = Distance();
 
@@ -90,10 +118,17 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     // navState.pos 구독 → 매 fix advance.
     final sub = ref.listen<NavigationState?>(navStateProvider, (_, next) {
       final p = next?.pos;
-      if (p != null) _advance(p);
+      if (p != null) _advance(p, next?.headingDeg);
     });
     ref.onDispose(sub.close);
     return null;
+  }
+
+  /// 후면단속카메라 전체 목록 주입(앱/내비 시작 시 1회, RearCamera.loadAll 결과).
+  /// route와 무관한 정적 데이터라 setRoute와 별개 — 즉시 재계산은 하지 않고
+  /// 다음 GPS fix(_advance)부터 반영된다.
+  void setRearCameras(List<RearCamera> cameras) {
+    _cameras = cameras;
   }
 
   /// 내비 진입/재탐색 시 경로 주입. snapIdx 리셋.
@@ -152,6 +187,11 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       curveZoneIdx: curveFields.idx,
       distToNextCurveM: curveFields.distM,
       nextCurveDirection: curveFields.direction,
+      // 아직 GPS fix가 없어(pos 없음) 카메라 판정 불가 — 다음 _advance부터 반영.
+      distToNextCameraM: double.infinity,
+      nextCameraSpeedKmh: 0,
+      nextCameraPostZoneM: 0,
+      inPostZone: false,
     );
   }
 
@@ -179,6 +219,11 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       curveZoneIdx: current.curveZoneIdx,
       distToNextCurveM: current.distToNextCurveM,
       nextCurveDirection: current.nextCurveDirection,
+      // 카메라도 이 메서드와 무관(GPS 기반, _advance에서만 갱신) — 기존 값 통과.
+      distToNextCameraM: current.distToNextCameraM,
+      nextCameraSpeedKmh: current.nextCameraSpeedKmh,
+      nextCameraPostZoneM: current.nextCameraPostZoneM,
+      inPostZone: current.inPostZone,
     );
   }
 
@@ -195,7 +240,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   }
 
   /// 점 pos를 [_snapIdx, _snapIdx+window] 범위 세그먼트에 스냅(단조).
-  void _advance(LatLng pos) {
+  void _advance(LatLng pos, double? headingDeg) {
     if (_pts.length < 2 || _segLenM.isEmpty) return;
 
     final start = _snapIdx;
@@ -249,6 +294,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
     final structFields = _structureFieldsFor(bestSeg, traveledM);
     final curveFields = _curveFieldsFor(bestSeg, traveledM);
+    final cameraFields = _cameraFieldsFor(pos, headingDeg);
     state = RouteProgress(
       snapIdx: bestSeg,
       activeStepIdx: activeStep,
@@ -262,6 +308,10 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       curveZoneIdx: curveFields.idx,
       distToNextCurveM: curveFields.distM,
       nextCurveDirection: curveFields.direction,
+      distToNextCameraM: cameraFields.distM,
+      nextCameraSpeedKmh: cameraFields.speedKmh,
+      nextCameraPostZoneM: cameraFields.postZoneM,
+      inPostZone: cameraFields.inPostZone,
     );
   }
 
@@ -398,6 +448,92 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       distM: (cumBegin - traveledM).clamp(0.0, double.maxFinite),
       direction: _curves[idx].direction,
     );
+  }
+
+  /// 현재 위치·헤딩 기준 추적 대상 후면단속카메라의 (거리, 제한속도, 사후구간,
+  /// 사후구간진입여부)를 계산한다. structureZone/curveZone과 달리 route
+  /// geometry가 아닌 GPS 직선거리+진행방향(헤딩)만으로 판정하는 독립적인
+  /// 로직이다(HANDOFF_0724/0728 Phase 1 설계).
+  ///
+  /// - 헤딩 기준 ±[_kCameraAngleToleranceDeg] 이내의 최근접 카메라를 "전방
+  ///   접근 중" 카메라로 선택한다([_kCameraSearchM] 반경으로 1차 필터링).
+  /// - 한 번 선택된 카메라는 [_trackedCamera]로 틱 간 유지되어, 지나쳐서
+  ///   방위각이 [_kCameraBehindAngleDeg]를 넘어 "후방"으로 전환되는 순간을
+  ///   포착한다 — 그 시점부터 postZoneM 이내인 동안 inPostZone=true.
+  /// - 추적 카메라가 사후구간(postZoneM)마저 벗어나면 추적을 해제하고 다음
+  ///   전방 후보를 다시 탐색한다.
+  /// - 헤딩이 없으면(GPS 미확보 등) 진행방향 판정이 불가능하므로 추적을
+  ///   리셋하고 "탐지 없음"을 반환한다.
+  ({double distM, int speedKmh, int postZoneM, bool inPostZone})
+      _cameraFieldsFor(LatLng pos, double? headingDeg) {
+    if (_cameras.isEmpty || headingDeg == null) {
+      _trackedCamera = null;
+      return (distM: double.infinity, speedKmh: 0, postZoneM: 0, inPostZone: false);
+    }
+
+    // 이미 추적 중인 카메라가 있으면 그 카메라 자체의 현재 거리/방위각으로만
+    // 판정한다 — [_kCameraAngleToleranceDeg](전방 탐지용, 70°)보다 느슨한
+    // [_kCameraBehindAngleDeg](통과 확정용, 90°) 문턱을 여기서 함께 쓰면
+    // angleDiff가 70°~90° 사이인 카메라 바로 옆(예: 오프셋 8m 기준 약
+    // 2.5~3m 전방) 구간에서 아래 fresh 탐색 루프(70° tolerance)가 이 카메라를
+    // 탈락시켜 "카메라 없음"으로 잘못 보고하거나, 근접한 다른 카메라로
+    // 바뀌치기될 수 있다. 따라서 아직 통과 확정 전(angleDiff <= 90)이면 fresh
+    // 탐색으로 넘어가지 않고 추적 카메라 자신의 값을 바로 반환한다.
+    if (_trackedCamera != null) {
+      final tracked = _trackedCamera!;
+      final camPos = LatLng(tracked.lat, tracked.lng);
+      final dist = PoiService.haversineMeters(pos, camPos);
+      final angleDiff = PoiService.bearingDiff(
+          PoiService.bearing(pos, camPos), headingDeg);
+      if (angleDiff > _kCameraBehindAngleDeg) {
+        if (dist <= tracked.postZoneM) {
+          return (
+            distM: dist,
+            speedKmh: tracked.speedKmh,
+            postZoneM: tracked.postZoneM,
+            inPostZone: true,
+          );
+        }
+        _trackedCamera = null; // 사후구간도 벗어남 — 추적 해제
+      } else {
+        // 아직 전방(통과 확정 전) — 이 카메라를 계속 추적하며 현재 값을 반환.
+        return (
+          distM: dist,
+          speedKmh: tracked.speedKmh,
+          postZoneM: tracked.postZoneM,
+          inPostZone: false,
+        );
+      }
+    }
+
+    // 전방 tolerance 이내에서 최근접 카메라를 새로 탐색한다. _trackedCamera가
+    // 없을 때(최초 탐지, 또는 사후구간을 벗어나 추적 해제된 직후)만 실행된다.
+    RearCamera? best;
+    double bestDist = double.infinity;
+    for (final cam in _cameras) {
+      final camPos = LatLng(cam.lat, cam.lng);
+      final dist = PoiService.haversineMeters(pos, camPos);
+      if (dist > _kCameraSearchM) continue;
+      final angleDiff =
+          PoiService.bearingDiff(PoiService.bearing(pos, camPos), headingDeg);
+      if (angleDiff > _kCameraAngleToleranceDeg) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = cam;
+      }
+    }
+
+    if (best != null) {
+      _trackedCamera = best;
+      return (
+        distM: bestDist,
+        speedKmh: best.speedKmh,
+        postZoneM: best.postZoneM,
+        inPostZone: false,
+      );
+    }
+
+    return (distM: double.infinity, speedKmh: 0, postZoneM: 0, inPostZone: false);
   }
 
   double _distToShapeIdx(int fromSeg, int toShape) {
