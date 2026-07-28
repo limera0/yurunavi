@@ -1950,6 +1950,14 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                       onClose: _clearDestination,
                       waypointCount: interaction.waypoints.length,
                       onWaypointEntryTap: () => _showWaypointSheet(context),
+                      originName: interaction.stops.isNotEmpty
+                          ? (interaction.stops.first.isCurrentLocation
+                              ? '현재 위치'
+                              : interaction.stops.first.name)
+                          : null,
+                      destinationName: interaction.stops.length >= 2
+                          ? interaction.stops.last.name
+                          : null,
                     ),
                   ),
               ],

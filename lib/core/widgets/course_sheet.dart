@@ -23,6 +23,12 @@ class CourseSheet extends StatelessWidget {
   /// 경유지 진입점 탭 콜백 (null이면 버튼 미표시)
   final VoidCallback? onWaypointEntryTap;
 
+  /// 출발지 이름 (null이면 stops 요약 행 미표시)
+  final String? originName;
+
+  /// 목적지 이름 (null이면 stops 요약 행 미표시)
+  final String? destinationName;
+
   const CourseSheet({
     super.key,
     required this.routeMeta,
@@ -32,6 +38,8 @@ class CourseSheet extends StatelessWidget {
     required this.onClose,
     this.waypointCount = 0,
     this.onWaypointEntryTap,
+    this.originName,
+    this.destinationName,
   });
 
   static final _routes = [
@@ -82,6 +90,54 @@ class CourseSheet extends StatelessWidget {
               ),
             ),
           ),
+
+          // 출발·도착 요약 (originName / destinationName 있을 때만)
+          if (originName != null || destinationName != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10, height: 10,
+                    decoration: const BoxDecoration(
+                        color: Colors.blue, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      originName ?? '현재 위치',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text(
+                      waypointCount > 0 ? '· 경유 $waypointCount개 ·' : '→',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textHint),
+                    ),
+                  ),
+                  Container(
+                    width: 10, height: 10,
+                    decoration: BoxDecoration(
+                        color: Colors.red.shade400, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      destinationName ?? '목적지',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // 경유지 진입점 (경유지 있으면 칩, 없으면 텍스트 버튼)
           if (onWaypointEntryTap != null)
