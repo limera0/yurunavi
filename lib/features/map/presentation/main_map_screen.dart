@@ -3508,69 +3508,59 @@ class _AddToRouteSheet extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               const Divider(height: 1),
-              // 출발지로 설정
-              ListTile(
-                leading: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: const BoxDecoration(
-                    color: Colors.blue,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.trip_origin, color: Colors.white, size: 14),
-                ),
-                title: const Text('출발지로 설정'),
-                onTap: () => Navigator.pop(context, _RouteAddAction.origin),
-              ),
-              // 경유지로 추가
-              ListTile(
-                leading: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: hasDest ? Colors.grey.shade500 : Colors.grey.shade300,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.radio_button_unchecked,
-                    color: hasDest ? Colors.white : Colors.grey.shade400,
-                    size: 14,
-                  ),
-                ),
-                title: Text(
-                  '경유지로 추가',
-                  style: TextStyle(
-                    color: hasDest ? null : Colors.grey.shade400,
-                  ),
-                ),
-                subtitle: hasDest
-                    ? null
-                    : Text(
-                        '목적지를 먼저 설정해 주세요',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade400,
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.trip_origin, size: 16, color: Colors.blue),
+                        label: const Text('출발', style: TextStyle(color: Colors.blue)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.blue),
                         ),
+                        onPressed: () => Navigator.pop(context, _RouteAddAction.origin),
                       ),
-                onTap: hasDest
-                    ? () => Navigator.pop(context, _RouteAddAction.waypoint)
-                    : null,
-              ),
-              // 목적지로 설정
-              ListTile(
-                leading: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.flag, color: Colors.white, size: 14),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: Icon(
+                          Icons.add_location_alt_outlined,
+                          size: 16,
+                          color: hasDest ? Colors.grey.shade600 : Colors.grey.shade300,
+                        ),
+                        label: Text(
+                          '경유지',
+                          style: TextStyle(
+                            color: hasDest ? Colors.grey.shade600 : Colors.grey.shade300,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: hasDest ? Colors.grey.shade400 : Colors.grey.shade200,
+                          ),
+                        ),
+                        onPressed: hasDest
+                            ? () => Navigator.pop(context, _RouteAddAction.waypoint)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: Icon(Icons.flag_outlined, size: 16, color: AppColors.primary),
+                        label: Text('도착', style: TextStyle(color: AppColors.primary)),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppColors.primary),
+                        ),
+                        onPressed: () => Navigator.pop(context, _RouteAddAction.destination),
+                      ),
+                    ),
+                  ],
                 ),
-                title: const Text('목적지로 설정'),
-                onTap: () => Navigator.pop(context, _RouteAddAction.destination),
               ),
-              const SizedBox(height: 8),
             ],
           ),
         ),
