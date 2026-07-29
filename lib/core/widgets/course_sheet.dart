@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../skin/skin_provider.dart';
 import '../theme/app_theme.dart';
 import 'slider_start_button.dart';
 
@@ -42,14 +43,14 @@ class CourseSheet extends StatelessWidget {
     this.destinationName,
   });
 
-  static final _routes = [
-    RouteInfo('시골길로\n느긋하게', courseLineColor[0]!),
-    RouteInfo('지방도로\n여유롭게', courseLineColor[1]!),
-    RouteInfo('국도로\n빠르게', courseLineColor[2]!),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final courseLineColor = context.skin.colors.courseLineColor;
+    final routes = [
+      RouteInfo('시골길로\n느긋하게', courseLineColor[0]!),
+      RouteInfo('지방도로\n여유롭게', courseLineColor[1]!),
+      RouteInfo('국도로\n빠르게', courseLineColor[2]!),
+    ];
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -163,8 +164,8 @@ class CourseSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
             child: Row(
-              children: List.generate(_routes.length, (i) {
-                final r = _routes[i];
+              children: List.generate(routes.length, (i) {
+                final r = routes[i];
                 final hasMeta = routeMeta.length > i;
                 final distKm = hasMeta ? routeMeta[i].km : 0.0;
                 final mins = hasMeta ? routeMeta[i].mins : 0;

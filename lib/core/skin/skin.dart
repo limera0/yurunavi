@@ -38,6 +38,10 @@ abstract class SkinColors {
   Color get structureAlert;
   Color get curveAlert;
   Color get speedometerBg;
+
+  /// 코스 인덱스별 경로선 색 (0: 시골길/scenic, 1: 지방도/regional, 2: 국도/fast).
+  /// 레거시 최상위 courseLineColor map과 동일한 키 규약.
+  Map<int, Color> get courseLineColor;
 }
 
 abstract class SkinTypography {

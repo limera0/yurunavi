@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
+import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/map_language.dart';
 import '../../../models/tour_log.dart';
@@ -185,7 +186,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
         _routeSourceId,
         _routeLayerId,
         ml.LineLayerProperties(
-          lineColor: colorToHex(courseLineColor[2]!),
+          lineColor: colorToHex(ref.read(skinProvider).colors.courseLineColor[2]!),
           lineWidth: 5.0,
           lineCap: 'round',
           lineJoin: 'round',

@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/settings_providers.dart';
 import '../../../models/map_language.dart';
+import '../../../core/skin/skin.dart';
+import '../../../core/skin/skin_provider.dart';
+import '../../../core/skin/skins/registry.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'favorite_categories_screen.dart';
@@ -35,6 +38,10 @@ class SettingsScreen extends ConsumerWidget {
           // ── 지도 표기 언어 ────────────────────────────────────────
           const _SectionHeader(title: '지도 표기 언어'),
           _LanguageSelector(),
+
+          // ── 스킨 ─────────────────────────────────────────────────
+          const _SectionHeader(title: '스킨'),
+          _SkinSelector(),
 
           // ── 주행 설정 ─────────────────────────────────────────────
           const _SectionHeader(title: '주행 설정'),
@@ -117,6 +124,29 @@ class _LanguageSelector extends ConsumerWidget {
           }).toList(),
         ),
       ),
+    );
+  }
+}
+
+class _SkinSelector extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current = ref.watch(skinProvider);
+    return Column(
+      children: kAvailableSkins.map((AppSkin skin) {
+        final selected = skin.id == current.id;
+        return ListTile(
+          leading: CircleAvatar(
+            radius: 12,
+            backgroundColor: skin.colors.brand,
+          ),
+          title: Text(skin.displayName),
+          trailing: selected
+              ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+              : null,
+          onTap: () => ref.read(skinProvider.notifier).apply(skin),
+        );
+      }).toList(),
     );
   }
 }

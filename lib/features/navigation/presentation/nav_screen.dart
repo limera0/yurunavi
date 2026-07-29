@@ -18,6 +18,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
@@ -1186,6 +1187,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     );
     await ctrl.addGeoJsonSource(_navRouteSourceId, _buildRouteGeoJson([]));
     final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
+    final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
     await ctrl.addLineLayer(
       _navRouteSourceId,
       _navRouteLayerId,
@@ -1721,6 +1723,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Future<void> _recolorNavRouteLayer(int idx) async {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
+    final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
     await ctrl.removeLayer(_navRouteLayerId);
     await ctrl.addLineLayer(
       _navRouteSourceId,

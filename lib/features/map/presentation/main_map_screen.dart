@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
@@ -415,6 +416,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     // selected route layer (above bg)
     await ctrl.addGeoJsonSource(_routeSourceId, _buildRouteGeoJson([]));
     final initialIdx = ref.read(mapInteractionProvider).selectedRouteIdx;
+    final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
     await ctrl.addLineLayer(
       _routeSourceId,
       _routeLayerId,
@@ -431,6 +433,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   Future<void> _recolorRouteLayer(int idx) async {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
+    final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
     await ctrl.removeLayer(_routeLayerId);
     await ctrl.addLineLayer(
       _routeSourceId,

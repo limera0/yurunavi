@@ -128,6 +128,22 @@ class _JsonColors implements SkinColors {
 
   @override
   Color get speedometerBg => _get('speedometerBg', _def.speedometerBg);
+
+  @override
+  Map<int, Color> get courseLineColor {
+    final raw = _m['courseLineColor'];
+    if (raw is Map) {
+      final result = <int, Color>{};
+      raw.forEach((key, value) {
+        final idx = int.tryParse(key.toString());
+        if (idx != null && value is String) {
+          result[idx] = _parseColor(value);
+        }
+      });
+      if (result.isNotEmpty) return result;
+    }
+    return _def.courseLineColor;
+  }
 }
 
 // ---------------------------------------------------------------------------
