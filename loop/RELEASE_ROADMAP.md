@@ -248,8 +248,13 @@
     Scaffold/AppBar/버튼 등 앱 전역 크롬은 스킨과 무관 — 오늘 실제로 스킨을 타는 건
     경로선 색(지도/내비/코스시트/투어요약)과 설정 화면 스와치뿐. 11번에서 마저 다룰 것.
 
-### 9. 앱 아이콘 확정
-- 8번 확정 완료 — 착수 가능. A안(유루캠 무드) 팔레트 기준으로 진행.
+### 9. 앱 아이콘 확정 — DONE
+- 마스터가 원본 벡터(코랄 핀 + 크림 S자 도로 + 흰 하이라이트)를 직접 제공,
+  `assets/icon/app_icon_source.svg`에 무수정 보존(`4d85b85`). 정방형 flat/adaptive
+  파생본 생성 후 `flutter_launcher_icons`(0.14.4)로 Android(adaptive icon,
+  배경 #FBF1E7) + iOS(AppIcon.appiconset 전 해상도) 자산 생성 완료(`59a626e`).
+  `flutter build apk --debug` + `flutter analyze` 통과, code-auditor PASS.
+  스킨(A/B/C)별 분기 없이 앱 전체 아이콘 하나로 고정(사전 확정 사항).
 
 ### 10. 실제 release build 검증
 - `flutter build apk --release` (또는 `appbundle`) 실행, 설치, 크기/동작 확인.
