@@ -195,7 +195,10 @@ class NativeEngine {
       final resp = await http
           .post(
             Uri.parse('$_rustBase/calc_route'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': AppConfig.instance.naviApiKey,
+            },
             body: body,
           )
           .timeout(const Duration(seconds: 5));
@@ -244,7 +247,10 @@ class NativeEngine {
       final resp = await http
           .post(
             Uri.parse('$_rustBase/score_route'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': AppConfig.instance.naviApiKey,
+            },
             body: body,
           )
           .timeout(const Duration(seconds: 15));

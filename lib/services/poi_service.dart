@@ -64,7 +64,9 @@ class PoiService {
     final uri = Uri.parse(_poiBaseUrl).replace(queryParameters: query);
 
     try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 30));
+      final resp = await http
+          .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
+          .timeout(const Duration(seconds: 30));
       if (resp.statusCode != 200) {
         debugPrint('YNAV_POI fetch failed status=${resp.statusCode}');
         return [];
@@ -110,7 +112,9 @@ class PoiService {
     final uri = Uri.parse(_poiBaseUrl).replace(queryParameters: query);
 
     try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 30));
+      final resp = await http
+          .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
+          .timeout(const Duration(seconds: 30));
       if (resp.statusCode != 200) {
         debugPrint('YNAV_POI fetchInBounds failed status=${resp.statusCode}');
         return [];

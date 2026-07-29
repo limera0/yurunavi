@@ -28,7 +28,9 @@ class AddressSearchService {
     final uri = Uri.parse(_baseUrl).replace(queryParameters: {'q': trimmed});
 
     try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 8));
+      final resp = await http
+          .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
+          .timeout(const Duration(seconds: 8));
       if (resp.statusCode != 200) {
         debugPrint('YNAV_ADDR search failed status=${resp.statusCode}');
         throw AddressSearchException('status=${resp.statusCode}');

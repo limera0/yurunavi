@@ -52,7 +52,9 @@ class GasStationService {
       'radius_m': radiusM.toStringAsFixed(0),
     });
     try {
-      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+      final resp = await http
+          .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
+          .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) {
         debugPrint('[GasStation] HTTP ${resp.statusCode}');
         return [];

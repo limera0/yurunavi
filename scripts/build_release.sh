@@ -17,7 +17,7 @@ OUTPUTS_DIR="$ROOT/outputs"
 mkdir -p "$OUTPUTS_DIR"
 
 echo "빌드 시작: v${VERSION} (${DATE})"
-flutter build apk --release 2>&1
+flutter build apk --release --dart-define-from-file=env.json 2>&1
 
 APK_SRC="$ROOT/build/app/outputs/flutter-apk/app-release.apk"
 APK_DEST="$OUTPUTS_DIR/$FILENAME"

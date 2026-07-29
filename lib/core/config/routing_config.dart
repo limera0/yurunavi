@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'app_config.dart';
+
 /// 원격 서버에서 라우팅 costing 파라미터를 로드한다.
 /// 서버 실패 시 [_defaultCostingOptions]로 폴백.
 class RoutingConfig {
@@ -15,7 +17,10 @@ class RoutingConfig {
   static Future<void> loadRemote(String naviBaseUrl) async {
     try {
       final resp = await http
-          .get(Uri.parse('$naviBaseUrl/routing-config'))
+          .get(
+            Uri.parse('$naviBaseUrl/routing-config'),
+            headers: {'X-Api-Key': AppConfig.instance.naviApiKey},
+          )
           .timeout(const Duration(seconds: 4));
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
