@@ -122,7 +122,10 @@ class _ApproachGaugePainter extends CustomPainter {
   final double fraction; // 0(0m)~1(150m 이상 남음)
   const _ApproachGaugePainter({required this.fraction});
 
-  static const _spokeCount = 40;
+  // 레퍼런스(speedcam1.webp) 극좌표 분석 결과: 붉은 스타버스트가 실제로 그려진
+  // 100°(78°~178°, 화면 중심 기준) 구간 안에서 스포크 간 간격(seam)이 정확히
+  // 7개, 피치 14.3°로 검출됨 — 360°로 환산하면 360/14.3≈25개(2026-07-29).
+  static const _spokeCount = 25;
   static const _red = Color(0xFFE8231B);
   static const _gold = Color(0xFFFFC107);
 
