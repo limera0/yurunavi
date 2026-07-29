@@ -49,6 +49,15 @@ dev_dependencies:
   # main 의존성으로 있고, 이건 그 플랫폼 인터페이스 패키지를 테스트에서
   # 직접 import하기 위한 depend_on_referenced_packages 린트 대응.
   wakelock_plus_platform_interface: ^1.5.1
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon_flat.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FBF1E7"
+  adaptive_icon_foreground: "assets/icon/app_icon_adaptive_fg.png"
 
 flutter:
   uses-material-design: true
