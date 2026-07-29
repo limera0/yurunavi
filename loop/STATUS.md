@@ -5,34 +5,34 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 12:22 · 브랜치 `verify/ride-0711` · HEAD `0462410`
+생성: 2026-07-29 12:46 · 브랜치 `verify/ride-0711` · HEAD `df2ef1f`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-28 16:01)
-- 작업트리: **미커밋 16건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 15건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
 
 `loop/RELEASE_ROADMAP.md`의 `### N.` 항목 중 DONE이 아닌 것. 옆 숫자는 그 문서의 줄번호다.
 
-- **9. 앱 아이콘 확정**  —  `RELEASE_ROADMAP.md:245`
-- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:248`
-- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:254`
-- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:580`
-- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:741`
-- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:763`
+- **9. 앱 아이콘 확정**  —  `RELEASE_ROADMAP.md:249`
+- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:252`
+- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:258`
+- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:588`
+- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:749`
+- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:771`
 
 ## 3. 최근 실행 결과
 
+- [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md)
+  - *목표 달성 판정:** 원래 목표: 로드맵 8번(브랜드 방향성 확정) — Claude가 방향 2~3개 제안,
 - [MORNING_REPORT_0728_rearcam_data.md](MORNING_REPORT_0728_rearcam_data.md)
   - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 - [MORNING_REPORT_0728_multi_stop_ux.md](MORNING_REPORT_0728_multi_stop_ux.md)
   - *목표 달성 판정:** 원래 목표: 다중 경유지 코스 설계 UX 개선 (Phase 1~4 전체) / 달성: 예 — 4개 Phase 모두 완료, analyze PASS, code-auditor PASS
-- [MORNING_REPORT_0722_waypoint_privacy.md](MORNING_REPORT_0722_waypoint_privacy.md)
-  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 
 ## 4. 최근 작업 지시서
 
@@ -43,6 +43,8 @@
 ## 5. 최근 커밋
 
 ```
+df2ef1f feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
+4dacce4 docs(roadmap): 8번 브랜드 방향성 확정 — A/B/C 무료 스킨 3종 채택
 0462410 feat(nav): 후면단속카메라 접근/사후구간 게이지 디자인 재작업 (체크포인트)
 ed5d973 fix(nav): 목적지 도착 배너가 회전 안내 카드에 가려지는 문제 수정
 4b9cf8e docs: 후면단속카메라 HANDOFF 완료 체크리스트 갱신
@@ -51,8 +53,6 @@ ed5d973 fix(nav): 목적지 도착 배너가 회전 안내 카드에 가려지�
 8cba24d feat(nav): 후면단속카메라 탐지 엔진 구현 (Phase 1)
 145aba5 feat(data): 후면단속카메라 유닛별 좌표 3583건 변환 (Phase 0)
 a3f2216 feat(data): 후면단속카메라 데이터 확보
-59012c3 feat(map): WaypointManagementSheet 인라인 경유지 검색 추가 (Phase 4)
-ec89981 feat(map): _AddToRouteSheet 가로 3-버튼 레이아웃으로 개선 (Phase 3)
 ```
 
 ## 6. 더 깊이 볼 때

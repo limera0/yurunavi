@@ -240,7 +240,11 @@
     잉크네이비 `#232A3B` 앵커, 혼다 슈퍼커브 무드.
   - "한국적 감성" 해석 확정: 한국 전통 모티프가 아니라 **한국·일본 vs 유럽/미국(서양)
     디자인 감각**의 구도 — 서양풍 대신 한/일 계열 감각 선호로 확인됨(2026-07-29).
-  - 구현 지시서: `loop/HANDOFF_0729_brand_skins.md`.
+  - 구현 지시서: `loop/HANDOFF_0729_brand_skins.md`, 구현 완료(`df2ef1f`, 상세:
+    `MORNING_REPORT_0729_brand_skins.md`) — flutter-coder 구현, code-auditor PASS.
+    **알려진 격차**: `AppSkin.toThemeData()`가 아직 정적 `AppTheme.light` 반환이라
+    Scaffold/AppBar/버튼 등 앱 전역 크롬은 스킨과 무관 — 오늘 실제로 스킨을 타는 건
+    경로선 색(지도/내비/코스시트/투어요약)과 설정 화면 스와치뿐. 11번에서 마저 다룰 것.
 
 ### 9. 앱 아이콘 확정
 - 8번 확정 완료 — 착수 가능. A안(유루캠 무드) 팔레트 기준으로 진행.
@@ -255,9 +259,13 @@
 - Phase 0~4 완료 (2026-07-22, `0b17048`~`2751048`, 상세: `MORNING_REPORT_0722_skin_infra.md`):
   AppConfig URL 추상화, AppSkin 인터페이스, DefaultSkin, SkinProvider + call-site 교체
   (`Color(0xFF008080)` 27건 → 0건), JSON 스킨 로더.
-- Phase 5(수익화 스캐폴딩·스킨 목록 UI) — 선행조건이던 8번 완료(2026-07-29), 착수:
-  `loop/HANDOFF_0729_brand_skins.md`(A/B/C 무료 스킨 3종 + 설정 화면 선택 UI).
-- 인라인 `TextStyle(...)` 116건(15파일)은 Phase 5와 함께 8번 이후 정리 권장.
+- Phase 5(수익화 스캐폴딩·스킨 목록 UI) — 스킨 목록 UI + A/B/C 무료 스킨 3종 완료
+  (2026-07-29, `df2ef1f`, `loop/HANDOFF_0729_brand_skins.md`). **남은 것**: 실제
+  수익화(구매/잠금) 로직은 아직 없음(프리미엄 스킨 자체가 아직 없어 스코프 밖으로
+  보류했음, `isPremium` 필드만 존재) — 유료 스킨이 실제로 생기는 시점에 다시 다룰 것.
+  또한 `toThemeData()`가 정적이라 앱 전역 Material 크롬(배경/AppBar/버튼)은 아직
+  스킨을 안 탐 — 경로선 색만 스킨 반영됨, 전면 리스킨은 이 Phase 이후 과제.
+- 인라인 `TextStyle(...)` 116건(15파일)은 위 항목과 함께 정리 권장.
 
 ### 12. 백엔드 인프라 IaC화 — DONE
 - 목표: 타일서버(tileserver-gl)와 `navi.westinx.com` 백엔드를 `docker/` 안에
