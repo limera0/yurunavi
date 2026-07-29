@@ -91,20 +91,23 @@ class _CameraApproachGaugeState extends State<CameraApproachGauge>
                   '$_shownM',
                   style: const TextStyle(
                     fontFamily: 'DSEG7Classic',
-                    fontSize: 42,
-                    color: Color(0xFFFF3B30),
+                    fontSize: 40,
+                    color: Colors.white,
                     height: 1.0,
+                    shadows: [
+                      Shadow(color: Color(0xFFFFC107), blurRadius: 10),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               const Text(
                 'METER.',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                  color: Colors.white70,
+                  letterSpacing: 1.4,
+                  color: Colors.white,
                 ),
               ),
             ],
@@ -119,76 +122,75 @@ class _ApproachGaugePainter extends CustomPainter {
   final double fraction; // 0(0m)~1(150m 이상 남음)
   const _ApproachGaugePainter({required this.fraction});
 
+  static const _spokeCount = 40;
+  static const _red = Color(0xFFE8231B);
+  static const _gold = Color(0xFFFFC107);
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final r = size.shortestSide / 2;
 
-    // 바깥 프레임 링
+    // 검정 베이스 디스크
+    canvas.drawCircle(center, r - 6, Paint()..color = Colors.black);
+
+    // 방사형 붉은 "스타버스트" 스포크 — 원작(rear_cctv_3)의 부채꼴이 단색
+    // 채움이 아니라 중심에서 뻗어나오는 가느다란 광선 다발로 보이는 질감을
+    // 근사한다. fraction(남은거리/150)만큼만 12시에서 시계방향으로 스포크가
+    // 존재하고, 나머지는 검정 베이스가 그대로 드러나 "붉은색이 검은색으로
+    // 줄어드는" 원래 요구사항을 그대로 만족한다.
+    final sweepSpokes = (_spokeCount * fraction).ceil();
+    final spokePaint = Paint()..color = _red;
+    for (int i = 0; i < sweepSpokes; i++) {
+      final a0 = -math.pi / 2 + (2 * math.pi * i / _spokeCount);
+      final a1 = a0 + (2 * math.pi / _spokeCount) * 0.62; // 스포크 사이 검정 갭
+      final path = Path()
+        ..moveTo(center.dx, center.dy)
+        ..lineTo(center.dx + (r - 6) * math.cos(a0), center.dy + (r - 6) * math.sin(a0))
+        ..lineTo(center.dx + (r - 6) * math.cos(a1), center.dy + (r - 6) * math.sin(a1))
+        ..close();
+      canvas.drawPath(path, spokePaint);
+    }
+    // 스포크 안쪽에 은은한 글로우를 더해 단색 삼각형보다 빛나 보이게.
+    canvas.drawCircle(
+      center,
+      r * 0.32,
+      Paint()
+        ..color = _red.withValues(alpha: 0.35)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
+    );
+
+    // 바깥 금색 테두리
     canvas.drawCircle(
       center,
       r - 3,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4
-        ..color = const Color(0xFF4A4A4A),
+        ..strokeWidth = 3.5
+        ..color = _gold,
     );
 
-    // 검정 베이스 디스크
-    canvas.drawCircle(center, r - 8, Paint()..color = Colors.black);
-
-    // 붉은 부채꼴 — 남은 비율만큼, 12시 방향에서 시계방향으로 채움.
-    // 남은거리가 줄수록(=fraction 감소) 이 부채꼴도 선형으로 줄어들고, 이미
-    // 지나간 자리는 베이스(검정)가 그대로 드러난다.
-    if (fraction > 0) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: r - 8),
-        -math.pi / 2,
-        2 * math.pi * fraction,
-        true,
-        Paint()..color = const Color(0xFFE53935),
-      );
-    }
-
-    // 노란 눈금호 (고정 장식, 우하단)
-    final tickPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round
-      ..color = const Color(0xFFFFC107);
-    const tickStartDeg = 95.0;
-    const tickSpanDeg = 65.0;
-    const tickCount = 7;
-    for (int i = 0; i < tickCount; i++) {
-      final deg = tickStartDeg + tickSpanDeg * i / (tickCount - 1);
-      final rad = deg * math.pi / 180;
-      final dir = Offset(math.cos(rad), math.sin(rad));
-      canvas.drawLine(center + dir * (r - 14), center + dir * (r - 5), tickPaint);
-    }
-
-    // 초록 쐐기 마커 (고정 장식, 좌하단)
-    const wedgeDeg = 235.0;
-    final wedgeRad = wedgeDeg * math.pi / 180;
-    final tip = center + Offset(math.cos(wedgeRad), math.sin(wedgeRad)) * (r - 6);
-    final baseA = center +
-        Offset(math.cos(wedgeRad - 0.14), math.sin(wedgeRad - 0.14)) * (r - 22);
-    final baseB = center +
-        Offset(math.cos(wedgeRad + 0.14), math.sin(wedgeRad + 0.14)) * (r - 22);
-    final wedgePath = Path()
-      ..moveTo(tip.dx, tip.dy)
-      ..lineTo(baseA.dx, baseA.dy)
-      ..lineTo(baseB.dx, baseB.dy)
-      ..close();
-    canvas.drawPath(wedgePath, Paint()..color = const Color(0xFF43A047));
-
-    // 안쪽 얇은 장식 링
-    canvas.drawCircle(
-      center,
-      r - 34,
+    // 중앙 판독 박스(노란 테두리 + 위 초록/아래 빨강 분할) — 원작의 "SEC."
+    // 박스를 화면 중앙에 재배치한 버전. 항상 고정 표시(거리와 무관한 장식).
+    final boxRect = Rect.fromCenter(center: center, width: r * 1.12, height: r * 1.0);
+    final boxRRect = RRect.fromRectAndRadius(boxRect, const Radius.circular(10));
+    canvas.save();
+    canvas.clipRRect(boxRRect);
+    canvas.drawRect(
+      Rect.fromLTRB(boxRect.left, boxRect.top, boxRect.right, boxRect.top + boxRect.height * 0.68),
+      Paint()..color = const Color(0xFF2E7D32).withValues(alpha: 0.55),
+    );
+    canvas.drawRect(
+      Rect.fromLTRB(boxRect.left, boxRect.top + boxRect.height * 0.68, boxRect.right, boxRect.bottom),
+      Paint()..color = const Color(0xFFEF6C00).withValues(alpha: 0.55),
+    );
+    canvas.restore();
+    canvas.drawRRect(
+      boxRRect,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
-        ..color = Colors.white24,
+        ..strokeWidth = 2.2
+        ..color = _gold,
     );
   }
 
@@ -331,16 +333,22 @@ class _CameraPostZoneGaugeState extends State<CameraPostZoneGauge>
               painter: _DotRingPainter(progress: _dotCtrl.value),
             ),
           ),
-          const _CircularSlowLabel(radius: CameraPostZoneGauge.kSize / 2 - 30),
-          FadeTransition(
-            opacity: blinkAnim,
-            child: Text(
-              '$_shownM',
-              style: const TextStyle(
-                fontFamily: 'DSEG7Classic',
-                fontSize: 40,
-                color: Color(0xFFFF3B30),
-                height: 1.0,
+          const _CircularSlowLabel(radius: 34),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: FadeTransition(
+              opacity: blinkAnim,
+              child: Text(
+                '$_shownM',
+                style: const TextStyle(
+                  fontFamily: 'DSEG7Classic',
+                  fontSize: 34,
+                  color: Colors.white,
+                  height: 1.0,
+                  shadows: [
+                    Shadow(color: Color(0xFFFFC107), blurRadius: 8),
+                  ],
+                ),
               ),
             ),
           ),
@@ -350,20 +358,86 @@ class _CameraPostZoneGaugeState extends State<CameraPostZoneGauge>
   }
 }
 
+/// 사후구간 게이지 배경 — 원작(rear_cctv_1)처럼 전체를 붉게 채우고, 중앙에
+/// 별도의 초록 원(판독창)을 얹은 뒤, 나침반 방향(N/E/S/W) 마커와 굵은 금색
+/// 테두리로 마무리한다. 거리/애니메이션과 무관한 고정 레이어.
 class _PostZoneFramePainter extends CustomPainter {
+  static const _gold = Color(0xFFFFC107);
+  static const _redFill = Color(0xFFE8231B);
+  static const _green = Color(0xFF3C9F40);
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final r = size.shortestSide / 2;
+
+    // 붉은 베이스 디스크 (원작: 화면 전체가 빨강으로 가득 찬 상태)
+    canvas.drawCircle(center, r - 6, Paint()..color = _redFill);
+
+    // 은은한 방사형 스포크 텍스처 (검정 반투명 선, 접근 게이지의 스타버스트와
+    // 대칭되는 장식)
+    final spokePaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.18)
+      ..strokeWidth = 1.4;
+    for (int i = 0; i < 24; i++) {
+      final a = 2 * math.pi * i / 24;
+      canvas.drawLine(
+        center + Offset(math.cos(a), math.sin(a)) * (r * 0.30),
+        center + Offset(math.cos(a), math.sin(a)) * (r - 20),
+        spokePaint,
+      );
+    }
+
+    // 나침반 마커 (N/E/S/W, 안쪽을 향한 작은 삼각형)
+    final markerPaint = Paint()..color = const Color(0xFFCFE8FF);
+    for (final deg in [-90.0, 0.0, 90.0, 180.0]) {
+      final a = deg * math.pi / 180;
+      final tip = center + Offset(math.cos(a), math.sin(a)) * (r - 14);
+      final perp = a + math.pi / 2;
+      final baseCenter = center + Offset(math.cos(a), math.sin(a)) * (r - 22);
+      final baseA = baseCenter + Offset(math.cos(perp), math.sin(perp)) * 4;
+      final baseB = baseCenter - Offset(math.cos(perp), math.sin(perp)) * 4;
+      final path = Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(baseA.dx, baseA.dy)
+        ..lineTo(baseB.dx, baseB.dy)
+        ..close();
+      canvas.drawPath(path, markerPaint);
+    }
+
+    // 중앙 초록 판독창 + 방사형 눈금
+    final greenCenter = center;
+    const greenR = 46.0;
+    canvas.drawCircle(greenCenter, greenR, Paint()..color = _green);
+    final tickPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.22)
+      ..strokeWidth = 1.2;
+    for (int i = 0; i < 16; i++) {
+      final a = 2 * math.pi * i / 16;
+      canvas.drawLine(
+        greenCenter + Offset(math.cos(a), math.sin(a)) * (greenR - 10),
+        greenCenter + Offset(math.cos(a), math.sin(a)) * greenR,
+        tickPaint,
+      );
+    }
+    canvas.drawCircle(
+      greenCenter,
+      greenR,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = _gold.withValues(alpha: 0.8),
+    );
+
+    // 바깥 금색 테두리 (굵게)
     canvas.drawCircle(
       center,
       r - 3,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4
-        ..color = const Color(0xFF4A4A4A),
+        ..strokeWidth = 4.5
+        ..color = _gold,
     );
-    canvas.drawCircle(center, r - 8, Paint()..color = Colors.black);
   }
 
   @override
@@ -372,24 +446,32 @@ class _PostZoneFramePainter extends CustomPainter {
 
 /// 둘레 [CameraPostZoneGauge.kDotCount]개 점 — 실거리와 무관한 장식용 스윕.
 /// progress(0..1, 1초 1사이클) 기준 12시부터 반시계로 순차 점등, 한 바퀴
-/// 완료 직후(다음 사이클 시작) 전체소등 상태로 돌아간다.
+/// 완료 직후(다음 사이클 시작) 전체소등 상태로 돌아간다. 원작(rear_cctv_1)의
+/// 촘촘한 구슬 목걸이 느낌을 내려고 기존 10개보다 훨씬 조밀하게(20개) 배치.
 class _DotRingPainter extends CustomPainter {
   final double progress;
   const _DotRingPainter({required this.progress});
 
+  static const _dotCount = 20;
+  static const _lit = Color(0xFFFFF8E1);
+  static const _unlit = Color(0xFF6B1616);
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final r = size.shortestSide / 2 - 14;
-    const dotCount = CameraPostZoneGauge.kDotCount;
-    final onPaint = Paint()..color = const Color(0xFFFFC107);
-    final offPaint = Paint()..color = Colors.white24;
-    for (int i = 0; i < dotCount; i++) {
-      final lit = progress >= i / dotCount;
+    final r = size.shortestSide / 2 - 12;
+    final onPaint = Paint()..color = _lit;
+    final offPaint = Paint()..color = _unlit;
+    final onGlow = Paint()
+      ..color = _lit.withValues(alpha: 0.55)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    for (int i = 0; i < _dotCount; i++) {
+      final lit = progress >= i / _dotCount;
       // 12시(-90°)에서 시작해 반시계(각도 감소) 방향으로 배치.
-      final angle = -math.pi / 2 - (2 * math.pi * i / dotCount);
+      final angle = -math.pi / 2 - (2 * math.pi * i / _dotCount);
       final pos = center + Offset(math.cos(angle), math.sin(angle)) * r;
-      canvas.drawCircle(pos, 5, lit ? onPaint : offPaint);
+      if (lit) canvas.drawCircle(pos, 6.5, onGlow);
+      canvas.drawCircle(pos, 4.2, lit ? onPaint : offPaint);
     }
   }
 
@@ -397,16 +479,16 @@ class _DotRingPainter extends CustomPainter {
   bool shouldRepaint(covariant _DotRingPainter old) => old.progress != progress;
 }
 
-/// "SLOW" 4글자를 원형으로 배치하는 고정 장식 텍스트(과속단속카메라 "STOP"
-/// 대항 컨셉). 개별 문자를 원 위 등간격 위치에 회전 배치해 곡선 텍스트를
-/// 근사한다.
+/// "SLOW" 4글자를 중앙 초록 원 안쪽 아랫변을 따라 곡선으로 배치하는 고정
+/// 장식 텍스트(과속단속카메라 "STOP" 대항 컨셉 — 원작 자막 지시사항).
+/// 개별 문자를 원 위 등간격 위치에 회전 배치해 곡선 텍스트를 근사한다.
 class _CircularSlowLabel extends StatelessWidget {
   final double radius;
   const _CircularSlowLabel({required this.radius});
 
   static const _text = 'SLOW';
-  static const _startDeg = -152.0;
-  static const _endDeg = -28.0;
+  static const _startDeg = 58.0;
+  static const _endDeg = 122.0;
 
   @override
   Widget build(BuildContext context) {
@@ -423,14 +505,14 @@ class _CircularSlowLabel extends StatelessWidget {
         return Transform.translate(
           offset: offset,
           child: Transform.rotate(
-            angle: rad + math.pi / 2,
+            angle: rad - math.pi / 2,
             child: Text(
               letters[i],
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
                 letterSpacing: 0.5,
-                color: Color(0xFFFFC107),
+                color: Colors.white,
               ),
             ),
           ),
