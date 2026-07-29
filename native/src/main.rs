@@ -1465,6 +1465,64 @@ async fn handle_routing_config() -> impl axum::response::IntoResponse {
     )
 }
 
+// ── 인증(API 키) ─────────────────────────────────────────────────
+
+/// 공개 배포(navi.westinx.com, 0.0.0.0:8003 직접 노출) 전에 최소한의 공유 비밀키 검사를
+/// 추가한다(2026-07-29 보안 감사). `VWORLD_API_KEY`와 달리 이 키가 없으면 해당 엔드포인트만
+/// 죽이는 게 아니라 **서버 자체를 기동하지 않는다(fail closed)** — 미인증 상태로 조용히
+/// 뜨는 것을 막기 위해서다. `native/.env`(docker-compose `env_file`)로 주입한다.
+static NAVI_API_KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn navi_api_key() -> &'static str {
+    NAVI_API_KEY.get_or_init(|| match std::env::var("NAVI_API_KEY") {
+        Ok(key) if !key.trim().is_empty() => key,
+        _ => panic!(
+            "[YuruNavi/Rust] 치명적 오류: NAVI_API_KEY 환경변수가 없거나 비어 있습니다. \
+             인증 없이 서버를 띄우지 않습니다 — native/.env(로컬) 또는 배포 환경변수에 \
+             NAVI_API_KEY를 설정하세요."
+        ),
+    })
+}
+
+/// 타이밍 사이드채널을 피하기 위한 수동 상수시간 비교. 길이가 다르면 즉시 `false`이지만
+/// (길이 자체는 비밀이 아니다), 바이트 단위 비교에서는 첫 불일치에서 조기 반환하지 않고
+/// 전체를 XOR-fold한다. `subtle` 같은 신규 크레이트를 추가하는 대신 기존 의존성 재사용을
+/// 우선하는 저장소 관례를 따른다.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// `X-Api-Key` 헤더를 검사하는 axum 미들웨어. `/health`, `/privacy`를 제외한 모든 라우트에
+/// 적용한다(각각 Cloudflare Tunnel 헬스체크/Dockerfile HEALTHCHECK, 공개 개인정보처리방침
+/// 페이지라서 무인증이어야 함 — main()의 라우터 분리 참조).
+async fn require_api_key(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
+    let expected = navi_api_key();
+    let provided = req
+        .headers()
+        .get("X-Api-Key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        Ok(next.run(req).await)
+    } else {
+        Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        ))
+    }
+}
+
 // ── Main ───────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -1473,10 +1531,18 @@ async fn main() {
     // 계속 뜨고 해당 엔드포인트만 503을 반환한다 — 각 함수 내부에서 로그로 알린다.
     poi_db();
     vworld_api_key();
+    // NAVI_API_KEY는 다르다 — 없으면(빈 값 포함) 여기서 panic해 서버 기동 자체를 막는다
+    // (fail closed). 요청이 오기 전, 기동 시점에 바로 검증한다.
+    navi_api_key();
 
-    let app = Router::new()
+    // `/health`, `/privacy`만 무인증으로 공개한다(각각 Docker HEALTHCHECK·Cloudflare
+    // Tunnel 확인용, 공개 개인정보처리방침 페이지). 나머지 전부는 `require_api_key`
+    // 미들웨어를 거친다 — 두 라우터를 만들어 merge하는 방식으로 분리한다.
+    let public_routes = Router::new()
         .route("/health", get(handle_health))
-        .route("/privacy", get(handle_privacy))
+        .route("/privacy", get(handle_privacy));
+
+    let protected_routes = Router::new()
         .route("/calc_route", post(handle_calc_route))
         .route("/score_route", post(handle_score_route))
         .route("/calc_winding_score", post(handle_winding))
@@ -1487,7 +1553,10 @@ async fn main() {
         .route("/poi/nearby", get(handle_poi_nearby))
         .route("/geocode/search", get(handle_geocode_search))
         .route("/gasstations/nearby", get(handle_gasstations_nearby))
-        .route("/routing-config", get(handle_routing_config));
+        .route("/routing-config", get(handle_routing_config))
+        .route_layer(axum::middleware::from_fn(require_api_key));
+
+    let app = public_routes.merge(protected_routes);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8003")
         .await
