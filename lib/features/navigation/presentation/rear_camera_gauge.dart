@@ -270,12 +270,11 @@ class _CameraTransitionFlashState extends State<CameraTransitionFlash>
 
 /// 후면단속카메라 사후구간(0m→postZoneM) 게이지 — 점-링 "SLOW" 스타일.
 ///
-/// 중앙 숫자는 postZoneM→0 실거리 기반 카운트다운. 둘레 10개 점은 실거리와
+/// 중앙 숫자는 postZoneM→0 실거리 기반 카운트다운. 둘레 24개 점은 실거리와
 /// 무관한 장식용 애니메이션(1초 주기, 12시 방향부터 반시계로 순차 점등 후
 /// 전체소등 반복) — 사후구간에 머무는 동안 계속 반복된다.
 class CameraPostZoneGauge extends StatefulWidget {
   static const double kSize = 176.0;
-  static const int kDotCount = 10;
 
   /// postZoneM - distToNextCameraM (>= 0). 0에 도달하면 사후구간 종료.
   final double remainingM;
@@ -444,15 +443,16 @@ class _PostZoneFramePainter extends CustomPainter {
   bool shouldRepaint(covariant _PostZoneFramePainter old) => false;
 }
 
-/// 둘레 [CameraPostZoneGauge.kDotCount]개 점 — 실거리와 무관한 장식용 스윕.
-/// progress(0..1, 1초 1사이클) 기준 12시부터 반시계로 순차 점등, 한 바퀴
-/// 완료 직후(다음 사이클 시작) 전체소등 상태로 돌아간다. 원작(rear_cctv_1)의
-/// 촘촘한 구슬 목걸이 느낌을 내려고 기존 10개보다 훨씬 조밀하게(20개) 배치.
+/// 둘레 24개 점 — 실거리와 무관한 장식용 스윕. progress(0..1, 1초 1사이클)
+/// 기준 12시부터 반시계로 순차 점등, 한 바퀴 완료 직후(다음 사이클 시작)
+/// 전체소등 상태로 돌아간다. 개수·점 반경은 원작 레퍼런스(speedcam2.webp)
+/// 점-링을 connected-component 분석해 확정(24개, area 기준 삼각형 틱마커와
+/// 뚜렷이 분리됨 — 2026-07-29).
 class _DotRingPainter extends CustomPainter {
   final double progress;
   const _DotRingPainter({required this.progress});
 
-  static const _dotCount = 20;
+  static const _dotCount = 24;
   static const _lit = Color(0xFFFFF8E1);
   static const _unlit = Color(0xFF6B1616);
 
@@ -470,8 +470,8 @@ class _DotRingPainter extends CustomPainter {
       // 12시(-90°)에서 시작해 반시계(각도 감소) 방향으로 배치.
       final angle = -math.pi / 2 - (2 * math.pi * i / _dotCount);
       final pos = center + Offset(math.cos(angle), math.sin(angle)) * r;
-      if (lit) canvas.drawCircle(pos, 6.5, onGlow);
-      canvas.drawCircle(pos, 4.2, lit ? onPaint : offPaint);
+      if (lit) canvas.drawCircle(pos, 9.5, onGlow);
+      canvas.drawCircle(pos, 6.5, lit ? onPaint : offPaint);
     }
   }
 
