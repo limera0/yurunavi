@@ -5,7 +5,7 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 12:46 · 브랜치 `verify/ride-0711` · HEAD `df2ef1f`
+생성: 2026-07-29 12:53 · 브랜치 `verify/ride-0711` · HEAD `ed78cc8`
 
 ## 1. 지금 상태
 
@@ -36,13 +36,14 @@
 
 ## 4. 최근 작업 지시서
 
+- [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md)
 - [HANDOFF_0729_brand_skins.md](HANDOFF_0729_brand_skins.md)
 - [HANDOFF_0728_rearcam_ui.md](HANDOFF_0728_rearcam_ui.md)
-- [HANDOFF_0728_rearcam_api_endpoint.md](HANDOFF_0728_rearcam_api_endpoint.md)
 
 ## 5. 최근 커밋
 
 ```
+ed78cc8 docs(roadmap): 8번/11번 완료 상태 갱신 + 브랜드 스킨 완료 보고서
 df2ef1f feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
 4dacce4 docs(roadmap): 8번 브랜드 방향성 확정 — A/B/C 무료 스킨 3종 채택
 0462410 feat(nav): 후면단속카메라 접근/사후구간 게이지 디자인 재작업 (체크포인트)
@@ -52,7 +53,6 @@ ed5d973 fix(nav): 목적지 도착 배너가 회전 안내 카드에 가려지�
 56ada4a feat(nav): 후면단속카메라 접근/사후구간 게이지 UI 구현 (Phase 2)
 8cba24d feat(nav): 후면단속카메라 탐지 엔진 구현 (Phase 1)
 145aba5 feat(data): 후면단속카메라 유닛별 좌표 3583건 변환 (Phase 0)
-a3f2216 feat(data): 후면단속카메라 데이터 확보
 ```
 
 ## 6. 더 깊이 볼 때

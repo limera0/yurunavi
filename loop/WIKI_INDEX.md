@@ -227,6 +227,9 @@
 - **2026-07-22** `지시서` [HANDOFF_0722_waypoint_mgmt.md](HANDOFF_0722_waypoint_mgmt.md) — 17번 경유지 관리 UI 작업지시
 - **2026-07-22** `리포트` [MORNING_REPORT_0722_night.md](MORNING_REPORT_0722_night.md) — 야간 작업 결과(14-D, 16번)
 - **2026-07-22** `리포트` [MORNING_REPORT_0722_skin_infra.md](MORNING_REPORT_0722_skin_infra.md) — 스킨 시스템 + 인프라 추상화 구현 결과
+- **2026-07-29** `지시서` [HANDOFF_0729_brand_skins.md](HANDOFF_0729_brand_skins.md) — 브랜드 방향 3안(A/B/C) 확정 → 무료 스킨 3종 구현 작업지시
+- **2026-07-29** `리포트` [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md) — 브랜드 스킨 3종 구현 결과(기본 스킨 교체, 경로색 마이그레이션, 설정 화면 선택 UI)
+- **2026-07-29** `지시서` [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md) — 세션 종료 인수인계, 다음 후보(9번 앱 아이콘 / 11번 전면 리팩터) 정리
 
 ---
 
@@ -243,6 +246,7 @@
 - **야간모드/일출일몰**: [RECON_NIGHTMODE.md](RECON_NIGHTMODE.md), [REPORT_NIGHTMODE.md](REPORT_NIGHTMODE.md), [RECON_SUNTIME.md](RECON_SUNTIME.md), [REPORT_SUNTIME.md](REPORT_SUNTIME.md)
 - **POI/히스토리/데이터소스**: [RECON_poi.md](RECON_poi.md), [RECON_history_ui.md](RECON_history_ui.md), [HANDOFF_0712_poi.md](HANDOFF_0712_poi.md), [HANDOFF_0715_poi_quota.md](HANDOFF_0715_poi_quota.md)
 - **설정/화면 UI**: [RECON_settings_phase1.md](RECON_settings_phase1.md), [REPORT_settings_phase1_impl.md](REPORT_settings_phase1_impl.md), [RECON_settings_phase2.md](RECON_settings_phase2.md), [SPEC_settings_phase2.md](archive/legacy_specs/SPEC_settings_phase2.md), [RECON_home_ui.md](RECON_home_ui.md), [HANDOFF_0722_waypoint_mgmt.md](HANDOFF_0722_waypoint_mgmt.md), [STITCH_DESIGN_PROMPTS.md](STITCH_DESIGN_PROMPTS.md), [HANDOFF_0722_skin_infra.md](HANDOFF_0722_skin_infra.md), [MORNING_REPORT_0722_skin_infra.md](MORNING_REPORT_0722_skin_infra.md)
+- **브랜드/스킨(8번)**: [HANDOFF_0729_brand_skins.md](HANDOFF_0729_brand_skins.md), [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md), [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md)
 - **백그라운드 내비게이션**: [VGPS_BGNAV_PHASE_A_0717.md](feedback/VGPS_BGNAV_PHASE_A_0717.md), [VGPS_BGNAV_PHASE_B_0717.md](feedback/VGPS_BGNAV_PHASE_B_0717.md)
 - **구조물 인지(다리/지하차도/터널)**: [HANDOFF_0716_structure_bypass_exit.md](HANDOFF_0716_structure_bypass_exit.md), [VGPS_STRUCTURE_EXIT_0716.md](feedback/VGPS_STRUCTURE_EXIT_0716.md), [VGPS_STRUCTURE_MINLENGTH_0717.md](feedback/VGPS_STRUCTURE_MINLENGTH_0717.md), [REPORT_structure_turnangle_vgps_verify.md](REPORT_structure_turnangle_vgps_verify.md), [RECON_underpass.md](RECON_underpass.md)
 - **실주행/가상GPS 검증**: [RIDE_RESULTS_0714.md](feedback/RIDE_RESULTS_0714.md), [RIDE_RESULTS_0715.md](feedback/RIDE_RESULTS_0715.md), [RIDE_RESULTS_0716.md](feedback/RIDE_RESULTS_0716.md), [VGPS_STRUCTURE_EXIT_0716.md](feedback/VGPS_STRUCTURE_EXIT_0716.md), [VGPS_BGNAV_PHASE_A_0717.md](feedback/VGPS_BGNAV_PHASE_A_0717.md), [VGPS_BGNAV_PHASE_B_0717.md](feedback/VGPS_BGNAV_PHASE_B_0717.md), [VGPS_STRUCTURE_MINLENGTH_0717.md](feedback/VGPS_STRUCTURE_MINLENGTH_0717.md), [BUGFIX_progress.md](feedback/BUGFIX_progress.md), [ANALYSIS_progress.md](feedback/ANALYSIS_progress.md), [REPORT_verify_ride0711.md](REPORT_verify_ride0711.md), [REPORT_reroute_heading_vgps_verify.md](REPORT_reroute_heading_vgps_verify.md)
@@ -253,6 +257,7 @@
 
 ## 작업 이력
 
+- **2026-07-29** [지시서](HANDOFF_0729_brand_skins.md) → [리포트](MORNING_REPORT_0729_brand_skins.md) — 브랜드 방향 3안(A/B/C) 확정, A를 기본으로 무료 스킨 3종 구현. 알려진 격차: `toThemeData()` 미반영으로 전역 크롬은 아직 스킨 미반영 → [세션 종료 인수인계](HANDOFF_0729_session_end.md)에서 9번/11번 다음 후보 정리
 - **2026-07-22** [지시서](HANDOFF_0722_skin_infra.md) → [리포트](MORNING_REPORT_0722_skin_infra.md) — 스킨 시스템 + 인프라 추상화 작업지시 및 구현 완료 보고
 - **2026-07-22** [지시서](HANDOFF_0722_waypoint_mgmt.md) — 17번 경유지 관리 UI 작업지시
 - **2026-07-22** [리포트](MORNING_REPORT_0722_night.md) — 야간작업 14-D(Crashlytics 후속) + 16번(구조물/급커브 카드) 진행 보고
