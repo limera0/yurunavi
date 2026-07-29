@@ -5,12 +5,12 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 12:53 · 브랜치 `verify/ride-0711` · HEAD `ed78cc8`
+생성: 2026-07-29 14:35 · 브랜치 `verify/ride-0711` · HEAD `0792d76`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
-- 마지막 handoff: `STATUS: DONE` (갱신 2026-07-28 16:01)
+- 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
 - 작업트리: **미커밋 15건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
@@ -29,30 +29,30 @@
 
 - [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md)
   - *목표 달성 판정:** 원래 목표: 로드맵 8번(브랜드 방향성 확정) — Claude가 방향 2~3개 제안,
-- [MORNING_REPORT_0728_rearcam_data.md](MORNING_REPORT_0728_rearcam_data.md)
-  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 - [MORNING_REPORT_0728_multi_stop_ux.md](MORNING_REPORT_0728_multi_stop_ux.md)
   - *목표 달성 판정:** 원래 목표: 다중 경유지 코스 설계 UX 개선 (Phase 1~4 전체) / 달성: 예 — 4개 Phase 모두 완료, analyze PASS, code-auditor PASS
+- [MORNING_REPORT_0722_waypoint_privacy.md](MORNING_REPORT_0722_waypoint_privacy.md)
+  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 
 ## 4. 최근 작업 지시서
 
 - [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md)
-- [HANDOFF_0729_brand_skins.md](HANDOFF_0729_brand_skins.md)
 - [HANDOFF_0728_rearcam_ui.md](HANDOFF_0728_rearcam_ui.md)
+- [HANDOFF_0729_rearcam_gauge_dial_refine.md](HANDOFF_0729_rearcam_gauge_dial_refine.md)
 
 ## 5. 최근 커밋
 
 ```
+0792d76 docs(roadmap): 19번 실제 상태로 갱신 — 백엔드/UI 구현 완료, 검증·보고 누락 명시
+7e439e2 docs: 게이지 다이얼 정밀화 핸드오프 완료 기록 (점-링 24개 + 웨지 25개)
+38484a2 fix(nav): 접근구간 웨지 스포크 개수를 레퍼런스와 정밀 대조해 25개로 확정
+160591a fix(nav): 사후구간 점-링 개수/반경을 레퍼런스와 정밀 대조해 24개로 확정
+377f233 docs: 세션 종료 인수인계 + 위키 인덱스 갱신 (8번 브랜드 스킨 완료)
 ed78cc8 docs(roadmap): 8번/11번 완료 상태 갱신 + 브랜드 스킨 완료 보고서
 df2ef1f feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
 4dacce4 docs(roadmap): 8번 브랜드 방향성 확정 — A/B/C 무료 스킨 3종 채택
 0462410 feat(nav): 후면단속카메라 접근/사후구간 게이지 디자인 재작업 (체크포인트)
 ed5d973 fix(nav): 목적지 도착 배너가 회전 안내 카드에 가려지는 문제 수정
-4b9cf8e docs: 후면단속카메라 HANDOFF 완료 체크리스트 갱신
-589e5b4 feat(nav): 후면단속카메라 TTS 안내 구현 (Phase 3)
-56ada4a feat(nav): 후면단속카메라 접근/사후구간 게이지 UI 구현 (Phase 2)
-8cba24d feat(nav): 후면단속카메라 탐지 엔진 구현 (Phase 1)
-145aba5 feat(data): 후면단속카메라 유닛별 좌표 3583건 변환 (Phase 0)
 ```
 
 ## 6. 더 깊이 볼 때

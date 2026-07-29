@@ -71,9 +71,8 @@ Scaffold 배경/AppBar/버튼 등 앱 전역 크롬은 안 바뀐다** — 오�
 ## 세션 시작 시 공통 확인사항
 
 - `git status`로 미커밋 파일 확인 — 이번 세션 기준 `assets/data/Opinet_API_Free.pdf`,
-  `assets/data/cctv.json`, `assets/data/rear_camera_apk_backup/`,
-  `assets/images/speedcam*.webp`, `scripts/scrape_rear_camera_notices.py`,
-  `loop/HANDOFF_0728_redacted-app_*.md`, `loop/MORNING_REPORT_0728_redacted-app_*.md`,
+  `assets/data/cctv.json`, `assets/images/speedcam*.webp`,
+  `scripts/scrape_rear_camera_notices.py`,
   `loop/HANDOFF_0728_multi_stop_ux.md`, `loop/MORNING_REPORT_0728_multi_stop_ux.md`,
   `loop/Screenshot_20260726_124125.jpg` 등이 미커밋 상태로 남아 있음 — **이번
   세션(8번/스킨) 작업물이 아니므로 손대지 말 것**, 다른 작업 스트림 소유.

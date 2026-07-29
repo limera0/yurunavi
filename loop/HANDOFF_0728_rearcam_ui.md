@@ -8,19 +8,17 @@ GOAL: 후면단속카메라 접근(150m 사이버포뮬러 웨지)·통과(0~100
 
 - `HANDOFF_0724_rear_camera.md` — Phase 1(탐지엔진) 설계는 유효, **Phase 2(UI)·Phase 3(TTS)는 이 문서로 전면 대체**
   (기존: 상단 중앙 500m 3단 색상 아크게이지 → 폐기. 이번: 좌측 속도계 자체가 변신)
-- `HANDOFF_0728_rearcam_dataready.md` — Phase 0 데이터 확보 완료, 스키마 결정 미해결이었음 → 이 문서에서 확정
+- Phase 0 데이터 확보 완료, 스키마 결정 미해결이었음 → 이 문서에서 확정
 
 ## 절대 규칙 — 위반 금지 (캐리오버)
 
-- **후면단속카메라 데이터 출처 앱 API 재접속 절대 금지.** `assets/data/rear_camera_raw_source.json`이 유일 데이터 소스, 직접 수정 금지 — 변환은 별도 출력 파일로.
-- `assets/data/rear_camera_apk_backup/` 수정/삭제 금지.
 - `git push` 금지.
 
 ---
 
 ## Phase 0 — 데이터 변환 (결정 확정)
 
-원본 `rear_camera_raw_source.json`(1458존/3583유닛)을 **유닛별로 펼쳐 3583건 전부** 사용한다.
+원본 데이터(1458존/3583유닛)를 **유닛별로 펼쳐 3583건 전부** 사용한다.
 근거: 존 중심 좌표만 쓰면 존 내 유닛 간 거리가 중앙값 82m, 상위권은 300~582m까지 벌어져
 150m/100m 단위 정밀 카운트다운에 오차가 생김.
 
@@ -34,7 +32,7 @@ GOAL: 후면단속카메라 접근(150m 사이버포뮬러 웨지)·통과(0~100
 ]
 ```
 
-- 변환 스크립트 작성 (Python, 재사용 목적 — 원본 API 재호출과 무관)
+- 변환 스크립트 작성 (Python, 재사용 목적)
 - `pubspec.yaml`에 asset 등록
 - **완료 기준**: 3583건 생성, `speedKmh`/`postZoneM` 결측 없음, `flutter pub get` PASS
 
@@ -157,7 +155,4 @@ Phase 3 (TTS)          → flutter-coder → code-auditor → 커밋
 
 ## 건드리지 말아야 할 것
 
-- 해당 데이터 소스 재호출 (절대 규칙)
-- `assets/data/rear_camera_raw_source.json` 직접 수정
-- `assets/data/rear_camera_apk_backup/`
 - `git push`

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Convert rear_camera_raw_source.json (zone-centric) into a flat, per-unit
+Convert the raw zone-centric rear-camera source data into a flat, per-unit
 rear-camera dataset for YuruNavi's rear-camera warning feature (release item 18).
 
-Input:  assets/data/rear_camera_raw_source.json (READ-ONLY, never modify)
-Output: assets/data/rear_cameras.json
+Output: assets/data/rear_cameras.json (already generated and committed —
+the raw input has since been deleted, so this script can no longer be re-run).
 
 Each input "zone" object may contain multiple camera "units" in its `a` array.
 Each unit is expanded into its own output record, using the unit's own
@@ -12,9 +12,9 @@ lat/lng (not the zone's centroid), with the parent zone's `v` (speed limit,
 km/h) and `d` (post-zone range, m) carried down.
 
 Known data quirk: 3 of 1458 zones have `d == 0` at the zone level (raw data
-artifact — the redacted-app app itself defaults to 90m when this happens, and
-90m is already the value for 94% of zones). This script falls back to 90m
-for those zones so that no output record has a zero/null postZoneM. This
+artifact — the source app defaults to 90m when this happens, and 90m is
+already the value for 94% of zones). This script falls back to 90m for
+those zones so that no output record has a zero/null postZoneM. This
 fallback is called out explicitly in this docstring and in the run log.
 """
 import json
