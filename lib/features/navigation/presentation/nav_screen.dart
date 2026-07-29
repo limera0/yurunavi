@@ -2053,6 +2053,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
             ),
 
           // ── 상단 회전 안내 ──────────────────────────────────────────────────
+          // _arrivalBannerVisible(최종 목적지 도착) 중엔 숨긴다 — 이 카드가
+          // Stack에서 도착 배너(위 _arrivalBannerVisible 블록)보다 나중에
+          // 그려져 같은 좌상단 영역을 덮어써 "안내 종료" 배너가 가려지는
+          // 문제가 있었다(2026-07-29 실기 vGPS 테스트로 확인). 최종 도착
+          // 후엔 어차피 다음 턴이 없으므로 숨기는 게 맞다.
+          if (!_arrivalBannerVisible)
           Positioned(
             top: MediaQuery.of(context).padding.top,
             left: 0,
