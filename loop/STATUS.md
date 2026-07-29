@@ -5,56 +5,55 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 23:17 · 브랜치 `verify/ride-0711` · HEAD `4d85b85`
+생성: 2026-07-29 23:57 · 브랜치 `verify/ride-0711` · HEAD `17fa4a2`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 54건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 9건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
 
 `loop/RELEASE_ROADMAP.md`의 `### N.` 항목 중 DONE이 아닌 것. 옆 숫자는 그 문서의 줄번호다.
 
-- **9. 앱 아이콘 확정**  —  `RELEASE_ROADMAP.md:251`
-- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:254`
-- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:260`
-- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:590`
-- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:751`
-- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:773`
-- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:812`
-- **21. 운영 서버 보안 강화**  —  `RELEASE_ROADMAP.md:836`
+- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:259`
+- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:265`
+- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:595`
+- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:756`
+- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:778`
+- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:817`
+- **21. 운영 서버 보안 강화**  —  `RELEASE_ROADMAP.md:841`
 
 ## 3. 최근 실행 결과
 
+- [MORNING_REPORT_0730_navi_api_key_auth.md](MORNING_REPORT_0730_navi_api_key_auth.md)
+  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 - [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md)
   - *목표 달성 판정:** 원래 목표: 로드맵 8번(브랜드 방향성 확정) — Claude가 방향 2~3개 제안,
 - [MORNING_REPORT_0728_multi_stop_ux.md](MORNING_REPORT_0728_multi_stop_ux.md)
   - *목표 달성 판정:** 원래 목표: 다중 경유지 코스 설계 UX 개선 (Phase 1~4 전체) / 달성: 예 — 4개 Phase 모두 완료, analyze PASS, code-auditor PASS
-- [MORNING_REPORT_0722_waypoint_privacy.md](MORNING_REPORT_0722_waypoint_privacy.md)
-  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 
 ## 4. 최근 작업 지시서
 
+- [HANDOFF_0730_navi_api_key_auth.md](HANDOFF_0730_navi_api_key_auth.md)
 - [HANDOFF_0729_server_security_audit.md](HANDOFF_0729_server_security_audit.md)
 - [HANDOFF_0729_app_icon_review.md](HANDOFF_0729_app_icon_review.md)
-- [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md)
 
 ## 5. 최근 커밋
 
 ```
+17fa4a2 docs(roadmap): 21번 2순위(navi API 공유키 인증) 완료 기록
+c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
+bc1fa0c feat(navi): API 공유키(X-Api-Key) 인증 미들웨어 추가
+cebbb83 docs(roadmap): 9번(앱 아이콘 확정) DONE 갱신
+59a626e feat(icon): flutter_launcher_icons로 Android/iOS 런처 아이콘 자산 생성
+ae034b3 docs(roadmap): 20/21번 신설 — 위치정보 로깅 의무 + 서버 보안 강화 감사 기록
+0d8a7fa docs(legal): 개인정보처리방침/이용약관 외부 법률 검토 반영
 4d85b85 feat(icon): 마스터 제공 원본 벡터로 앱 아이콘 소스 확정
 761d48a docs: 앱 아이콘(9번) 시안 진행 상황 인수인계 — B안 도로 굵기 방향 미확정
 817103b chore(data): 후면단속카메라 원본 데이터 소스 관련 파일/문구 제거
-db254f7 docs(roadmap): 19번 실제 상태로 갱신 — 백엔드/UI 구현 완료, 검증·보고 누락 명시
-bc0ed0b docs: 게이지 다이얼 정밀화 핸드오프 완료 기록 (점-링 24개 + 웨지 25개)
-c641a92 fix(nav): 접근구간 웨지 스포크 개수를 레퍼런스와 정밀 대조해 25개로 확정
-def386d fix(nav): 사후구간 점-링 개수/반경을 레퍼런스와 정밀 대조해 24개로 확정
-1c2691f docs: 세션 종료 인수인계 + 위키 인덱스 갱신 (8번 브랜드 스킨 완료)
-2f54924 docs(roadmap): 8번/11번 완료 상태 갱신 + 브랜드 스킨 완료 보고서
-b851d15 feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
 ```
 
 ## 6. 더 깊이 볼 때
