@@ -5,25 +5,27 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 14:35 · 브랜치 `verify/ride-0711` · HEAD `0792d76`
+생성: 2026-07-29 23:17 · 브랜치 `verify/ride-0711` · HEAD `4d85b85`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 15건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 54건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
 
 `loop/RELEASE_ROADMAP.md`의 `### N.` 항목 중 DONE이 아닌 것. 옆 숫자는 그 문서의 줄번호다.
 
-- **9. 앱 아이콘 확정**  —  `RELEASE_ROADMAP.md:249`
-- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:252`
-- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:258`
-- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:588`
-- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:749`
-- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:771`
+- **9. 앱 아이콘 확정**  —  `RELEASE_ROADMAP.md:251`
+- **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:254`
+- **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:260`
+- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:590`
+- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:751`
+- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:773`
+- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:812`
+- **21. 운영 서버 보안 강화**  —  `RELEASE_ROADMAP.md:836`
 
 ## 3. 최근 실행 결과
 
@@ -36,23 +38,23 @@
 
 ## 4. 최근 작업 지시서
 
+- [HANDOFF_0729_server_security_audit.md](HANDOFF_0729_server_security_audit.md)
+- [HANDOFF_0729_app_icon_review.md](HANDOFF_0729_app_icon_review.md)
 - [HANDOFF_0729_session_end.md](HANDOFF_0729_session_end.md)
-- [HANDOFF_0728_rearcam_ui.md](HANDOFF_0728_rearcam_ui.md)
-- [HANDOFF_0729_rearcam_gauge_dial_refine.md](HANDOFF_0729_rearcam_gauge_dial_refine.md)
 
 ## 5. 최근 커밋
 
 ```
-0792d76 docs(roadmap): 19번 실제 상태로 갱신 — 백엔드/UI 구현 완료, 검증·보고 누락 명시
-7e439e2 docs: 게이지 다이얼 정밀화 핸드오프 완료 기록 (점-링 24개 + 웨지 25개)
-38484a2 fix(nav): 접근구간 웨지 스포크 개수를 레퍼런스와 정밀 대조해 25개로 확정
-160591a fix(nav): 사후구간 점-링 개수/반경을 레퍼런스와 정밀 대조해 24개로 확정
-377f233 docs: 세션 종료 인수인계 + 위키 인덱스 갱신 (8번 브랜드 스킨 완료)
-ed78cc8 docs(roadmap): 8번/11번 완료 상태 갱신 + 브랜드 스킨 완료 보고서
-df2ef1f feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
-4dacce4 docs(roadmap): 8번 브랜드 방향성 확정 — A/B/C 무료 스킨 3종 채택
-0462410 feat(nav): 후면단속카메라 접근/사후구간 게이지 디자인 재작업 (체크포인트)
-ed5d973 fix(nav): 목적지 도착 배너가 회전 안내 카드에 가려지는 문제 수정
+4d85b85 feat(icon): 마스터 제공 원본 벡터로 앱 아이콘 소스 확정
+761d48a docs: 앱 아이콘(9번) 시안 진행 상황 인수인계 — B안 도로 굵기 방향 미확정
+817103b chore(data): 후면단속카메라 원본 데이터 소스 관련 파일/문구 제거
+db254f7 docs(roadmap): 19번 실제 상태로 갱신 — 백엔드/UI 구현 완료, 검증·보고 누락 명시
+bc0ed0b docs: 게이지 다이얼 정밀화 핸드오프 완료 기록 (점-링 24개 + 웨지 25개)
+c641a92 fix(nav): 접근구간 웨지 스포크 개수를 레퍼런스와 정밀 대조해 25개로 확정
+def386d fix(nav): 사후구간 점-링 개수/반경을 레퍼런스와 정밀 대조해 24개로 확정
+1c2691f docs: 세션 종료 인수인계 + 위키 인덱스 갱신 (8번 브랜드 스킨 완료)
+2f54924 docs(roadmap): 8번/11번 완료 상태 갱신 + 브랜드 스킨 완료 보고서
+b851d15 feat(skin): 브랜드 스킨 3종(A유루캠/B레트로/C커브) 구현, 설정 화면 선택 UI 추가
 ```
 
 ## 6. 더 깊이 볼 때
