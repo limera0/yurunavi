@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-30 00:05 · 브랜치 `verify/ride-0711` · HEAD `aa3594d`
+생성: 2026-07-30 00:57 · 브랜치 `verify/ride-0711` · HEAD `939382e`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 10건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 4건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -44,6 +44,8 @@
 ## 5. 최근 커밋
 
 ```
+939382e docs(roadmap): 21번 1순위(Cloudflare 무료 하드닝) 완료 기록
+c37842c docs: 세션 종료 인수인계 — navi API 인증 완료, 21번 잔여 우선순위 후보 정리
 aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
 17fa4a2 docs(roadmap): 21번 2순위(navi API 공유키 인증) 완료 기록
 c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
@@ -52,8 +54,6 @@ cebbb83 docs(roadmap): 9번(앱 아이콘 확정) DONE 갱신
 59a626e feat(icon): flutter_launcher_icons로 Android/iOS 런처 아이콘 자산 생성
 ae034b3 docs(roadmap): 20/21번 신설 — 위치정보 로깅 의무 + 서버 보안 강화 감사 기록
 0d8a7fa docs(legal): 개인정보처리방침/이용약관 외부 법률 검토 반영
-4d85b85 feat(icon): 마스터 제공 원본 벡터로 앱 아이콘 소스 확정
-761d48a docs: 앱 아이콘(9번) 시안 진행 상황 인수인계 — B안 도로 굵기 방향 미확정
 ```
 
 ## 6. 더 깊이 볼 때
