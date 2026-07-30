@@ -23,6 +23,7 @@ import '../../../models/poi.dart';
 import '../../../models/saved_place.dart';
 import '../../../services/address_search_service.dart';
 import '../../../services/connectivity_service.dart';
+import '../../../services/gas_station_service.dart';
 import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/poi_icon_renderer.dart';
@@ -2908,6 +2909,10 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   // 클라이언트에서만 처리하고 재조회하지 않는다.
   List<Poi> _allPois = const [];
 
+  // "주유소" 칩만 단독 선택된 상태에서 오피넷(가격 정렬) 조회 결과를 담는다. 그
+  // 상태를 벗어나면 null로 비워 다음에 다시 들어올 때 새로 조회하게 한다.
+  Future<List<GasStation>>? _gasStationFuture;
+
   // ── 주소 검색(V-World 지오코더 프록시) 관련 상태 ──────────────────────────
   // 기본값 business로 고정 — 기존 사용자에게는 오늘 동작이 그대로 유지된다.
   _SearchMode _searchMode = _SearchMode.business;
@@ -3028,6 +3033,12 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     return _allPois.where((p) => types.contains(p.type)).toList();
   }
 
+  /// "주유소" 칩만 단독으로 선택돼 있는지 — `_effectiveTypes`가 아니라 사용자가
+  /// 직접 고른 `_selectedTypes`만 본다(검색어만 있고 칩이 없을 때 5종 전체로
+  /// 확장되는 `_effectiveTypes`는 이 분기를 타면 안 된다).
+  bool get _isGasStationOnly =>
+      _selectedTypes.length == 1 && _selectedTypes.single == PoiType.gasStation;
+
   void _onSearchChanged() {
     if (_searchMode == _SearchMode.address) {
       _onAddressTextChanged();
@@ -3087,8 +3098,21 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   void _toggleType(PoiType type) {
     setState(() {
       if (!_selectedTypes.add(type)) _selectedTypes.remove(type);
+      // 주유소 단독 선택 상태를 벗어나면 캐시된 조회 future를 비워, 다음에 다시
+      // 그 상태로 들어올 때(_buildGasStationBody의 ??= 가드) 새로 조회하게 한다.
+      if (!_isGasStationOnly) _gasStationFuture = null;
     });
     ref.read(poiListProvider.notifier).set(_mapPinPois);
+  }
+
+  Future<List<GasStation>> _fetchGasStations() {
+    final origin = widget.origin;
+    if (origin == null) return Future.value(const []);
+    return GasStationService.fetchNearby(
+      lat: origin.latitude,
+      lon: origin.longitude,
+      fuel: 'B027',
+    );
   }
 
   /// 검색어(있으면)로 클라이언트 필터링한 뒤 거리순으로 보여줄 목록.
@@ -3362,6 +3386,9 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   }
 
   Widget _buildBusinessBody(LatLng origin) {
+    if (_isGasStationOnly) {
+      return _buildGasStationBody();
+    }
     if (_effectiveTypes.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
@@ -3437,6 +3464,98 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         );
       }).toList(),
     );
+  }
+
+  /// "주유소" 칩 단독 선택 시 소상공인 POI 대신 오피넷(가격순) 목록을 보여준다.
+  /// 검색창(_searchCtrl)은 이 분기에서 관여하지 않는다 — 칩 행은 계속 보이지만
+  /// 상호명 필터링은 적용되지 않는다(범위 밖).
+  Widget _buildGasStationBody() {
+    _gasStationFuture ??= _fetchGasStations();
+    return FutureBuilder<List<GasStation>>(
+      future: _gasStationFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final stations = snapshot.data ?? [];
+        if (stations.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text('5km 내 주유소 정보를 찾을 수 없습니다',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+          );
+        }
+        return Column(
+          children: [
+            for (var i = 0; i < stations.length; i++)
+              _buildGasStationTile(stations[i], i),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildGasStationTile(GasStation station, int index) {
+    final rankColor = Color(PoiType.gasStation.colorValue);
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: rankColor.withValues(alpha: 0.15),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Text(
+            '${index + 1}',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: rankColor,
+            ),
+          ),
+        ),
+      ),
+      title: Text(
+        station.name,
+        style: const TextStyle(fontSize: 14),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        '${_formatDistance(station.distanceM)}  •  ${station.brand.isNotEmpty ? station.brand : "기타"}',
+        style: const TextStyle(fontSize: 11, color: Colors.grey),
+      ),
+      trailing: station.price != null
+          ? Text(
+              '${_formatGasPrice(station.price!)}원',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            )
+          : null,
+      onTap: () {
+        final poi = Poi(
+          id: '${station.lat}_${station.lon}',
+          name: station.name,
+          type: PoiType.gasStation,
+          location: LatLng(station.lat, station.lon),
+          address: station.address.isEmpty ? null : station.address,
+        );
+        widget.onSelectDest(poi);
+      },
+    );
+  }
+
+  String _formatGasPrice(int price) {
+    final s = price.toString();
+    if (s.length <= 3) return s;
+    return '${s.substring(0, s.length - 3)},${s.substring(s.length - 3)}';
   }
 }
 
