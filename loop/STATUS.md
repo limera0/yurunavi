@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-30 01:12 · 브랜치 `verify/ride-0711` · HEAD `1d643ec`
+생성: 2026-07-30 01:52 · 브랜치 `verify/ride-0711` · HEAD `8a339b0`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 4건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 7건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -28,12 +28,12 @@
 
 ## 3. 최근 실행 결과
 
+- [MORNING_REPORT_0730_ufw_fail2ban_done.md](MORNING_REPORT_0730_ufw_fail2ban_done.md)
+  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
+- [MORNING_REPORT_0730_access_log_and_ufw_prep.md](MORNING_REPORT_0730_access_log_and_ufw_prep.md)
+  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
 - [MORNING_REPORT_0730_navi_api_key_auth.md](MORNING_REPORT_0730_navi_api_key_auth.md)
   - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
-- [MORNING_REPORT_0729_brand_skins.md](MORNING_REPORT_0729_brand_skins.md)
-  - *목표 달성 판정:** 원래 목표: 로드맵 8번(브랜드 방향성 확정) — Claude가 방향 2~3개 제안,
-- [MORNING_REPORT_0728_multi_stop_ux.md](MORNING_REPORT_0728_multi_stop_ux.md)
-  - *목표 달성 판정:** 원래 목표: 다중 경유지 코스 설계 UX 개선 (Phase 1~4 전체) / 달성: 예 — 4개 Phase 모두 완료, analyze PASS, code-auditor PASS
 
 ## 4. 최근 작업 지시서
 
@@ -44,6 +44,8 @@
 ## 5. 최근 커밋
 
 ```
+8a339b0 docs: 세션 보고 — 21번 4순위(요청 로깅) 완료, 3/5순위 실행 순서서로 대체
+b5a21d7 chore(status): STATUS.md 재생성 (21번 4순위 완료 반영)
 1d643ec docs(roadmap): 21번 4순위(요청 로깅) 완료 기록 + 3/5순위 실행 runbook 추가
 da5bf40 feat(navi): 요청 접근 로그 미들웨어 추가 (21번 4순위)
 02ac8a4 chore(status): STATUS.md 재생성 (Cloudflare 1순위 완료 반영)
@@ -52,8 +54,6 @@ c37842c docs: 세션 종료 인수인계 — navi API 인증 완료, 21번 잔�
 aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
 17fa4a2 docs(roadmap): 21번 2순위(navi API 공유키 인증) 완료 기록
 c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
-bc1fa0c feat(navi): API 공유키(X-Api-Key) 인증 미들웨어 추가
-cebbb83 docs(roadmap): 9번(앱 아이콘 확정) DONE 갱신
 ```
 
 ## 6. 더 깊이 볼 때

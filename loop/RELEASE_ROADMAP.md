@@ -105,7 +105,7 @@
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 | 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | **DONE** — 커밋 `27dae87`, 아래 16번 상세 참조 |
 | 20 | 위치정보 확인자료 로깅 구현 (위치기반서비스사업자 등록 시 법정 의무) | 2급 | 미착수 — 6번(사업 신고) 선행조건 |
-| 21 | 운영 서버 보안 강화 (방화벽/API 인증/접근로그) | 1급 | PARTIAL — 1·2·4순위(Cloudflare Rate Limit+국가 차단, navi API 공유키 인증, 접근 로그) 완료(2026-07-30), 3(ufw)/5(fail2ban)는 순서서(`RUNBOOK_ufw_fail2ban.md`) 작성 완료·마스터 직접 실행 대기 |
+| 21 | 운영 서버 보안 강화 (방화벽/API 인증/접근로그) | 1급 | **DONE** — 1~5순위 전부 완료(2026-07-30). ufw+fail2ban은 Claude가 마스터의 narrow sudo 위임(`/etc/sudoers.d/claude-ufw-fail2ban`)을 받아 데드맨 스위치(타이머 자동복구)와 함께 직접 실행, 종단 검증 완료 |
 
 ## 항목별 상세
 
@@ -920,24 +920,56 @@ rust-coder 구현 → code-auditor PASS(ownership/프라이버시/스코프 전�
 공개 도메인 요청 시 실제 클라이언트 IP가 `CF-Connecting-IP`로 정상 캡처됨)
 확인 완료.
 
-3(ufw)/5(fail2ban)순위는 **Claude가 이 세션에서 sudo 비밀번호 없이 직접 실행
-불가**(`sudo -n` → "a password is required")로 확인돼, 대신 마스터가 콘솔
-앞에서 직접 실행할 단계별 순서서를 작성해 `loop/RUNBOOK_ufw_fail2ban.md`에
-남겼다 — 여전히 미착수, 다음 세션(또는 마스터 직접 실행) 대기.
+3(ufw)/5(fail2ban)순위는 처음엔 **Claude가 sudo 비밀번호 없이 직접 실행
+불가**(`sudo -n` → "a password is required")로 막혀, 마스터가 콘솔 앞에서
+직접 실행할 단계별 순서서 `loop/RUNBOOK_ufw_fail2ban.md`를 대신 작성했다.
+그런데 마스터가 실제로는 **SSH 외 콘솔 접속 경로가 전혀 없고(키보드/마우스를
+새로 사야 함), 터미널 명령을 직접 치는 것도 부담스럽다**고 확인 — RUNBOOK을
+마스터가 직접 실행하는 건 비현실적이라고 판단해 계획을 바꿨다.
 
-이 순서서 작성 과정에서 원 감사(`HANDOFF_0729`)에 없던 사실을 추가로 확인함:
+**최종 진행 방식**: 마스터가 narrow-scope `NOPASSWD` sudoers 항목
+(`/etc/sudoers.d/claude-ufw-fail2ban` — `ufw`/`iptables-save`/`/etc/ufw/after.rules`
+백업·추가/`apt-get install fail2ban`/`systemctl`·`fail2ban-client` 등 딱 필요한
+명령어만, `visudo -c`로 문법 검증 후 저장)를 한 번만 붙여넣어 위임, 그 다음부턴
+Claude가 직접 각 단계를 실행하며 검증함. `ufw enable` 직전엔 **데드맨 스위치**
+(`nohup sleep 480 && sudo ufw disable` 백그라운드 타이머 — 콘솔이 없어도 몇 분
+안에 자동 원상복구되는 안전장치)를 걸어두고, 검증 성공 후 취소하는 방식으로
+"콘솔 없음" 리스크를 상쇄했다.
+
+이 과정에서 원 감사(`HANDOFF_0729`)에 없던 사실을 추가로 확인함:
 valhalla(8002)·tiles(8080)·style-ai(8014)는 전부 docker bridge 게시 포트라
 **`ufw enable`만으로는 보호되지 않는다** — Docker가 `DOCKER-USER`/`FORWARD`
 체인을 `ufw`의 `INPUT` 체인보다 먼저 가로채기 때문에, 이 셋은 별도로
 `/etc/ufw/after.rules`에 `DOCKER-USER` 규칙을 추가해야 실제로 막힌다(navi와
 tuning-dashboard는 `network_mode: host`라 일반 ufw 규칙이 정상 적용됨). 또한
 Cloudflare Tunnel(`n8n_cloudflared`)이 이 리포의 `docker_default`(172.19.0.0/16)가
-아니라 별도 네트워크 `n8n_network`(172.18.0.0/16)에 붙어 있음을 확인 — 정확한
-tunnel origin 주소는 Cloudflare 대시보드(마스터 전용 접근)에서만 확인 가능해
-Claude가 100% 검증하지 못했다. 상세·정확한 실행 커맨드는 `RUNBOOK_ufw_fail2ban.md`
-참고, 실행 전 그 문서의 0장(왜 위험한지)을 반드시 먼저 읽을 것.
+아니라 별도 네트워크 `n8n_network`(172.18.0.0/16)에 붙어 있음을 확인. 부수적으로
+`iptables-save` 출력에서 이 호스트에 **Tailscale**(`tailscaled`, `ts-input`/
+`ts-forward` 체인)이 이미 설정돼 있는 것도 발견함 — 마스터 본인 디바이스에
+Tailscale이 연결돼 있다면, SSH 말고도 이 호스트에 접근할 수 있는 별도 경로가
+이미 있다는 뜻일 수 있다(확인은 안 함, 다음에 콘솔 접근이 또 필요하면 이걸
+먼저 물어볼 것).
 
-1순위·2순위·4순위 완료. **3(ufw)/5(fail2ban)순위는 마스터 직접 실행 대기.**
+**최종 적용 규칙**(2026-07-30 밤):
+- ufw: 기본 `deny incoming`/`allow outgoing`, 기존에 이미 잡혀있던(활성화 전부터
+  `ufw allow`로 등록만 돼 있던) 5678(n8n 내부)/11434(Ollama)/80·443(n8n_nginx)/
+  Samba/22(SSH) 그대로 유지 + `8003/tcp from 172.18.0.0/16`·`from 127.0.0.1`
+  (navi) 추가. tuning-dashboard(8501)는 공개 도메인 없는 내부 도구라 의도적으로
+  규칙 추가 안 함(default-deny로 자동 차단).
+- `/etc/ufw/after.rules`에 `DOCKER-USER` 체인 규칙 추가: 8002/8080/8014는
+  172.18.0.0/16(n8n_network)·127.0.0.0/8에서만 RETURN(허용), 나머지는 DROP.
+- fail2ban 설치, `[sshd]` jail 활성화(`maxretry=5`, `bantime=1h`, `findtime=10m`).
+- 검증: SSH 리스닝 정상, navi/valhalla/tiles 세 공개 도메인 curl 전부 200
+  (규칙 추가 전후 여러 차례 반복 확인), `sudo ufw status verbose`/
+  `fail2ban-client status sshd` 정상. 단, 이 서버 자신에서의 curl 테스트는
+  hairpin NAT 한계로 "정말 공인 인터넷에서 직접 IP:포트로 못 들어오는지"까지는
+  확증 못 함(원 감사 때와 같은 제약) — 마스터가 와이파이 끄고 모바일 데이터로
+  `curl --max-time 5 http://112.186.40.91:8002/status` 등을 시도해 타임아웃/
+  연결거부가 나오는지 직접 재확인하는 걸 권장.
+- 위임했던 sudoers 항목은 그대로 남겨둠(`sudo rm /etc/sudoers.d/claude-ufw-fail2ban`
+  으로 언제든 회수 가능, 마스터에게 안내함).
+
+1~5순위 전부 완료. 21번 항목 DONE.
 
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
