@@ -5,7 +5,7 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-30 00:57 · 브랜치 `verify/ride-0711` · HEAD `939382e`
+생성: 2026-07-30 01:12 · 브랜치 `verify/ride-0711` · HEAD `1d643ec`
 
 ## 1. 지금 상태
 
@@ -44,6 +44,9 @@
 ## 5. 최근 커밋
 
 ```
+1d643ec docs(roadmap): 21번 4순위(요청 로깅) 완료 기록 + 3/5순위 실행 runbook 추가
+da5bf40 feat(navi): 요청 접근 로그 미들웨어 추가 (21번 4순위)
+02ac8a4 chore(status): STATUS.md 재생성 (Cloudflare 1순위 완료 반영)
 939382e docs(roadmap): 21번 1순위(Cloudflare 무료 하드닝) 완료 기록
 c37842c docs: 세션 종료 인수인계 — navi API 인증 완료, 21번 잔여 우선순위 후보 정리
 aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
@@ -51,9 +54,6 @@ aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
 c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
 bc1fa0c feat(navi): API 공유키(X-Api-Key) 인증 미들웨어 추가
 cebbb83 docs(roadmap): 9번(앱 아이콘 확정) DONE 갱신
-59a626e feat(icon): flutter_launcher_icons로 Android/iOS 런처 아이콘 자산 생성
-ae034b3 docs(roadmap): 20/21번 신설 — 위치정보 로깅 의무 + 서버 보안 강화 감사 기록
-0d8a7fa docs(legal): 개인정보처리방침/이용약관 외부 법률 검토 반영
 ```
 
 ## 6. 더 깊이 볼 때
