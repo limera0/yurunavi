@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-29 23:57 · 브랜치 `verify/ride-0711` · HEAD `17fa4a2`
+생성: 2026-07-30 00:05 · 브랜치 `verify/ride-0711` · HEAD `aa3594d`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 9건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 10건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -37,13 +37,14 @@
 
 ## 4. 최근 작업 지시서
 
+- [HANDOFF_0730_session_end.md](HANDOFF_0730_session_end.md)
 - [HANDOFF_0730_navi_api_key_auth.md](HANDOFF_0730_navi_api_key_auth.md)
 - [HANDOFF_0729_server_security_audit.md](HANDOFF_0729_server_security_audit.md)
-- [HANDOFF_0729_app_icon_review.md](HANDOFF_0729_app_icon_review.md)
 
 ## 5. 최근 커밋
 
 ```
+aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
 17fa4a2 docs(roadmap): 21번 2순위(navi API 공유키 인증) 완료 기록
 c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
 bc1fa0c feat(navi): API 공유키(X-Api-Key) 인증 미들웨어 추가
@@ -53,7 +54,6 @@ ae034b3 docs(roadmap): 20/21번 신설 — 위치정보 로깅 의무 + 서버 �
 0d8a7fa docs(legal): 개인정보처리방침/이용약관 외부 법률 검토 반영
 4d85b85 feat(icon): 마스터 제공 원본 벡터로 앱 아이콘 소스 확정
 761d48a docs: 앱 아이콘(9번) 시안 진행 상황 인수인계 — B안 도로 굵기 방향 미확정
-817103b chore(data): 후면단속카메라 원본 데이터 소스 관련 파일/문구 제거
 ```
 
 ## 6. 더 깊이 볼 때
