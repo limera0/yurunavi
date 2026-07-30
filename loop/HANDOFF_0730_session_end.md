@@ -33,10 +33,13 @@ GOAL: 세션 종료 인수인계 — 21번(운영 서버 보안 강화) 남은 1
 `loop/HANDOFF_0729_server_security_audit.md`와
 `loop/RELEASE_ROADMAP.md:841` 상세 섹션 참고.
 
-1. **Cloudflare 대시보드 WAF/Rate Limiting/Bot Fight Mode** — 계정이
-   `/data/n8n-stack/` 소유라 이 리포/Claude가 직접 조작 불가. 마스터가 대시보드에서
-   직접 진행해야 하는 항목 — Claude가 착수할 수 없으니 다음 세션에서 이걸 고르면
-   "마스터가 직접 하셔야 합니다"로 안내만 하고 종료.
+1. ~~Cloudflare 대시보드 WAF/Rate Limiting/Bot Fight Mode~~ — **완료(2026-07-30
+   저녁, 마스터가 대시보드에서 직접)**. 무료 플랜 제약으로 실제 구성은: Rate
+   limiting(navi+valhalla, IP당 30요청/10초 Block, 무료 쿼터 1/1 사용) + Custom
+   rule(navi/valhalla/tiles를 KR·JP 외 국가는 Block, 무료 쿼터 1/5 사용). WAF
+   Managed Rules(OWASP)는 Pro($25/월) 전용이라 스킵, Bot Fight Mode는 API 전용
+   도메인이라 의미 없어 안 켜기로 결정. 실기기 테스트 완료, 이상 없음. 상세는
+   `loop/RELEASE_ROADMAP.md:841` 21번 섹션 참고. Custom rules 잔여 4개 남음.
 2. ~~API 공유키 인증~~ — 완료.
 3. **`ufw` 활성화 + 인바운드 규칙** — 가장 효과 크지만 SSH 락아웃/사이트 전체 다운
    위험 있음. 콘솔 접속(SSH 아닌 별도 경로) 확보 후, SSH 허용 규칙부터 추가·확인,
