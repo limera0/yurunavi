@@ -1193,7 +1193,19 @@ async fn nominatim_region(
 }
 
 fn parse_opinet_price(v: &serde_json::Value) -> Option<i32> {
-    v.as_str()?.trim().parse::<i32>().ok().filter(|&p| p > 0)
+    // 99999는 Opinet이 "해당 유종 미취급"을 표시하는 sentinel 값이다(실제 가격일 수 없음).
+    v.as_str()?.trim().parse::<i32>().ok().filter(|&p| p > 0 && p != 99999)
+}
+
+/// 요청 유종(fuel)에 대해 이 주유소를 결과 목록에 포함할지 여부.
+/// B034(고급휘발유) 요청인데 해당 주유소가 고급휘발유를 취급하지 않으면(premium == None)
+/// 목록에서 완전히 제외한다. B027(일반휘발유) 요청은 항상 포함한다(기존 동작 유지).
+fn should_include_for_fuel(fuel: &str, _gasoline: Option<i32>, premium: Option<i32>) -> bool {
+    if fuel == "B034" {
+        premium.is_some()
+    } else {
+        true
+    }
 }
 
 async fn fetch_opinet_region(
@@ -1267,6 +1279,9 @@ async fn handle_gasstations_nearby(
             }
             let gasoline = parse_opinet_price(&s["B027_P"]);
             let premium = parse_opinet_price(&s["B034_P"]);
+            if !should_include_for_fuel(&q.fuel, gasoline, premium) {
+                return None;
+            }
             let sort_price = match q.fuel.as_str() {
                 "B034" => premium.unwrap_or(i32::MAX),
                 _ => gasoline.unwrap_or(i32::MAX),
@@ -1650,6 +1665,41 @@ mod tests {
     #[test]
     fn all_poi_categories_has_five_entries() {
         assert_eq!(ALL_POI_CATEGORIES.len(), 5);
+    }
+
+    #[test]
+    fn parse_opinet_price_filters_99999_sentinel() {
+        assert_eq!(parse_opinet_price(&serde_json::json!("99999")), None);
+    }
+
+    #[test]
+    fn parse_opinet_price_accepts_normal_value() {
+        assert_eq!(parse_opinet_price(&serde_json::json!("2369")), Some(2369));
+    }
+
+    #[test]
+    fn parse_opinet_price_filters_zero_and_negative_and_non_numeric() {
+        assert_eq!(parse_opinet_price(&serde_json::json!("0")), None);
+        assert_eq!(parse_opinet_price(&serde_json::json!("-100")), None);
+        assert_eq!(parse_opinet_price(&serde_json::json!("")), None);
+        assert_eq!(parse_opinet_price(&serde_json::json!(null)), None);
+    }
+
+    #[test]
+    fn should_include_for_fuel_excludes_non_premium_station_when_requesting_b034() {
+        // 고급휘발유 미취급 주유소 → B034 요청 시 제외.
+        assert!(!should_include_for_fuel("B034", Some(1700), None));
+    }
+
+    #[test]
+    fn should_include_for_fuel_includes_non_premium_station_when_requesting_b027() {
+        // 같은 주유소라도 B027 요청이면 기존 동작대로 포함.
+        assert!(should_include_for_fuel("B027", Some(1700), None));
+    }
+
+    #[test]
+    fn should_include_for_fuel_includes_premium_carrying_station_when_requesting_b034() {
+        assert!(should_include_for_fuel("B034", Some(1700), Some(1900)));
     }
 
     // ── query_poi_nearby: 실제 rusqlite(bundled, rtree) 기반 end-to-end 검증 ──
