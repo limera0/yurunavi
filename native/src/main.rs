@@ -1523,6 +1523,38 @@ async fn require_api_key(
     }
 }
 
+/// 최소 접근 로그 미들웨어. 스캐닝/남용 탐지용으로 메서드·경로·상태코드·지연시간·
+/// (Cloudflare Tunnel 뒤라 TCP peer addr이 아닌) `CF-Connecting-IP` 헤더만 기록한다.
+/// 쿼리스트링(위경도 등 개인위치정보 포함 가능)·요청/응답 바디는 절대 로그하지 않는다
+/// — `req.uri().path()`만 쓰고 `req.uri().query()`는 쓰지 않는다. `require_api_key`와
+/// 같은 평범한 함수 스타일을 따르고, 병합된 최종 `app`에 `.layer(...)`로 붙여 `/health`,
+/// `/privacy` 포함 모든 라우트를 커버한다(신규 `tracing`/`tower_http` 의존성 추가 없음).
+async fn log_requests(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let ip = req
+        .headers()
+        .get("CF-Connecting-IP")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let elapsed_ms = start.elapsed().as_millis();
+
+    println!(
+        "[access] {} {} {} {}ms ip={}",
+        method,
+        path,
+        response.status().as_u16(),
+        elapsed_ms,
+        ip
+    );
+
+    response
+}
+
 // ── Main ───────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -1556,7 +1588,11 @@ async fn main() {
         .route("/routing-config", get(handle_routing_config))
         .route_layer(axum::middleware::from_fn(require_api_key));
 
-    let app = public_routes.merge(protected_routes);
+    // 접근 로그는 인증 여부와 무관하게 모든 라우트에 적용해야 하므로, 두 라우터를
+    // merge한 최종 `app`에 붙인다(개별 라우터에 붙이면 `/health`/`/privacy`가 빠진다).
+    let app = public_routes
+        .merge(protected_routes)
+        .layer(axum::middleware::from_fn(log_requests));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8003")
         .await
