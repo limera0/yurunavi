@@ -592,7 +592,7 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 - iOS는 스코프 밖(`GoogleService-Info.plist`/URL scheme 미설정, 이 서버는 헤드리스 Linux라
   Xcode 빌드 불가) — 13-5와 동일한 패턴으로 별도 과제.
 
-### 14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)
+### 14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (ListTile 건 A~D 전부 완료, RenderFlex overflow 신규 건 미해결)
 
 - **계기 (2026-07-13)**: Firebase Crashlytics가 1.0.1(2)에서 157건의 "치명적(Fatal)" 이벤트를
   경고 메일로 보내왔으나, 실제로는 앱이 죽은 게 아니라 `lib/core/crash_reporting.dart:18`의
@@ -631,6 +631,22 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
      FlutterError/Crashlytics 관련 오류 전혀 없음. **Crashlytics 콘솔 측 최종 확인은 마스터가
      직접 Firebase 콘솔(Crashlytics → Issues)에서 최근 fatal 이벤트 없음을 확인할 것** —
      자율 루프에서 웹 콘솔 직접 접근 불가. logcat 근거상 신규 fatal 발생 가능성 낮음.
+
+**추가 발견 (2026-07-30, 마스터 Crashlytics 콘솔 확인) — 별도 패턴, 재오픈**:
+위 A~D는 `ListTile._debugCheckBackgroundIsHidden`(ink splash 경고) 건으로 이미 해소됐으나,
+Crashlytics 콘솔에서 **다른 종류의 fatal**이 새로 확인됨 — `RenderFlex overflowed by 186
+pixels on the right`(`DebugOverflowIndicatorMixin._reportOverflow` 경유). 2026-07-26(필드
+테스트일, 지인과 실주행) 46건, 2026-07-29 2건, 총 49건 중 **80%가 F766N(Galaxy Z Flip7)에서
+발생**. 스택트레이스상 `RenderClipRRect`+`RenderDecoratedBox`(둥근 모서리+배경색이 있는
+카드/시트류) 안의 `RenderFlex`(Row/Column) 오버플로 — Flip7의 좁은 화면 폭에서 Row 안
+아이콘·텍스트가 `Expanded`/`Flexible` 없이 고정폭으로 배치된 위젯이 유력 용의자.
+**주의**: 이 오버플로 인디케이터 페인팅도 기존 ListTile 건과 마찬가지로 Flutter가 debug
+전용 `assert()` 블록으로 감싸는 코드이므로(release 빌드에서 스트립), 7/26·7/29 발생분이
+디버그 APK로 진행한 필드테스트 중이었다면 release 빌드에서는 재현 안 될 가능성이 있음 —
+그러나 어느 화면의 어떤 Row가 실제로 186px 넘치는지는 실재하는 레이아웃 버그이므로
+release 여부와 무관하게 찾아서 고치는 게 맞음. **다음 세션 할 일**: 최근 추가된
+바텀시트/카드류(주유소 시트, 웨이포인트 관리 시트, 코스 시트, 스킨 선택 UI 등) 중 고정폭
+Row를 grep해 원인 특정 후 수정.
 
 ### 15. POI 데이터소스 자체 호스팅 전환 — DONE (2026-07-15, 발견 당일 해결)
 
@@ -753,32 +769,38 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 
 ---
 
-## 18번 — 후면단속카메라 안내
+## 18번 — 후면단속카메라 안내 — PARTIAL (구현 완료, 실기기 시각 검증 남음)
 
-**상태**: 계획 완료, Phase 0 착수 대기 (공공데이터 다운로드 필요)
+**상태**: Phase 0~3 구현·커밋 전부 완료 (2026-07-24~28), `flutter analyze`/`flutter test`(301건)
+PASS. **실기기/vGPS 시각 검증만 남음** — 2026-07-30 진행 예정(마스터 확인).
 
 **배경**: 오토바이는 앞번호판 없어 후면카메라에만 잡힘. 투어링 중 과태료 방지.
 
-**데이터**: 공공데이터포털 경찰청 무인교통단속카메라 현황
-(https://www.data.go.kr/data/15028200/standard.do) — 후면단속 유형만 필터
+**데이터**: 공공데이터 원본(경찰청 무인교통단속카메라 현황) 유닛별 좌표 3583건을
+`assets/data/rear_cameras.json`으로 변환 완료(커밋 `76d3c61`/`145aba5`). 변환용 원본 소스
+파일은 2026-07-29 정리(커밋 `817103b`) — 변환된 `rear_cameras.json`은 그대로 유지되어 앱
+동작에는 영향 없음.
 
-**핸드오프**: `loop/HANDOFF_0724_rear_camera.md`
+**핸드오프**: `loop/HANDOFF_0724_rear_camera.md`(Phase 1 설계) →
+`loop/HANDOFF_0728_rearcam_ui.md`(Phase 2 UI·Phase 3 TTS로 전면 대체, 완료 체크리스트 포함)
 
-**Phase 구성**:
-- Phase 0: 공공데이터 CSV 다운로드 → 후면단속 필터 → `assets/data/rear_cameras.json`
-- Phase 1: Flutter asset 로더 + `RouteProgress` 탐지 엔진 (GPS 하버사인 + 방향 필터)
-- Phase 2: 사이버포뮬러 스타일 원형 호 게이지 UI (500m→0m 색상 변화, "단속중" 맥박)
-- Phase 3: TTS 안내 (500m/300m/100m/진입 시)
+**구현 완료 내역**:
+- Phase 0: `assets/data/rear_cameras.json` 3583건 (커밋 `76d3c61`)
+- Phase 1: `RouteProgress` 탐지 엔진 — 하버사인 + 헤딩 필터, 150m 임계값 (커밋 `3b81c6a`)
+- Phase 2: 좌측 속도계가 변신하는 사이버포뮬러 스타일 웨지/점-링 게이지 UI, 접근(150m→0m)·
+  사후구간(0→90m) 2단계, 과속 시 심장박동 오버레이 (커밋 `98fb682`/`56ada4a`, 디테일 정밀화
+  `def386d`/`c641a92`)
+- Phase 3: TTS 150m/50m 고정 타이밍 안내 (커밋 `5afa8fd`/`589e5b4`)
 
-**선행 조건**: Phase 0 — 공공데이터 파일 마스터가 직접 다운로드 후 프로젝트에 배치
-(data.go.kr 로그인 필요할 수 있음)
+**남은 것**: 실제 카메라 좌표 근처에서 게이지·플래시·TTS가 의도대로 동작하는지 실주행/vGPS
+시각 확인 — 완료되면 DONE으로 전환.
 
 ---
 
-## 19번 — 실시간 최저가 주유소 안내
+## 19번 — 실시간 최저가 주유소 안내 — DONE (2026-07-30)
 
-**상태**: PARTIAL — 백엔드+내비 화면 UI 구현 완료(2026-07-25), 실기기 검증·code-auditor 감사
-기록 없음
+**상태**: DONE (2026-07-30, 실기기 검증 완료) — 단, code-auditor 감사 기록은 여전히 없음
+(아래 "남은 것" 참고, 필요 시 추후 소급 감사 권장)
 
 **데이터**: 오피넷 공식 API(`aroundAll.do`)는 유료 전용이라 우회 — 오피넷 웹사이트 내부
 엔드포인트(`searRgPlaceAjax.do`)를 역지오코딩(시도/시군구) + 커스텀 TM좌표→WGS84 역변환으로
@@ -796,19 +818,21 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
   `_liveWaypoints`/`_reroute` 반영).
 
 **원래 계획 대비 달라진 점**:
-- 진입점: "지도 검색창 주유소 버튼"은 구현되지 않음 — 현재는 **내비(주행) 화면 아이콘 버튼**
-  에서만 진입 가능, 일반 지도 화면에서는 접근 불가.
+- 진입점: "지도 검색창 주유소 버튼"은 구현되지 않음 — **내비(주행) 화면 아이콘 버튼**
+  에서만 진입 가능, 일반 지도 화면에서는 접근 불가. **2026-07-30 마스터 결정: 이대로 최종
+  확정** — 지도 화면에 가격 표시를 추가하면 정보 밀도가 높아져 화면이 지저분해진다는 이유로
+  별도 지도 진입점은 만들지 않기로 함.
 - 유종 선택: "설정 페이지"가 아니라 **바텀시트 내 토글칩**으로 구현(휘발유/고급휘발유 —
   최초 계획의 경유는 고급휘발유로 대체됨, `99d737c`).
 - 아키텍처(API 키 노출 방지 → navi Rust 서버 프록시 경유)는 계획대로 구현됨.
 
+**검증 (2026-07-30)**: 마스터가 실기기로 내비 화면 주유소 버튼 → 바텀시트에서 근방 주유소
+목록이 최저가순으로 정렬되어 표시되는 것을 확인.
+
 **남은 것**:
-- 실기기(adb install) 검증 기록 없음 — 헤드리스 서버 세션이라 커밋 시점에 육안 확인 안 된
-  것으로 보임.
 - code-auditor 리뷰 기록 없음, MORNING_REPORT/HANDOFF/위키 색인 누락(작업이 끝난 뒤 loop
-  프로토콜 6·7단계가 이행되지 않은 채 코드만 커밋됨).
-- 일반 지도 화면 진입점(원래 계획의 "지도 검색창 주유소 버튼")을 추가할지, 내비 화면 전용으로
-  남길지는 다음 세션에서 결정 필요.
+  프로토콜 6·7단계가 이행되지 않은 채 코드만 커밋됨) — 기능은 DONE 처리하되, 출시 전 여유가
+  있으면 `gas_station_service.dart`/`nav_screen.dart` 주유소 관련 변경분만 소급 감사 권장.
 
 ---
 
@@ -838,7 +862,7 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 **선행조건**: 6번(위치기반서비스사업 신고) 진행 상태 확인 — 아직 미신고 상태라면
 이 작업의 우선순위는 낮다.
 
-### 21. 운영 서버 보안 강화
+### 21. 운영 서버 보안 강화 — DONE (2026-07-30, 1~5순위 전부 완료)
 
 **배경**: 2026-07-29, 마스터 요청("네이버·카카오·중국 해커 등의 역설계·서버침입을
 막도록 보안 전문가 수준으로 검토")으로 운영 서버(`westinx` 호스트) 심층 감사 수행.
@@ -961,11 +985,9 @@ Tailscale이 연결돼 있다면, SSH 말고도 이 호스트에 접근할 수 �
 - fail2ban 설치, `[sshd]` jail 활성화(`maxretry=5`, `bantime=1h`, `findtime=10m`).
 - 검증: SSH 리스닝 정상, navi/valhalla/tiles 세 공개 도메인 curl 전부 200
   (규칙 추가 전후 여러 차례 반복 확인), `sudo ufw status verbose`/
-  `fail2ban-client status sshd` 정상. 단, 이 서버 자신에서의 curl 테스트는
-  hairpin NAT 한계로 "정말 공인 인터넷에서 직접 IP:포트로 못 들어오는지"까지는
-  확증 못 함(원 감사 때와 같은 제약) — 마스터가 와이파이 끄고 모바일 데이터로
-  `curl --max-time 5 http://112.186.40.91:8002/status` 등을 시도해 타임아웃/
-  연결거부가 나오는지 직접 재확인하는 걸 권장.
+  `fail2ban-client status sshd` 정상. 서버 자신에서의 curl 테스트는 hairpin NAT
+  한계로 확증 못 했던 부분(공인 인터넷에서 직접 IP:포트 접근 차단 여부)을
+  **2026-07-30 마스터가 모바일 데이터로 직접 재확인 — 실제로 막히는 것 확인 완료.**
 - 위임했던 sudoers 항목은 그대로 남겨둠(`sudo rm /etc/sudoers.d/claude-ufw-fail2ban`
   으로 언제든 회수 가능, 마스터에게 안내함).
 

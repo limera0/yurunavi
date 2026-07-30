@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-30 01:52 · 브랜치 `verify/ride-0711` · HEAD `8a339b0`
+생성: 2026-07-30 02:25 · 브랜치 `verify/ride-0711` · HEAD `b87e28b`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 7건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 6건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -20,11 +20,9 @@
 
 - **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:259`
 - **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:265`
-- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (A/C 완료, B/D 남음)**  —  `RELEASE_ROADMAP.md:595`
-- **18번 — 후면단속카메라 안내**  —  `RELEASE_ROADMAP.md:756`
-- **19번 — 실시간 최저가 주유소 안내**  —  `RELEASE_ROADMAP.md:778`
-- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:817`
-- **21. 운영 서버 보안 강화**  —  `RELEASE_ROADMAP.md:841`
+- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (ListTile 건 A~D 전부 완료, RenderFlex overflow 신규 건 미해결)**  —  `RELEASE_ROADMAP.md:595`
+- **18번 — 후면단속카메라 안내 — PARTIAL (구현 완료, 실기기 시각 검증 남음)**  —  `RELEASE_ROADMAP.md:772`
+- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:841`
 
 ## 3. 최근 실행 결과
 
@@ -44,6 +42,7 @@
 ## 5. 최근 커밋
 
 ```
+b87e28b docs: 21번(운영 서버 보안 강화) 1~5순위 전부 완료 — ufw+fail2ban 마무리
 8a339b0 docs: 세션 보고 — 21번 4순위(요청 로깅) 완료, 3/5순위 실행 순서서로 대체
 b5a21d7 chore(status): STATUS.md 재생성 (21번 4순위 완료 반영)
 1d643ec docs(roadmap): 21번 4순위(요청 로깅) 완료 기록 + 3/5순위 실행 runbook 추가
@@ -53,7 +52,6 @@ da5bf40 feat(navi): 요청 접근 로그 미들웨어 추가 (21번 4순위)
 c37842c docs: 세션 종료 인수인계 — navi API 인증 완료, 21번 잔여 우선순위 후보 정리
 aa3594d chore(status): STATUS.md 재생성 (navi API 인증 반영)
 17fa4a2 docs(roadmap): 21번 2순위(navi API 공유키 인증) 완료 기록
-c72f873 feat(app): navi API 요청에 X-Api-Key 공유키 헤더 추가
 ```
 
 ## 6. 더 깊이 볼 때
