@@ -105,7 +105,7 @@
 | 15 | POI 데이터소스 자체 호스팅 전환 (쿼터 아키텍처 결함 해소) | 특급 | **DONE** — 2026-07-15 발견 당일 해결, 커밋 `06adfb5`/`e27f06d`/`5b3eecd`/`ce709b8` |
 | 16 | 구조물(고가도로/터널/지하차도)·지오메트리 급커브 카드 UI 신설 | 2급 | **DONE** — 커밋 `27dae87`, 아래 16번 상세 참조 |
 | 20 | 위치정보 확인자료 로깅 구현 (위치기반서비스사업자 등록 시 법정 의무) | 2급 | 미착수 — 6번(사업 신고) 선행조건 |
-| 21 | 운영 서버 보안 강화 (방화벽/API 인증/접근로그) | 1급 | PARTIAL — 1·2순위(Cloudflare Rate Limit+국가 차단, navi API 공유키 인증) 완료(2026-07-30), 3/4/5순위 남음 |
+| 21 | 운영 서버 보안 강화 (방화벽/API 인증/접근로그) | 1급 | PARTIAL — 1·2·4순위(Cloudflare Rate Limit+국가 차단, navi API 공유키 인증, 접근 로그) 완료(2026-07-30), 3(ufw)/5(fail2ban)는 순서서(`RUNBOOK_ufw_fail2ban.md`) 작성 완료·마스터 직접 실행 대기 |
 
 ## 항목별 상세
 
@@ -908,7 +908,36 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 - 실기기(국내)로 지도/경로 요청 테스트, 정상 동작 확인 완료.
 - Custom rules 잔여 쿼터 4개 — 추후 추가 하드닝 여지로 기억해둘 것.
 
-1순위·2순위 완료. **3(ufw)/4(요청 로깅)/5(fail2ban)순위는 여전히 미착수.**
+**진행 상황 (2026-07-30, 밤 — 4순위)**: 마스터가 3/4/5순위 동시 진행 지시,
+4번(요청 로깅)부터 완료. `native/src/main.rs`에 `log_requests` axum 미들웨어
+추가(커밋 `da5bf40`) — method·path(쿼리스트링 제외)·상태코드·지연시간·
+`CF-Connecting-IP` 헤더만 `println!`으로 기록, 좌표 등 개인위치정보가 담길 수
+있는 쿼리파라미터/바디는 로그하지 않는 최소 설계. `require_api_key`와 같은
+평범한 함수 스타일로 구현해 `tower_http`/`tracing` 등 신규 의존성 추가 없음.
+rust-coder 구현 → code-auditor PASS(ownership/프라이버시/스코프 전부 확인) →
+운영 navi 컨테이너 재빌드·재기동 → curl(로컬 `/health` 200, 무인증 `/poi/nearby`
+401, 공개 도메인 200)과 `docker logs`로 실제 로그 라인(쿼리스트링 미포함,
+공개 도메인 요청 시 실제 클라이언트 IP가 `CF-Connecting-IP`로 정상 캡처됨)
+확인 완료.
+
+3(ufw)/5(fail2ban)순위는 **Claude가 이 세션에서 sudo 비밀번호 없이 직접 실행
+불가**(`sudo -n` → "a password is required")로 확인돼, 대신 마스터가 콘솔
+앞에서 직접 실행할 단계별 순서서를 작성해 `loop/RUNBOOK_ufw_fail2ban.md`에
+남겼다 — 여전히 미착수, 다음 세션(또는 마스터 직접 실행) 대기.
+
+이 순서서 작성 과정에서 원 감사(`HANDOFF_0729`)에 없던 사실을 추가로 확인함:
+valhalla(8002)·tiles(8080)·style-ai(8014)는 전부 docker bridge 게시 포트라
+**`ufw enable`만으로는 보호되지 않는다** — Docker가 `DOCKER-USER`/`FORWARD`
+체인을 `ufw`의 `INPUT` 체인보다 먼저 가로채기 때문에, 이 셋은 별도로
+`/etc/ufw/after.rules`에 `DOCKER-USER` 규칙을 추가해야 실제로 막힌다(navi와
+tuning-dashboard는 `network_mode: host`라 일반 ufw 규칙이 정상 적용됨). 또한
+Cloudflare Tunnel(`n8n_cloudflared`)이 이 리포의 `docker_default`(172.19.0.0/16)가
+아니라 별도 네트워크 `n8n_network`(172.18.0.0/16)에 붙어 있음을 확인 — 정확한
+tunnel origin 주소는 Cloudflare 대시보드(마스터 전용 접근)에서만 확인 가능해
+Claude가 100% 검증하지 못했다. 상세·정확한 실행 커맨드는 `RUNBOOK_ufw_fail2ban.md`
+참고, 실행 전 그 문서의 0장(왜 위험한지)을 반드시 먼저 읽을 것.
+
+1순위·2순위·4순위 완료. **3(ufw)/5(fail2ban)순위는 마스터 직접 실행 대기.**
 
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
