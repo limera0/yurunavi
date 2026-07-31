@@ -161,28 +161,6 @@ class _LogoWidget extends StatelessWidget {
             ),
           ),
         ),
-
-        const SizedBox(height: 28),
-
-        // ── 태그라인 ─────────────────────────────────────────
-        Text(
-          '유루나비',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textSecondary,
-            letterSpacing: 4,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '이륜차를 위한 감성 내비게이션',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
-            color: AppColors.textHint,
-          ),
-        ),
       ],
     );
   }

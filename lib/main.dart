@@ -52,10 +52,15 @@ class YuruNaviApp extends ConsumerWidget {
         systemNavigationBarContrastEnforced: false,
       ));
     } else {
-      // Splash screen only — excluded from the unified color, kept as-is.
+      // Splash screen only — status bar stays transparent, but nav bar
+      // still needs to match the splash background (loop/layout_fixes/
+      // PROGRESS.md 라운드1) instead of the OS default black.
       SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: AppColors.background,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
       ));
     }
 

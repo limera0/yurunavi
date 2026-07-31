@@ -89,9 +89,19 @@
 - `main()`의 최초 `SystemChrome.setSystemUIOverlayStyle`(L27-32, 첫 프레임)에도
   라이트 테마 기준값을 선반영할지는 체감 확인 후 필요시 추가.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: 로고+텍스트 시안 제작 → 마스터 확인/승인 → flutter-coder 위임(3번 나비바
-수정 포함) → code-auditor PASS → 체크포인트 커밋.
+### 상태: **구현 완료 (2026-07-31)** — 범위 축소 확정
+마스터가 구현 시점에 범위를 축소: **1번(로고 재도안)은 스킵, 기존 이미지 그대로
+사용** — 새 그래픽 에셋 제작은 별도 세션에서 마스터가 준비. **2번(텍스트
+이미지화)도 이미지 제작 대신 텍스트 자체를 삭제**로 변경(`splash_screen.dart`
+`_LogoWidget`의 "유루나비"+태그라인 `Text` 2개 제거, 로고만 남김). **3번(내비바
+색상)은 계획대로 구현** — `main.dart`의 스플래시 전용
+`SystemChrome.setSystemUIOverlayStyle` else 분기(라운드2에서 pastSplash 여부로
+분기된 그 자리)에 `systemNavigationBarColor: AppColors.background`,
+`systemNavigationBarIconBrightness: Brightness.dark`,
+`systemNavigationBarContrastEnforced: false` 추가. `flutter analyze`/
+`flutter build apk --debug` 통과. 트리비얼 편집이라 flutter-coder 위임 없이 직접
+수정. 로고 재도안(원 1번)은 이 트랙에서 완전히 빠진 게 아니라 마스터가 새 에셋을
+준비하면 재개하는 것으로 보류.
 
 ---
 
