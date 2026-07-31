@@ -318,7 +318,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
-  String? _lastForegroundText; // FGS 알림에 마지막으로 보낸 텍스트 — 중복 채널 호출 방지
   // 구조물(다리/터널) zone 비동기 페치 stale-response 가드 — _applyRouteGuidance
   // 호출마다 증가시켜, 이전 세대의 fetchStructureZones 응답이 늦게 도착해도
   // 최신 경로에 잘못 반영되지 않게 한다.
@@ -401,8 +400,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _pipHintChannel.setMethodCallHandler((call) async {
         if (call.method == 'onUserLeaveHint') await _maybeEnterPip();
       });
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) setState(() => _pipReady = true);
+      Future.delayed(const Duration(seconds: 2), () async {
+        if (!mounted) return;
+        setState(() => _pipReady = true);
+        // Auto-enter PiP (Android 12/API 31+): OS가 액티비티를 어떤 이유로든(홈/
+        // 최근앱전환/전화수신 등) 백그라운드로 보낼 때 자동으로 PIP 진입시켜준다.
+        // onUserLeaveHint 수동 트리거(_maybeEnterPip)가 놓치는 조건 3(전화 수신 등
+        // onUserLeaveHint가 발화하지 않는 인터럽션)까지 구조적으로 커버한다.
+        // 항상 켜둔 채 유지한다(_isManualMode/_showCourseSheet에 따라 토글하지
+        // 않음) — 토글 지점이 5곳 이상이라 복잡도가 크고, "더 자주 PIP가 뜨는 쪽이
+        // 안전한 방향"이라는 판단(라운드9 계획서 참고). isAutoPipAvailable이
+        // false인 기기(API 26~30)는 기존 onUserLeaveHint 수동 경로가 폴백으로
+        // 그대로 남는다.
+        final pip = _pip;
+        if (pip == null) return;
+        if (!await AndroidPIP.isPipAvailable) return;
+        if (!await AndroidPIP.isAutoPipAvailable) return;
+        if (!mounted) return;
+        await pip.setAutoPipMode(autoEnter: true);
       });
     }
     // TTS 초기화 + 첫 안내
@@ -545,18 +560,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
           _cardRemainingM = prog.distToNextTurnM;
           _stepIdx = prog.activeStepIdx.clamp(0, _steps.length - 1);
         });
-        // 온스크린 카드(build()의 `upcoming`, 약 1539번째 줄)와 동일하게 "다음" 턴 라벨을
-        // 써야 _cardRemainingM(다음 턴까지 거리)과 짝이 맞는다 — 현재 스텝 라벨을 쓰면
-        // 라벨과 거리가 서로 다른 턴을 가리키게 된다.
-        final upcomingLabel = _stepIdx + 1 < _steps.length
-            ? _steps[_stepIdx + 1].label
-            : _steps[_stepIdx].label;
-        final fgText =
-            '$upcomingLabel · ${_TurnStep._formatDist(_cardRemainingM / 1000.0)}';
-        if (fgText != _lastForegroundText) {
-          _lastForegroundText = fgText;
-          unawaited(NavForegroundService.update(fgText));
-        }
         _updateRouteSplit(prog.snapIdx);
         _handleVoice(prog);
         if (prog.arrived && !_arrived && _passedWaypointCount >= widget.waypoints.length) {

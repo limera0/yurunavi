@@ -36,6 +36,20 @@ class NavForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Called when the user swipes the app away from the recent-apps list. This is the most
+     * common way riders "close" the app, and Flutter's widget `dispose()` (which normally
+     * sends ACTION_STOP) is not guaranteed to run in that path — leaving the foreground
+     * service (and its status-bar notification) alive indefinitely. Mirror the ACTION_STOP
+     * cleanup here so the notification is always removed when the task is removed, regardless
+     * of whether Dart got a chance to call stop() first.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {

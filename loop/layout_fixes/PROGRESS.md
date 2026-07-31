@@ -1400,10 +1400,20 @@ status bar에 계속 남아있음. 요구사항:
 - 네이티브(Kotlin) 변경이 포함되는 라운드 — `flutter-coder`가 `android/` 네이티브까지
   같이 처리할지, 별도로 진행할지는 구현 착수 시 확인.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 코더 위임(Dart +
-네이티브 Kotlin 변경 포함) → code-auditor PASS → 체크포인트 커밋. 실기기 PIP 3조건 +
-알림 잔류 재현 검증 필수.
+### 상태: **구현 완료 (2026-07-31)**
+flutter-coder → code-auditor PASS(1회, Kotlin 컴파일까지 확인) → 체크포인트 커밋.
+`nav_screen.dart`: `_pipReady` 세팅 직후 Android + `isPipAvailable` + `isAutoPipAvailable`
+모두 true면 `_pip!.setAutoPipMode(autoEnter: true)` 호출(auto-enter PiP, API31+ 커버) —
+기존 `onUserLeaveHint`→`_maybeEnterPip()` 수동 경로(API26-30 폴백)는 그대로 유지. **의도적
+단순화**: `_isManualMode`/`_showCourseSheet` 변화에 따른 auto-enter 토글은 구현 안 함(항상
+켜둠, 호출지점 5곳 복잡도 대비 실효성 낮다고 판단) — 실기기 검증 시 코스시트/수동모드
+중 백그라운드 전환됐을 때 PIP 진입이 어색하지 않은지 함께 확인 필요. `_progressSub`의
+매 GPS 틱 `NavForegroundService.update(fgText)` 호출 제거해 알림 문구 고정화(`'경로 안내
+중'` 그대로 유지, `update()`/`ACTION_UPDATE` 자체는 죽은 코드로 유지). `NavForegroundService.kt`에
+`onTaskRemoved()` 추가(`stopForeground(STOP_FOREGROUND_REMOVE)`+`stopSelf()`) — 최근앱
+스와이프 종료 시 알림 잔류 버그 수정.
+**실기기 검증 미완료** — PIP 3조건(홈버튼/최근앱전환/전화수신 등)과 "스와이프 종료 후
+알림 사라짐"을 실제 기기에서 확인 전까지는 문서 조사 기반 가설임을 감안할 것.
 
 ---
 
