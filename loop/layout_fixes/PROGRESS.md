@@ -464,9 +464,13 @@ POI 선택 시 아래에서 위로 올라오는 카드(POI 이름 + 출발/경�
 - 경유지 여러 곳 순차 등록 UX는 이번 라운드 범위 밖 — 6번 라운드
   (`6_add_waypoint_layout.png`)에서 별도 처리.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(즐겨찾기 별 파라미터 확인 포함) → code-auditor PASS → 체크포인트 커밋.
+### 상태: **구현 완료 (2026-07-31, 배치2/라운드4→5→6 세션)**
+flutter-coder → code-auditor PASS → 커밋 `b13923f`(`feat(map): POI 선택 카드
+재디자인`). 안내문구 삭제, 이름 폰트 확대(20sp w700)+`_FavoriteStarButton`
+추가(`_AddToRouteSheet`에 `lat`/`lng` 필드 신설, `_showAddToRouteSheet`가
+`location`에서 전달), 출발/경유지/도착 버튼 `AppColors.primary` 통일(경유지
+비활성 상태는 회색 유지) + `softWrap:false`로 줄바꿈 버그 수정 + 탭 시
+`overlayColor` 브랜드컬러 피드백 추가. `hasDest` 비활성화 로직 불변.
 
 ---
 
@@ -653,9 +657,19 @@ Ride"로 교체, 폰트는 마스터가 쓴 폰트를 따름.
 - 경유지 다건(2곳 이상) 표시 문구("경유지 N곳" 등)와 그 처리 UX는 6번 라운드
   (`6_add_waypoint_layout.png`)와 연계해 최종 확정.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(지도 탭 분기·죽은 코드 정리 포함) → code-auditor PASS → 체크포인트 커밋.
+### 상태: **구현 완료 (2026-07-31, 배치2/라운드4→5→6 세션)**
+flutter-coder → code-auditor PASS → 커밋 `4ae6ccf`(`feat(map): 코스 선택
+카드 재디자인 + 지도탭 배관 통합`). `destinationName` 미참조 버그 수정
+(`interaction.destinationName ?? interaction.stops.last.name`), 상단 요약행
+재설계(점 제거·`>>` 구분자·`waypointNames` 신설 파라미터로 경유지 이름
+표시), `_onMapTap`이 `_showCourseSheet==true`일 때 `_showAddToRouteSheet`로
+분기(공용 헬퍼 `_applyRouteAddAction`으로 `_handleLocationTap`과 로직
+공유) + `_showTapConfirmSheet`의 `hasRoute`/`_TapAction.waypoint` 죽은
+코드 정리, 재미점수 배지 카드에서 제거(계산 로직은 유지), 카드 표면
+tint/보더/그림자 강화 + 폰트 확대, 슬라이드 버튼 완전 pill+흰배경+그림자
++ 흰 썸+쉐브론 아이콘 + `slide_to_ride_label.png` 이미지로 텍스트 교체
+(드래그 로직 무변경, 감사에서 바이트 단위 확인), 좌측 일출/일몰 바
+`_showCourseSheet` 반응형 위치(`bottom: 380/160`) 적용(라운드3 이월 항목).
 
 ---
 
@@ -815,10 +829,19 @@ Ride"로 교체, 폰트는 마스터가 쓴 폰트를 따름.
   라운드의 지도 기반 `+` 흐름이 라운드 5의 배관을 전제로 하므로, 배치 구현 시
   라운드 5를 먼저 처리하거나 동일 세션에서 함께 처리하는 편이 매끄러움.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(라운드 5와 순서 조율 + `_MapCtrlBtn` 공용 추출 포함) → code-auditor PASS →
-체크포인트 커밋.
+### 상태: **구현 완료 (2026-07-31, 배치2/라운드4→5→6 세션)**
+flutter-coder → code-auditor PASS → 커밋 `287f2bb`(`feat(map): 경유지 관리
+카드 재디자인 + 지도기반 추가`). `_MapCtrlBtn`을 `lib/core/widgets/map_ctrl_btn.dart`의
+공용 `MapCtrlBtn`으로 추출(라운드3이 미룬 항목, 메인 지도 화면 6개 호출부
+전부 갱신), 검색식 "+ 경유지 추가" 버튼+`AddressSearchSheet` import 제거,
+리스트 행 색깔 점 제거+출발/도착 행만 `w700` bold+삭제 아이콘 원형 배지화
+(가시성/활성화 로직은 완전 동일), 출발지/도착지 행에 `+` 버튼 신규 추가
+— `map_providers.dart`에 `WaypointInsertPosition` enum·`pendingWaypointInsert`
+상태(기존 `destinationName`/`clearDestinationName` 패턴 그대로 미러링)·
+`addWaypoint(atStart:)` 파라미터 추가, `_applyRouteAddAction`이 플래그를
+읽어 삽입 위치 결정 + 처리 후 플래그 클리어 + (플래그가 있었을 때만) 시트
+자동 재오픈. 재정렬(`reorderStop`)·삭제(`removeWaypoint`) 로직은 무변경
+확인(감사에서 diff 0줄 확인).
 
 ---
 
