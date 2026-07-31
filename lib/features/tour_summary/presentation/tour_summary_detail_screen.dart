@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show cos;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -58,6 +59,12 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
   // 통계 헤더만 따로 캡처하기 위한 RepaintBoundary 앵커.
   final _statHeaderKey = GlobalKey();
   bool _sharing = false;
+  // 공유 캡처 중에는 지도를 화면 전체가 아니라 헤더 아래의 정해진
+  // 높이만큼만 보여준다 — 카드+전체 경로를 정사각형(또는 세로로 긴
+  // 비율)으로 합성하기 위함. 기본값은 _computeCaptureMapHeight가 항상
+  // _capturing을 true로 바꾸기 직전에 실제 값으로 덮어쓰므로 의미 없다.
+  bool _capturing = false;
+  double _captureMapHeight = 300;
 
   @override
   void initState() {
@@ -112,10 +119,34 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
     if (_sharing) return;
     setState(() => _sharing = true);
     try {
+      setState(() {
+        _capturing = true;
+        _captureMapHeight = _computeCaptureMapHeight(context);
+      });
+      // 리사이즈된 레이아웃이 실제로 반영될 때까지 한 프레임 기다린 뒤,
+      // 새 뷰포트 크기에 맞춰 트랙 bounds를 다시 fit한다.
+      await WidgetsBinding.instance.endOfFrame;
+      await _fitTrackBounds();
+      // 카메라 애니메이션이 스냅샷 찍기 전에 시각적으로 안정되도록 잠깐
+      // 대기한다.
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      // 메모 → 클립보드(공유 시트의 텍스트 필드에 채우던 기존 동작을
+      // 대체한다 — 이미지에는 메모가 찍히지 않으므로 텍스트 사본을
+      // 클립보드로 따로 전달한다).
+      final trimmedMemo = _currentMemo?.trim();
+      if (trimmedMemo != null && trimmedMemo.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: trimmedMemo));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('텍스트가 클립보드에 복사되었습니다.')),
+          );
+        }
+      }
+
       final ok = await shareTourImage(
         statHeaderKey: _statHeaderKey,
         mapController: _mlCtrl,
-        memo: _currentMemo,
       );
       if (!mounted) return;
       if (!ok) {
@@ -124,8 +155,52 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
         );
       }
     } finally {
+      if (mounted) {
+        setState(() => _capturing = false);
+        await WidgetsBinding.instance.endOfFrame;
+        await _fitTrackBounds(); // 화면 전체 fit으로 복원
+      }
       if (mounted) setState(() => _sharing = false);
     }
+  }
+
+  /// 공유 캡처 모드에 들어가기 직전, 지도 뷰포트에 쓸 높이를 계산한다.
+  ///
+  /// 기본은 헤더 아래 남은 폭만큼의 정사각형(`screenWidth - headerHeight`)
+  /// 이지만, 경로가 남북으로 길게 뻗어 있어 정사각형 안에 욱여넣으면
+  /// 경로가 안 보일 정도로 작아지는 경우에는 세로로 긴 이미지로 전환한다.
+  double _computeCaptureMapHeight(BuildContext context) {
+    final headerBox = _statHeaderKey.currentContext?.findRenderObject() as RenderBox?;
+    final headerHeight = headerBox?.size.height ?? 150.0;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final squareMapHeight =
+        (screenWidth - headerHeight).clamp(100.0, double.infinity).toDouble();
+
+    if (_track.length < 2) return squareMapHeight;
+
+    final minLat = _track.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = _track.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLng = _track.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLng = _track.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+
+    // 경도 1도당 거리는 위도에 따라 달라지므로(cos(위도) 보정), 실제
+    // 지구상 거리(m) 기준으로 종횡비를 구해야 지도 모양과 대략 일치한다.
+    // pi는 여기서 별도로 import하지 않는다 — package:latlong2/latlong.dart가
+    // 이미 동일한 값의 top-level `pi` 상수를 제공해서 dart:math의 `pi`를
+    // show하면 이름이 겹쳐 analyzer가 unused_shown_name 경고를 낸다.
+    final midLatRad = (minLat + maxLat) / 2 * (pi / 180);
+    final widthM = (maxLng - minLng) * 111320 * cos(midLatRad);
+    final heightM = (maxLat - minLat) * 110540;
+    final routeAspect = widthM.abs() < 1 ? 1.0 : (heightM / widthM).abs();
+
+    final squareViewportAspect = squareMapHeight / screenWidth;
+    if (routeAspect > squareViewportAspect * 1.5) {
+      final verticalHeight = (screenWidth * routeAspect)
+          .clamp(squareMapHeight, screenWidth * 3.0)
+          .toDouble();
+      return verticalHeight;
+    }
+    return squareMapHeight;
   }
 
   Future<void> _loadStyle() async {
@@ -212,8 +287,15 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
       iconSize: _kPinIconSize,
     ));
 
-    // 0/1개 좌표는 bounds가 퇴화하므로 카메라 fit을 건너뛴다.
-    if (_track.length < 2) return;
+    await _fitTrackBounds();
+  }
+
+  /// `_track`의 bounds에 맞춰 카메라를 fit한다. `_drawn`(소스/레이어/심볼
+  /// 최초 1회 세팅)과 달리 이 메서드는 여러 번 호출해도 안전하다 —
+  /// 공유 캡처 진입/복귀 시 뷰포트 크기가 바뀔 때마다 다시 불러 재fit한다.
+  Future<void> _fitTrackBounds() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null || _track.length < 2) return;
     final minLat = _track.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
     final maxLat = _track.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
     final minLng = _track.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
@@ -264,6 +346,24 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
         children: [
           if (_styleJson == null)
             const Center(child: CircularProgressIndicator())
+          else if (_capturing)
+            // 공유 캡처 중: 헤더 아래 고정 높이만 지도를 그려 카드+지도를
+            // 정사각형(또는 세로로 긴 비율)으로 합성할 수 있게 한다.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: _captureMapHeight,
+              child: ml.MapLibreMap(
+                styleString: _styleJson!,
+                initialCameraPosition: ml.CameraPosition(
+                  target: ml.LatLng(tourLog.startLat, tourLog.startLng),
+                  zoom: 12,
+                ),
+                onMapCreated: (c) => _mlCtrl = c,
+                onStyleLoadedCallback: _onStyleLoaded,
+              ),
+            )
           else
             Positioned.fill(
               child: ml.MapLibreMap(

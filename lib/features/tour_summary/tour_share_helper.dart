@@ -10,7 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 /// 투어 상세 화면의 통계 헤더 + 지도를 세로로 합성한 PNG 한 장으로 만들어
-/// OS 공유 시트(카카오스토리/인스타/파일저장 등)로 전달한다.
+/// OS 공유 시트(카카오스토리/인스타/파일저장 등)로 전달한다. 공유는 항상
+/// 이미지만 전달한다(텍스트 필드 없음) — 메모가 있으면 호출부가 그 텍스트를
+/// 클립보드로 따로 복사해 알려준다.
 ///
 /// 지도는 MapLibre 네이티브 플랫폼 뷰라 일반적인 `RepaintBoundary.toImage()`
 /// 로는 캡처되지 않을 위험이 있다(별도 텍스처/서피스로 합성되어 빈 화면으로
@@ -28,7 +30,6 @@ import 'package:share_plus/share_plus.dart';
 Future<bool> shareTourImage({
   required GlobalKey statHeaderKey,
   required ml.MapLibreMapController? mapController,
-  required String? memo,
 }) async {
   if (mapController == null) return false;
 
@@ -81,14 +82,11 @@ Future<bool> shareTourImage({
     tempFile = File(path);
     await tempFile.writeAsBytes(pngData.buffer.asUint8List(), flush: true);
 
-    // ShareParams는 text가 빈 문자열이면 ArgumentError를 던지므로(공백만
-    // 있는 메모 포함), 비어있으면 아예 text를 생략해 이미지만 공유한다.
-    final trimmedMemo = memo?.trim();
-    final shareText =
-        (trimmedMemo != null && trimmedMemo.isNotEmpty) ? trimmedMemo : null;
-
+    // 메모가 있어도 공유 시트의 텍스트 필드는 항상 비워둔다 — 메모 텍스트는
+    // 호출부(tour_summary_detail_screen._shareTour)에서 클립보드로 따로
+    // 복사하고, 여기서는 이미지만 공유한다.
     await SharePlus.instance.share(
-      ShareParams(files: [XFile(path)], text: shareText),
+      ShareParams(files: [XFile(path)]),
     );
     return true;
   } catch (_) {
@@ -126,32 +124,46 @@ double centerHorizontalOffset(int containerWidth, int itemWidth) =>
     (containerWidth - itemWidth) / 2.0;
 
 /// 통계 헤더 이미지를 위에, 지도 스냅샷을 아래에 놓고 세로로 합성한다.
-/// 두 이미지의 폭이 다를 수 있으므로(카드형 헤더의 여백 vs 지도 스냅샷의
-/// 실제 크기), 어느 쪽도 늘리지 않고 좁은 쪽을 가로로 가운데 정렬한다.
+///
+/// 두 이미지의 폭이 다를 수 있다 — 헤더는 항상 고정 배율(`pixelRatio: 3.0`)
+/// 로 캡처되는 반면, 지도 네이티브 스냅샷은 기기 자체의 화면 밀도를 따라가서
+/// 실효 배율이 서로 어긋날 수 있다. 폭만 다르고 늘리지 않은 채 가운데
+/// 정렬만 하면 두 이미지의 실제 스케일이 달라 보이므로, 합성 전에 폭이 더
+/// 좁은 쪽을 넓은 쪽 폭에 맞춰 (자신의 종횡비를 유지하며) 확대한다. 헤더
+/// 쪽을 확대 대상으로 우선하도록 값을 고르는 게 아니라 항상 "더 좁은 쪽"을
+/// 키우므로, 어느 쪽이 좁든 화질 손실 없이 업스케일된다.
 Future<ui.Image> _compositeVertically(ui.Image top, ui.Image bottom) async {
-  final width = top.width > bottom.width ? top.width : bottom.width;
-  final height = top.height + bottom.height;
+  final targetWidth = top.width > bottom.width ? top.width : bottom.width;
+
+  final topScale = targetWidth / top.width;
+  final topHeight = (top.height * topScale).round();
+  final bottomScale = targetWidth / bottom.width;
+  final bottomHeight = (bottom.height * bottomScale).round();
+
+  final height = topHeight + bottomHeight;
 
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(
     recorder,
-    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Rect.fromLTWH(0, 0, targetWidth.toDouble(), height.toDouble()),
   );
   canvas.drawRect(
-    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    Rect.fromLTWH(0, 0, targetWidth.toDouble(), height.toDouble()),
     Paint()..color = const Color(0xFFFFFFFF),
   );
-  canvas.drawImage(
+  canvas.drawImageRect(
     top,
-    Offset(centerHorizontalOffset(width, top.width), 0),
+    Rect.fromLTWH(0, 0, top.width.toDouble(), top.height.toDouble()),
+    Rect.fromLTWH(0, 0, targetWidth.toDouble(), topHeight.toDouble()),
     Paint(),
   );
-  canvas.drawImage(
+  canvas.drawImageRect(
     bottom,
-    Offset(centerHorizontalOffset(width, bottom.width), top.height.toDouble()),
+    Rect.fromLTWH(0, 0, bottom.width.toDouble(), bottom.height.toDouble()),
+    Rect.fromLTWH(0, topHeight.toDouble(), targetWidth.toDouble(), bottomHeight.toDouble()),
     Paint(),
   );
 
   final picture = recorder.endRecording();
-  return picture.toImage(width, height);
+  return picture.toImage(targetWidth, height);
 }
