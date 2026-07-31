@@ -592,7 +592,7 @@ Activities로 아키텍처가 완전히 다른 별도 과제, 이번 스코프�
 - iOS는 스코프 밖(`GoogleService-Info.plist`/URL scheme 미설정, 이 서버는 헤드리스 Linux라
   Xcode 빌드 불가) — 13-5와 동일한 패턴으로 별도 과제.
 
-### 14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (ListTile 건 A~D 전부 완료, RenderFlex overflow 신규 건 미해결)
+### 14. Crashlytics fatal 오분류 전수 감사 — DONE (2026-07-31, ListTile A~D + RenderFlex overflow 전부 완료)
 
 - **계기 (2026-07-13)**: Firebase Crashlytics가 1.0.1(2)에서 157건의 "치명적(Fatal)" 이벤트를
   경고 메일로 보내왔으나, 실제로는 앱이 죽은 게 아니라 `lib/core/crash_reporting.dart:18`의
@@ -644,9 +644,20 @@ pixels on the right`(`DebugOverflowIndicatorMixin._reportOverflow` 경유). 2026
 전용 `assert()` 블록으로 감싸는 코드이므로(release 빌드에서 스트립), 7/26·7/29 발생분이
 디버그 APK로 진행한 필드테스트 중이었다면 release 빌드에서는 재현 안 될 가능성이 있음 —
 그러나 어느 화면의 어떤 Row가 실제로 186px 넘치는지는 실재하는 레이아웃 버그이므로
-release 여부와 무관하게 찾아서 고치는 게 맞음. **다음 세션 할 일**: 최근 추가된
-바텀시트/카드류(주유소 시트, 웨이포인트 관리 시트, 코스 시트, 스킨 선택 UI 등) 중 고정폭
-Row를 grep해 원인 특정 후 수정.
+release 여부와 무관하게 찾아서 고치는 게 맞음.
+
+**✅ 수정 완료 (2026-07-31, 커밋 `d8d00b0`)** — `layout_fixes` 트랙(17라운드) 종료로
+선행조건(레이아웃 작업 유동성) 충족돼 `HANDOFF_0730_renderflex_overflow_fix.md` 그대로
+실행. 원인은 `nav_screen.dart` `_GasStationSheetState.build()` 제목 Row(주유소 시트) —
+`Text('근처 최저가 주유소', ...)`가 `Expanded` 없이 `Spacer()`+연료토글 칩 2개
+(`_FuelChip`, '고급휘발유' 5글자로 폭 넓음)와 나열돼 좁은 화면에서 186px 초과. 제목을
+`Expanded`+`maxLines:1`+`overflow: TextOverflow.ellipsis`로 감싸고, 경쟁하던
+`Spacer()`를 제거(같은 파일의 이미 올바른 `_GasStationSelectionCard` 패턴과 통일 —
+그쪽도 `Spacer` 없이 `Expanded`만 사용). 동일 패턴 전수 감사(`nav_screen.dart`,
+`waypoint_management_sheet.dart`, `course_sheet.dart`, `address_search_sheet.dart`,
+`main_map_screen.dart`, 스킨 선택 UI) 결과 다른 곳은 전부 안전 확인 — 이 Row 하나가
+유일한 실제 버그였음. `flutter analyze` 통과, code-auditor PASS. **이제 10번(release
+build 검증) 착수 전 걸림돌 없음.**
 
 ### 15. POI 데이터소스 자체 호스팅 전환 — DONE (2026-07-15, 발견 당일 해결)
 
