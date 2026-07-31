@@ -2700,7 +2700,19 @@ Apple Human Interface Guidelines는 앱에 "종료/Quit" 메뉴나 확인창을 
 - 광고 플레이스홀더의 정확한 높이·문구는 실제 광고 SDK 연동 시점(별도 작업)에 맞춰
   조정될 수 있음 — 이번 라운드는 자리 확보 수준.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(iOS 분기 포함, X버튼/바깥탭 취소 동작 실기기 검증 포함) → code-auditor PASS →
-체크포인트 커밋. 광고 SDK 실연동은 이번 라운드 범위 밖 — 별도 작업으로 추후 논의.
+### 상태: **구현 완료 (2026-07-31, 커밋 `9254a79`)**
+
+`_lastBackPress` 타이머+토스트 로직 삭제, `_showExitConfirmSheet`/`_ExitConfirmSheet`
+신규 구현. 안드로이드만 카드 노출(`defaultTargetPlatform` 분기로 iOS 완전 배제).
+
+구현 중 code-auditor가 1차 감사에서 **치명적 버그**를 잡아냈다: `isDismissible: true`의
+기본 바깥탭 처리는 `Navigator.maybePop()`을 타는데, 이게 카드의 `PopScope(canPop:false)`
+게이트를 그대로 통과해서 **바깥 탭 시 취소가 아니라 앱이 완전 종료되는 버그**였다
+(X버튼의 명시적 `Navigator.pop()`은 이 게이트를 우회해 원래도 안전했음 — 바깥탭만
+문제). 수정: `isDismissible: false` + `isScrollControlled: true`로 프레임워크 기본
+동작을 끄고, `Stack` 위에 전체화면 `GestureDetector.onTap → Navigator.pop()`(X버튼과
+동일한 안전 경로)을 직접 얹어 바깥탭-취소를 재구현. 재감사 PASS. 4개 종료 경로
+(X버튼/바깥탭/드래그닫기=취소, 시스템 뒤로가기=완전종료) 전부 소스 레벨로 재검증됨.
+
+광고 영역은 계획대로 SDK 미연동, 레이아웃 자리(90dp 플레이스홀더)만 확보.
+실기기에서의 최종 촉감 확인은 미검증(헤드리스 서버 한계) — 다음 실기기 세션에서 확인 권장.
