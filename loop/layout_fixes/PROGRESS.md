@@ -1517,17 +1517,19 @@ flutter-coder → code-auditor PASS(1회, Kotlin 컴파일까지 확인) → 체
 - 삭제 다이얼로그 배경/버튼 색의 정확한 톤(예: `surface` vs `background`, 삭제 버튼을
   `error` 그대로 vs 약간 다듬을지)은 실기기 시안 확인 후 최종 결정.
 
-### 상태: **1번(AppBar 전역 모스그린) 구현 완료 (2026-07-31)** / 2번(삭제 확인
-다이얼로그 브랜드화)은 **미구현 — 범위에서 의도적으로 제외됨**
+### 상태: **1번·2번 모두 구현 완료 (2026-07-31)**
 1번은 flutter-coder → code-auditor PASS → 커밋 `6a9ce00`
 (`feat(theme): AppBar 전역 배경색을 모스그린 브랜드 컬러로 교체`)로 완료.
 `AppColors.brandMoss(#8CA283)` 신규 추가, `AppTheme.light.appBarTheme.backgroundColor`만
 교체(`AppColors.secondary` 값 자체는 안 건드림). `settings_screen.dart` 등
 로컬 오버라이드가 있는 화면(13/14/15/16번)은 이 전역 변경이 아직 자동 적용 안 됨 —
 각 라운드가 로컬 오버라이드 제거를 맡을 때 반영됨(계획대로).
-`tour_summary_list_screen.dart`의 삭제 확인 다이얼로그 스타일링(2번 항목)은
-**이번엔 손대지 않았다** — 다른 화면들의 확인 다이얼로그(14/15번 등)와 함께
-묶어서 나중에 처리하는 편이 낫다고 판단, 아직 미구현 상태로 남아있음.
+2번(삭제 확인 다이얼로그 브랜드화)은 이번 세션(2026-07-31, 라운드10-2→11→12
+배치)에서 flutter-coder → code-auditor PASS → 커밋 `8a6b403`
+(`fix(history): 삭제 확인 다이얼로그 브랜드 스타일링 (라운드10-2)`)로 완료.
+`tour_summary_list_screen.dart`의 `_confirmDelete()` — 배경 `AppColors.background`,
+제목/본문 `AppTextStyles.titleSM`/`bodyMD`, 취소 버튼 `AppColors.brandMoss`,
+삭제 버튼은 경고색 `AppColors.error` 유지(로직/트리거 변경 없음).
 
 ---
 
@@ -1688,11 +1690,18 @@ flutter-coder → code-auditor PASS(1회, Kotlin 컴파일까지 확인) → 체
   승인 절차 필요, 확정 전까지 임시로 `pointer_yellow` 색만 초록으로 바꾼 버전을 가안으로
   가정.
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(카드 배색+`_StatItem` 파라미터, 경로선 스킨 참조 교체, 메모 상시 카드 신규 위젯,
-출발/도착 핀 심볼 전환) → code-auditor PASS → 체크포인트 커밋. 출발지 핀 이미지는
-디자인 시안 승인이 선행되어야 함(로고와 동일한 절차).
+### 상태: **구현 완료 (2026-07-31, 라운드10-2→11→12 세션, 커밋 `a6dbbec`)**
+flutter-coder → code-auditor PASS → 체크포인트 커밋으로 진행. 통계 카드 배경을
+`AppColors.brandMoss`로, 카드 내부 텍스트/아이콘을 흰색 계열로 교체(`_StatItem`에
+`labelColor`/`valueColor` 옵션 추가, 기본값은 기존 동작 유지). 경로선은
+`courseLineColor[2]` 하드코딩 대신 스킨의 `routeLine` 시맨틱 getter로 교체(유루캠
+스킨 기준 코랄). 메모는 편집 패널이 닫혀 있어도 저장된 값이 있으면 지도 위에
+상시 반투명 카드(`_buildMemoDisplay`, 스킨 `routeLine` 색 배경 alpha 0.9, 흰 텍스트,
+탭 핸들러 없음 — 편집은 기존 연필 아이콘으로만)로 표시. 출발/도착 지점은
+`addCircle` 단색 원 대신 `main_map_screen.dart`와 동일한 이미지 핀 방식
+(`addImage`+`addSymbol`)으로 전환 — 도착은 기존 `pointer_red.png` 재사용, 출발은
+사전 준비된 신규 에셋 `assets/images/pointer_start.png` 사용. 경유지 핀은 계획대로
+이번 라운드 범위에서 제외(`TourLog`에 경유지 데이터 자체가 없음).
 
 ---
 
@@ -1851,10 +1860,18 @@ flutter-coder → code-auditor PASS(1회, Kotlin 컴파일까지 확인) → 체
   헤더 `RepaintBoundary` 범위 밖·지도 네이티브 스냅샷 범위 밖이라 공유 이미지에 자동으로
   제외됨을 재확인해둘 것(별도 조치 불필요, 회귀 확인 차원).
 
-### 상태: 계획 확정, 구현 대기
-다음 단계: (다른 라운드들과 함께) 마스터가 배치 구현 시작을 지시하면 flutter-coder
-위임(캡처 모드 지도 리사이즈+재피팅 로직, 합성 스케일 보정, 클립보드/토스트 치환) →
-code-auditor PASS → 체크포인트 커밋.
+### 상태: **구현 완료 (2026-07-31, 라운드10-2→11→12 세션, 커밋 `2b8c393`)**
+flutter-coder → code-auditor PASS → 체크포인트 커밋으로 진행. 공유 시점에 지도
+뷰포트를 임시로 리사이즈(`_capturing`/`_captureMapHeight`)해 헤더 카드+전체 경로가
+대략 1:1로 합성되게 하고, 경로의 실거리(m) 기준 종횡비가 정사각형 뷰포트 대비
+과도하게 세로로 길면 세로형으로 자동 전환(임계값·배율은 실기기 튜닝이 필요할 수
+있는 근사치). 카메라 bounds fit을 `_fitTrackBounds()`로 분리해 캡처 진입/복귀 시
+재사용(`_drawn` 최초 1회 가드와 무관하게 여러 번 호출 가능하도록 별도 가드).
+`shareTourImage()`의 `memo` 파라미터·공유시트 텍스트 필드 전달을 제거하고, 메모가
+있으면 클립보드 복사 + "텍스트가 클립보드에 복사되었습니다" 토스트로 대체. 헤더
+(고정 `pixelRatio 3.0`)와 지도 네이티브 스냅샷 간 스케일 불일치는
+`_compositeVertically`에서 좁은 쪽을 넓은 쪽 폭에 맞춰 확대(자기 종횡비 유지)해
+보정 — 기존 헤더-only 폴백 안전장치는 그대로 유지.
 
 ---
 
