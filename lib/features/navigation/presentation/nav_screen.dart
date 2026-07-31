@@ -327,9 +327,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Color(0xFFF8F4F0),
+      statusBarColor: kSystemBarColor,
       statusBarIconBrightness: Brightness.dark,
-      systemNavigationBarColor: Color(0xFFF8F4F0),
+      systemNavigationBarColor: kSystemBarColor,
       systemNavigationBarIconBrightness: Brightness.dark,
       systemNavigationBarContrastEnforced: false,
     ));
@@ -431,8 +431,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (!_tourFinalizeStarted) {
       unawaited(_finalizeAndPersistTour());
     }
+    // 내비 화면 진입 시 설정한 상태바+내비바를 앱 전역 색으로 명시 복원한다
+    // (statusBarIconBrightness만 부분 복원하면 systemNavigationBarColor가
+    // F8F4F0/F5F1EC에 눌어붙은 채 남는 버그였다 — loop/layout_fixes/PROGRESS.md 라운드2).
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: kSystemBarColor,
       statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: kSystemBarColor,
+      systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
     ));
     _pipHintChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);

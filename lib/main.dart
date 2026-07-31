@@ -11,6 +11,7 @@ import 'core/logging/file_logger.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'firebase_options.dart';
+import 'providers/app_providers.dart';
 import 'services/tour_recovery_service.dart';
 
 void main() async {
@@ -37,11 +38,26 @@ class YuruNaviApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Status bar brightness — single light theme, always dark icons.
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-    ));
+    final pastSplash = ref.watch(pastSplashProvider);
+    if (pastSplash) {
+      // Post-splash: every screen (home/map, course sheet, route option
+      // sheet, ...) shares one unified status/navigation bar color —
+      // loop/layout_fixes/PROGRESS.md 라운드2. Re-applied on every rebuild
+      // so it survives any reason YuruNaviApp re-renders.
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: kSystemBarColor,
+        statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: kSystemBarColor,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      ));
+    } else {
+      // Splash screen only — excluded from the unified color, kept as-is.
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+      ));
+    }
 
     return MaterialApp(
       title: 'YuruNavi',

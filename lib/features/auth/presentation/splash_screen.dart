@@ -5,8 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/config/routing_config.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../providers/app_providers.dart';
 import '../../map/presentation/main_map_screen.dart';
-import '../../map/providers/map_providers.dart';
 
 /// YuruNavi Splash Screen
 /// - 로고 fade + scale 애니메이션
@@ -75,6 +75,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
   }
   void _goToMain() {
+    // 스플래시 → 메인 전환 시점: 여기부터 앱 전역 상태바/내비바 색상 통일이
+    // 적용되도록 신호를 켠다(loop/layout_fixes/PROGRESS.md 라운드2).
+    ref.read(pastSplashProvider.notifier).markPastSplash();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 400),

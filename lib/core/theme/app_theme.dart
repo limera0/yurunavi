@@ -3,6 +3,12 @@ import 'package:google_fonts/google_fonts.dart';
 
 // ── YuruNavi Design Token ─────────────────────────────────────────────────────
 
+/// Status bar / system navigation bar color used across every screen except
+/// the splash screen (loop/layout_fixes/PROGRESS.md 라운드2). Shared between
+/// `main.dart` (global overlay applied post-splash) and `nav_screen.dart`
+/// (navigation entry/exit overlay) so both stay in sync.
+const kSystemBarColor = Color(0xFFF5F1EC);
+
 class AppColors {
   AppColors._();
 
