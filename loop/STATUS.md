@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-30 03:34 · 브랜치 `verify/ride-0711` · HEAD `0decff2`
+생성: 2026-07-31 04:22 · 브랜치 `verify/ride-0711` · HEAD `0619872`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
 - 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 7건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 작업트리: **미커밋 28건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -20,10 +20,9 @@
 
 - **10. 실제 release build 검증**  —  `RELEASE_ROADMAP.md:259`
 - **11. 하드코딩 스타일 → 토큰 기반 전면 리팩터 — PARTIAL**  —  `RELEASE_ROADMAP.md:265`
-- **14. Crashlytics fatal 오분류 전수 감사 — PARTIAL (ListTile 건 A~D 전부 완료, RenderFlex overflow 신규 건 미해결)**  —  `RELEASE_ROADMAP.md:595`
-- **18번 — 후면단속카메라 안내 — PARTIAL (구현 완료, 실기기 시각 검증 남음)**  —  `RELEASE_ROADMAP.md:772`
-- **19번 후속 (2026-07-30, 같은 날 저녁 세션) — 고급휘발유 99999 버그 수정 + 지도 검색창 진입점 추가**  —  `RELEASE_ROADMAP.md:839`
-- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:886`
+- **18번 — 후면단속카메라 안내 — PARTIAL (구현 완료, 실기기 시각 검증 남음)**  —  `RELEASE_ROADMAP.md:783`
+- **19번 후속 (2026-07-30, 같은 날 저녁 세션) — 고급휘발유 99999 버그 수정 + 지도 검색창 진입점 추가**  —  `RELEASE_ROADMAP.md:850`
+- **20. 위치정보 확인자료 로깅 구현**  —  `RELEASE_ROADMAP.md:897`
 
 ## 3. 최근 실행 결과
 
@@ -36,23 +35,23 @@
 
 ## 4. 최근 작업 지시서
 
+- [HANDOFF_0731_layout_batch2_map_course_flow.md](HANDOFF_0731_layout_batch2_map_course_flow.md)
 - [HANDOFF_0730_renderflex_overflow_fix.md](HANDOFF_0730_renderflex_overflow_fix.md)
 - [HANDOFF_0730_gasstation_search_chip_and_premium_bug.md](HANDOFF_0730_gasstation_search_chip_and_premium_bug.md)
-- [HANDOFF_0730_session_end.md](HANDOFF_0730_session_end.md)
 
 ## 5. 최근 커밋
 
 ```
-0decff2 feat(map): 검색창 주유소 단독선택 시 오피넷 가격순 목록으로 전환
-5353305 fix(navi): 오피넷 99999 센티널 필터 + B034 미취급 주유소 목록 제외
-201dcd8 docs: 19번 후속(검색창 오피넷 전환+고급휘발유 버그) · 14번(오버플로) 핸드오프 작성
-63181ca docs(roadmap): 마스터 검증 반영 — 18/19/21번 실제 상태 갱신, 14번 신규 크래시 패턴 기록
-b87e28b docs: 21번(운영 서버 보안 강화) 1~5순위 전부 완료 — ufw+fail2ban 마무리
-8a339b0 docs: 세션 보고 — 21번 4순위(요청 로깅) 완료, 3/5순위 실행 순서서로 대체
-b5a21d7 chore(status): STATUS.md 재생성 (21번 4순위 완료 반영)
-1d643ec docs(roadmap): 21번 4순위(요청 로깅) 완료 기록 + 3/5순위 실행 runbook 추가
-da5bf40 feat(navi): 요청 접근 로그 미들웨어 추가 (21번 4순위)
-02ac8a4 chore(status): STATUS.md 재생성 (Cloudflare 1순위 완료 반영)
+0619872 docs(roadmap): 14번(RenderFlex overflow) 완료 반영 — 전수감사 DONE 전환
+d8d00b0 fix(nav): 주유소 시트 제목 Row RenderFlex overflow 수정 (14번 신규 건)
+0ab4807 fix(splash): 스플래시 태그라인 삭제 + 하단 내비게이션 바 색상 통일 (라운드1)
+b6695a6 docs: 라운드17(앱 종료 확인 카드) 구현완료 반영
+9254a79 feat(map): 앱 종료 시 확인 카드 도입 (라운드17)
+e85d637 docs: 라운드10-2→11→12(히스토리 화면) 구현완료 반영
+2b8c393 feat(history): 공유 이미지 카드+지도 정사각/세로형 캡처 + 메모 클립보드 전환 (라운드12)
+a6dbbec feat(history): 상세 화면 브랜드 리디자인 — 통계카드 모스그린, 경로선 코랄, 메모 상시카드, 출발/도착 핀 (라운드11)
+8a6b403 fix(history): 삭제 확인 다이얼로그 브랜드 스타일링 (라운드10-2)
+1476236 fix(nav): PIP auto-enter 도입 + 알림 잔류/문구 갱신 버그 수정 (라운드9)
 ```
 
 ## 6. 더 깊이 볼 때
