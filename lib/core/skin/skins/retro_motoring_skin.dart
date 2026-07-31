@@ -13,7 +13,7 @@ class RetroMotoringSkin implements AppSkin {
   String get id => 'retro_motoring';
 
   @override
-  String get displayName => '레트로 모터링';
+  String get displayName => '박하빛';
 
   @override
   bool get isPremium => false;

@@ -13,7 +13,7 @@ class CubBuddySkin implements AppSkin {
   String get id => 'cub_buddy';
 
   @override
-  String get displayName => '동네 라이딩 메이트';
+  String get displayName => '황토빛';
 
   @override
   bool get isPremium => false;

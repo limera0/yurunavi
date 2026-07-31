@@ -6,7 +6,6 @@ import '../../../models/map_language.dart';
 import '../../../core/skin/skin.dart';
 import '../../../core/skin/skin_provider.dart';
 import '../../../core/skin/skins/registry.dart';
-import '../../../core/theme/app_theme.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'favorite_categories_screen.dart';
 import 'terms_screen.dart';
@@ -17,15 +16,15 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('설정'),
-        backgroundColor: AppColors.secondary,
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: const Text('설정')),
       body: ListView(
         children: [
           // ── 프로필 ────────────────────────────────────────────────
+          const _SectionHeader(title: '프로필'),
           ListTile(
+            visualDensity: VisualDensity.compact,
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
             leading: const Icon(Icons.person_outline),
             title: const Text('프로필 편집'),
             trailing: const Icon(Icons.chevron_right),
@@ -35,26 +34,12 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const Divider(height: 1),
 
-          // ── 지도 표기 언어 ────────────────────────────────────────
-          const _SectionHeader(title: '지도 표기 언어'),
-          _LanguageSelector(),
-
           // ── 스킨 ─────────────────────────────────────────────────
           const _SectionHeader(title: '스킨'),
           _SkinSelector(),
 
-          // ── 주행 설정 ─────────────────────────────────────────────
+          // ── 주행 설정 (야간 디밍만 남음, 지도 방향은 앱 설정으로 이동) ────
           const _SectionHeader(title: '주행 설정'),
-          Consumer(builder: (ctx, ref, _) {
-            final headingUp = ref.watch(navHeadingUpProvider).value ?? true;
-            return SwitchListTile(
-              secondary: const Icon(Icons.navigation_outlined),
-              title: const Text('지도 방향'),
-              subtitle: Text(headingUp ? '헤딩업 (진행방향 위)' : '노스업 (북쪽 위)'),
-              value: headingUp,
-              onChanged: (v) => ref.read(navHeadingUpProvider.notifier).set(v),
-            );
-          }),
           Consumer(builder: (ctx, ref, _) {
             final nightDimEnabled =
                 ref.watch(mapNightDimEnabledProvider).value ?? true;
@@ -71,6 +56,23 @@ class SettingsScreen extends ConsumerWidget {
           // TODO Phase 2: 안내 음성 / 안내 언어
 
           const _SectionHeader(title: '앱 설정'),
+          _LanguageSelector(),
+          Consumer(builder: (ctx, ref, _) {
+            final headingUp = ref.watch(navHeadingUpProvider).value ?? true;
+            return ListTile(
+              leading: const Icon(Icons.navigation_outlined),
+              title: const Text('지도 방향'),
+              trailing: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true, label: Text('헤딩업')),
+                  ButtonSegment(value: false, label: Text('노스업')),
+                ],
+                selected: {headingUp},
+                onSelectionChanged: (s) =>
+                    ref.read(navHeadingUpProvider.notifier).set(s.first),
+              ),
+            );
+          }),
           ListTile(
             leading: const Icon(Icons.label_outline),
             title: const Text('즐겨찾기 카테고리'),
@@ -108,6 +110,9 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
+String _mapLanguageLabel(MapLanguage option) =>
+    option == MapLanguage.korean ? '한국어' : 'English';
+
 class _LanguageSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -118,22 +123,25 @@ class _LanguageSelector extends ConsumerWidget {
         child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
       ),
       error: (err, _) => const SizedBox.shrink(),
-      data: (lang) => RadioGroup<MapLanguage>(
-        groupValue: lang,
-        onChanged: (v) => ref.read(mapLanguageProvider.notifier).setLanguage(v!),
-        child: Column(
-          children: MapLanguage.values.map((option) {
-            final label = option == MapLanguage.korean ? '한국어' : 'English';
-            return ListTile(
-              title: Text(label),
-              leading: Radio<MapLanguage>(
-                value: option,
-                activeColor: Theme.of(context).colorScheme.primary,
-              ),
-              onTap: () =>
-                  ref.read(mapLanguageProvider.notifier).setLanguage(option),
-            );
-          }).toList(),
+      data: (lang) => ListTile(
+        visualDensity: VisualDensity.compact,
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        title: const Text('지도 표기 언어'),
+        trailing: DropdownButton<MapLanguage>(
+          value: lang,
+          underline: const SizedBox.shrink(),
+          items: MapLanguage.values
+              .map((option) => DropdownMenuItem(
+                    value: option,
+                    child: Text(_mapLanguageLabel(option)),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) {
+              ref.read(mapLanguageProvider.notifier).setLanguage(v);
+            }
+          },
         ),
       ),
     );
@@ -148,6 +156,9 @@ class _SkinSelector extends ConsumerWidget {
       children: kAvailableSkins.map((AppSkin skin) {
         final selected = skin.id == current.id;
         return ListTile(
+          visualDensity: VisualDensity.compact,
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
           leading: CircleAvatar(
             radius: 12,
             backgroundColor: skin.colors.brand,
@@ -170,7 +181,7 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Text(
         title,
         style: TextStyle(

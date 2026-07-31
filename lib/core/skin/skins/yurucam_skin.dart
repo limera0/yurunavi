@@ -13,7 +13,7 @@ class YuruCamSkin implements AppSkin {
   String get id => 'yurucam';
 
   @override
-  String get displayName => '유루캠 무드';
+  String get displayName => '노을빛';
 
   @override
   bool get isPremium => false;
