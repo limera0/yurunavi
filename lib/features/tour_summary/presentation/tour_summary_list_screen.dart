@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../models/tour_log.dart';
 import '../providers/tour_log_providers.dart';
 import '../tour_log_format.dart';
@@ -67,14 +68,23 @@ class _TourLogCard extends ConsumerWidget {
       context: context,
       builder: (dlgCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('투어 기록 삭제'),
-        content: const Text('이 투어 기록을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.'),
+        backgroundColor: AppColors.background,
+        title: Text('투어 기록 삭제', style: AppTextStyles.titleSM),
+        content: Text(
+          '이 투어 기록을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.',
+          style: AppTextStyles.bodyMD,
+        ),
         actions: [
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.brandMoss),
             onPressed: () => Navigator.of(dlgCtx).pop(false),
             child: const Text('취소'),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.of(dlgCtx).pop(true),
             child: const Text('삭제'),
           ),
