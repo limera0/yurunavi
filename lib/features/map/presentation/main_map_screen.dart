@@ -129,11 +129,14 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   bool _locLayerReady = false;
   ml.Symbol? _destMarker;
+  ml.Symbol? _originMarker;
   List<ml.Symbol> _waypointMarkers = [];
   static const String _kDestIcon = 'pointer_red';
   static const double _kDestIconSize = 1.05; // nav_screen과 동일 배율(96px 핀 기준)
   static const String _kWpIcon = 'pointer_yellow';
   static const double _kWpIconSize = 1.05; // nav_screen과 동일 배율
+  static const String _kOriginIcon = 'pointer_start';
+  static const double _kOriginIconSize = 1.05; // 다른 핀과 동일 배율
   static const String _kArrowIcon = 'nav_arrow';
   static const double _kArrowIconSize = 1.0; // nav_screen과 동일
   // 검색 결과(상호명/주소 공통) 탭 시 확인시트가 뜨는 동안 위치를 보여주는 임시
@@ -170,9 +173,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // 13-1b: 상시 표시 POI (ambient) — 검색 시트를 열지 않아도 줌 레벨에 따라
   // 자동으로 표시/갱신되는 별개 레이어의 로컬 상태.
   List<Poi> _ambientPois = const [];
-  DateTime? _lastAmbientFetchAt;
-  LatLng? _lastAmbientFetchCenter;
-  Set<PoiType> _lastAmbientFetchTypes = const {};
   // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
   int _ambientFetchGen = 0;
   // 뷰포트 사각형+타입 조합 단위로 최근 조회 결과를 재사용해 패닝 왕복 시
@@ -626,11 +626,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     _mlCtrl?.setGeoJsonSource(_favPoiSourceId, _buildFavPoiGeoJson(favs));
   }
 
-  /// 현재 줌 레벨에서 노출 대상인 카테고리를 계산하고, 필요 시(카테고리 변경 시
-  /// 즉시 / 그 외엔 200m 이동 또는 15초 경과 디바운스) 뷰포트 중심 기준으로
-  /// POI를 재조회해 ambient 레이어를 갱신한다. 화면에 실제 보이는 것만, 카테고리
-  /// 우선순위(주유소>편의점>카페>대형마트>식당)와 화면 분포를 함께 고려해 최대
-  /// 20개로 제한한다.
+  /// 현재 줌 레벨에서 노출 대상인 카테고리를 계산하고, onCameraIdle마다(제스처가
+  /// 멈출 때 1회) 뷰포트 중심 기준으로 POI를 재조회해 ambient 레이어를 갱신한다.
+  /// 화면에 실제 보이는 것만, 카테고리 우선순위(주유소>편의점>카페>대형마트>식당)와
+  /// 화면 분포를 함께 고려해 최대 20개로 제한한다.
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
@@ -643,30 +642,12 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         _ambientPois = const [];
         _updateAmbientPoiLayer(const []);
       }
-      _lastAmbientFetchTypes = const {};
       return;
     }
 
-    // 디바운스 판단은 getVisibleRegion()(플랫폼 채널 호출) 없이도 가능한
-    // 저비용 동기 카메라 중심점으로 먼저 끝낸다 — 실제로 재조회할 때만
-    // getVisibleRegion()을 부른다. onCameraIdle 직후라 카메라가 정지해
-    // 있으므로 이 값이 곧 뷰포트 중심과 사실상 같다(회전/기울기 잠금이라
-    // bounds가 target 기준으로 대칭).
-    final camTarget = ctrl.cameraPosition?.target;
-    if (camTarget == null) return;
-    final approxCenter = LatLng(camTarget.latitude, camTarget.longitude);
-
-    final sameTypes = targetTypes.length == _lastAmbientFetchTypes.length &&
-        targetTypes.every(_lastAmbientFetchTypes.contains);
-    if (sameTypes) {
-      final lastAt = _lastAmbientFetchAt;
-      final lastCenter = _lastAmbientFetchCenter;
-      final movedEnough = lastCenter == null ||
-          PoiService.haversineMeters(lastCenter, approxCenter) >= 200;
-      final staleEnough = lastAt == null ||
-          DateTime.now().difference(lastAt) >= const Duration(seconds: 15);
-      if (!movedEnough && !staleEnough) return;
-    }
+    // 로컬 SQLite 기반 POI라 서드파티 API 쿼터 부담이 없다 — onCameraIdle마다
+    // (제스처가 멈출 때 1회만 발생하므로 자체적으로 충분히 rate-limit된다)
+    // 무조건 재조회한다. 동일 뷰포트+타입 재조회는 아래 _poiRegionCache가 걸러낸다.
 
     // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
     // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
@@ -733,9 +714,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
     _ambientPois = limited;
     _updateAmbientPoiLayer(limited);
-    _lastAmbientFetchAt = DateTime.now();
-    _lastAmbientFetchCenter = center;
-    _lastAmbientFetchTypes = targetTypes;
   }
 
   /// GPS 위치가 갱신될 때마다(캐시된 마지막 위치 포함) 호출 — 검색 시트(_PoiExploreSheet)용
@@ -805,6 +783,41 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       await c.removeSymbol(_destMarker!);
     }
     _destMarker = null;
+  }
+
+  Future<void> _ensureOriginMarker(LatLng origin, {String? name}) async {
+    final c = _mlCtrl;
+    if (c == null || !_styleLoaded) return;
+    final geo = _toMl(origin);
+    final options = ml.SymbolOptions(
+      geometry: geo,
+      iconImage: _kOriginIcon,
+      iconSize: _kOriginIconSize,
+      iconAnchor: 'bottom',
+      zIndex: 4,
+      // updateSymbol은 null 필드를 "변경 없음"으로 처리해 이전 라벨이 남을 수 있으므로
+      // 이름이 없을 땐 빈 문자열을 명시적으로 보내 이전 값을 확실히 지운다.
+      textField: name ?? '',
+      textSize: 12,
+      textOffset: const Offset(0, 1.4),
+      textAnchor: 'top',
+      textColor: '#212121',
+      textHaloColor: '#FFFFFF',
+      textHaloWidth: 1.2,
+    );
+    if (_originMarker == null) {
+      _originMarker = await c.addSymbol(options);
+    } else {
+      await c.updateSymbol(_originMarker!, options);
+    }
+  }
+
+  Future<void> _removeOriginMarker() async {
+    final c = _mlCtrl;
+    if (c != null && _originMarker != null) {
+      await c.removeSymbol(_originMarker!);
+    }
+    _originMarker = null;
   }
 
   /// 검색 결과(상호명/주소) 탭 시 확인시트가 뜨는 동안만 보이는 임시 초록 점.
@@ -1021,6 +1034,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
   }) async {
     if (act == _TapAction.origin) {
       ref.read(mapInteractionProvider.notifier).setOrigin(loc, name: preResolvedName);
+      await _ensureOriginMarker(loc, name: preResolvedName);
       final dest = ref.read(mapInteractionProvider).destination;
       if (dest != null) {
         ref.read(mapInteractionProvider.notifier).setLoading(true);
@@ -1116,6 +1130,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     switch (act) {
       case _RouteAddAction.origin:
         ref.read(mapInteractionProvider.notifier).setOrigin(location, name: name);
+        await _ensureOriginMarker(location, name: name);
       case _RouteAddAction.waypoint:
         final pending = ref.read(mapInteractionProvider).pendingWaypointInsert;
         ref.read(mapInteractionProvider.notifier).addWaypoint(
@@ -1465,6 +1480,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     _sheetCtrl.reverse();
     _recenterMap();
     _removeDestMarker(); // unawaited — B2
+    _removeOriginMarker(); // unawaited — reset()이 explicit origin도 지우므로 핀도 제거
     _syncWaypointMarkers(const [], const []); // unawaited — 경유지 핀 전체 제거
   }
 
@@ -1634,6 +1650,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               target: _toMl(_origin ?? _lastKnown ?? kInitialMapView),
               zoom: _currentZoom,
             ),
+            // ctrl.cameraPosition이 실제 카메라를 추적하게 한다 — false(기본값)면
+            // onCameraIdle 이후에도 _maybeFetchAmbientPois()의 저비용 사전 판단용
+            // camTarget이 초기 위치에 고정돼 팬(pan)해도 ambient POI가 갱신되지 않는다.
+            trackCameraPosition: true,
             // 오토바이 거치 — 회전 잠금 (North-up 고정)
             rotateGesturesEnabled: false,
             // 기울기도 잠금 (2D 유지)
@@ -1693,6 +1713,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               // 스타일 재주입 시 네이티브 어노테이션 매니저가 파괴·재생성되므로
               // Dart 레퍼런스를 초기화해 재생성 경로를 타도록 한다.
               _destMarker = null;
+              _originMarker = null;
               _waypointMarkers = <ml.Symbol>[];
               _searchPreviewMarker = null;
               _locLayerReady = false;
@@ -1706,6 +1727,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               await _mlCtrl!.addImage('pointer_red', pinBytes.buffer.asUint8List());
               final wpBytes = await rootBundle.load('assets/images/pointer_yellow.png');
               await _mlCtrl!.addImage(_kWpIcon, wpBytes.buffer.asUint8List());
+              final startBytes = await rootBundle.load('assets/images/pointer_start.png');
+              await _mlCtrl!.addImage(_kOriginIcon, startBytes.buffer.asUint8List());
               final arrowBytes = await rootBundle.load('assets/images/arrow_puck.png');
               await _mlCtrl!.addImage(_kArrowIcon, arrowBytes.buffer.asUint8List());
               await _mlCtrl!.setSymbolIconAllowOverlap(true);
@@ -1719,6 +1742,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
               if (currentDest != null) {
                 await _ensureDestMarker(currentDest,
                     name: mapState.destinationName);
+              }
+              if (mapState.origin != null) {
+                await _ensureOriginMarker(mapState.origin!,
+                    name: mapState.stops.first.name);
               }
               if (mapState.waypoints.isNotEmpty) {
                 await _syncWaypointMarkers(

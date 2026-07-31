@@ -103,12 +103,16 @@ class CourseSheet extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      originName ?? '현재 위치',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: GestureDetector(
+                      onTap: onWaypointEntryTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: Text(
+                        originName ?? '현재 위치',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                   const Padding(
@@ -143,13 +147,17 @@ class CourseSheet extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    child: Text(
-                      destinationName ?? '목적지',
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: GestureDetector(
+                      onTap: onWaypointEntryTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: Text(
+                        destinationName ?? '목적지',
+                        textAlign: TextAlign.end,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ],
