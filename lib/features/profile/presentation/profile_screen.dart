@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -74,9 +75,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _addBike() async {
-    final result = await showDialog<BikeProfile>(
+    final result = await showModalBottomSheet<BikeProfile>(
       context: context,
-      builder: (_) => const _BikeEditDialog(),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _BikeEditSheet(),
     );
     if (result == null) return;
     final current = ref.read(userProfileProvider).value ?? UserProfile.empty;
@@ -344,104 +347,297 @@ class _BikeCard extends StatelessWidget {
   }
 }
 
-// ── 바이크 추가 다이얼로그 ────────────────────────────────────
+// ── 바이크 추가 카드 (바텀시트) ──────────────────────────────────
 
-class _BikeEditDialog extends StatefulWidget {
-  const _BikeEditDialog();
+class _BikeEditSheet extends StatefulWidget {
+  const _BikeEditSheet();
 
   @override
-  State<_BikeEditDialog> createState() => _BikeEditDialogState();
+  State<_BikeEditSheet> createState() => _BikeEditSheetState();
 }
 
-class _BikeEditDialogState extends State<_BikeEditDialog> {
+class _BikeEditSheetState extends State<_BikeEditSheet> {
   final _brandCtrl = TextEditingController();
   final _modelCtrl = TextEditingController();
   final _ccCtrl = TextEditingController();
-  final _yearCtrl = TextEditingController(text: DateTime.now().year.toString());
+  int _selectedYear = DateTime.now().year;
 
   @override
   void dispose() {
     _brandCtrl.dispose();
     _modelCtrl.dispose();
     _ccCtrl.dispose();
-    _yearCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _openYearPicker() async {
+    const minYear = 1970;
+    const maxYear = 2027;
+    final years = List<int>.generate(maxYear - minYear + 1, (i) => minYear + i);
+    var picked = _selectedYear;
+    final yearScrollCtrl = FixedExtentScrollController(
+      initialItem: _selectedYear - minYear,
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 200,
+                child: CupertinoPicker(
+                  itemExtent: 40,
+                  scrollController: yearScrollCtrl,
+                  onSelectedItemChanged: (i) => picked = years[i],
+                  children: years
+                      .map((y) => Center(child: Text('$y년')))
+                      .toList(),
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      child: const Text('확인'),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    yearScrollCtrl.dispose();
+    if (mounted) setState(() => _selectedYear = picked);
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('바이크 추가'),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _LabeledField(
-              label: '브랜드',
-              controller: _brandCtrl,
-              hint: 'Honda, BMW ...',
-              icon: Icons.branding_watermark,
-            ),
-            const SizedBox(height: 10),
-            _LabeledField(
-              label: '모델명',
-              controller: _modelCtrl,
-              hint: 'CB650R, R1250GS ...',
-              icon: Icons.two_wheeler,
-            ),
-            const SizedBox(height: 10),
-            _LabeledField(
-              label: '배기량 (cc)',
-              controller: _ccCtrl,
-              hint: '650',
-              icon: Icons.speed,
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 10),
-            _LabeledField(
-              label: '연식',
-              controller: _yearCtrl,
-              hint: '2024',
-              icon: Icons.calendar_today,
-              keyboardType: TextInputType.number,
-            ),
-          ],
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── 핸들 바 ─────────────────────────────────────────
+              const SizedBox(height: 10),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── 헤더 ───────────────────────────────────────────
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '바이크 추가',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF222222),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ── 필드 + 버튼 (스크롤 가능: 작은 화면/키보드 대응) ──
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Column(
+                          children: [
+                            _LabeledField(
+                              label: '브랜드',
+                              controller: _brandCtrl,
+                              hint: '혼다, 베스파 ...',
+                              icon: Icons.branding_watermark,
+                            ),
+                            const SizedBox(height: 10),
+                            _LabeledField(
+                              label: '모델명',
+                              controller: _modelCtrl,
+                              hint: '슈퍼커브, 프리마베라 ...',
+                              icon: Icons.two_wheeler,
+                            ),
+                            const SizedBox(height: 10),
+                            _LabeledField(
+                              label: '배기량 (cc)',
+                              controller: _ccCtrl,
+                              hint: '125',
+                              icon: Icons.speed,
+                              keyboardType: TextInputType.number,
+                            ),
+                            const SizedBox(height: 10),
+                            _YearField(
+                              year: _selectedYear,
+                              onTap: _openYearPicker,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // ── 취소/추가 버튼 ────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF333333),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('취소'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  final cc =
+                                      int.tryParse(_ccCtrl.text.trim()) ?? 0;
+                                  if (_brandCtrl.text.trim().isEmpty ||
+                                      _modelCtrl.text.trim().isEmpty) {
+                                    return;
+                                  }
+                                  Navigator.pop(
+                                    context,
+                                    BikeProfile(
+                                      id: DateTime.now().millisecondsSinceEpoch
+                                          .toString(),
+                                      brand: _brandCtrl.text.trim(),
+                                      model: _modelCtrl.text.trim(),
+                                      displacement: cc,
+                                      year: _selectedYear,
+                                    ),
+                                  );
+                                },
+                                child: const Text('추가'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('취소'),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+    );
+  }
+}
+
+// ── 연식 필드 (탭하면 모달 휠피커) ────────────────────────────
+
+class _YearField extends StatelessWidget {
+  final int year;
+  final VoidCallback onTap;
+
+  const _YearField({required this.year, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('연식', style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.calendar_today,
+                  size: 18,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: 12),
+                Text('$year년', style: const TextStyle(fontSize: 15)),
+              ],
             ),
           ),
-          onPressed: () {
-            final cc = int.tryParse(_ccCtrl.text.trim()) ?? 0;
-            final year =
-                int.tryParse(_yearCtrl.text.trim()) ?? DateTime.now().year;
-            if (_brandCtrl.text.trim().isEmpty ||
-                _modelCtrl.text.trim().isEmpty) {
-              return;
-            }
-            Navigator.pop(
-              context,
-              BikeProfile(
-                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                brand: _brandCtrl.text.trim(),
-                model: _modelCtrl.text.trim(),
-                displacement: cc,
-                year: year,
-              ),
-            );
-          },
-          child: const Text('추가'),
         ),
       ],
     );
