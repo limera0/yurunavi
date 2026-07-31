@@ -37,6 +37,7 @@ import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
+import '../../tour_summary/tour_log_format.dart';
 import '../providers/nav_state_provider.dart';
 import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
@@ -204,7 +205,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
   bool _arrivalBannerVisible = false;
+  // 라운드7: 독립 도착 배너를 폐기하며 이 리스트를 렌더링할 자리가 새 목업엔
+  // 없어졌다(PROGRESS.md 미확정 항목 — 완전 제거 vs 다른 화면 이전은 별도
+  // 결정 필요). 조회(_fetchNearbyPois) 자체는 부작용 없어 그대로 두고 값만
+  // 계속 채우므로, 표시하지 않는 한 analyzer가 "읽히지 않는 필드"로 잡는다.
+  // ignore: unused_field
   List<({String name, String type})> _arrivalPois = const [];
+  // 실제 주행 경과시간(라운드7 카드1 "목적지 도착" 표시용) — 내비 시작
+  // 시각(_tourRecorderStarted와 같은 시점)을 기록해두고, 도착 판정 순간
+  // 한 번만 스냅샷(_arrivalDurationS)을 찍는다(실시간 갱신 스톱워치 아님).
+  DateTime? _navStartedAt;
+  int? _arrivalDurationS;
   // 도착배너 종료버튼 지오펜스+속도 게이트 (feat/arrival-fix SPEC_arrival_v2 포팅 —
   // 정차(속도<1.0) 게이트는 실 GPS에서 안 걸려 폐기됐던 전례가 있어 채택하지 않음).
   static const _kExitGeofenceM = 30.0;  // 종료버튼 노출 지오펜스 반경(폴리라인 잔여거리 기준, m)
@@ -214,6 +225,29 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 배너를 직접 닫으면 반드시 취소해야 한다(주행 중 화면이 갑자기 꺼지면 안 됨).
   Timer? _exitAutoCloseTimer;
   Timer? _compassNorthTimer;
+
+  // 하단 ETA 카드 ↔ "탐색 유지"/"내비게이션 종료" 확인 카드 전환 (라운드7).
+  // 트리거는 두 가지: (a) 도착(_arrivalBannerVisible=true와 동시에 켜짐,
+  // _canExit 게이트 적용) (b) 시스템 뒤로가기/온스크린 종료(X) 탭(게이트 없음,
+  // 즉시 활성).
+  bool _showExitConfirm = false;
+  // (b) 뒤로가기 트리거 전용 "두 번째 뒤로가기" 무장 플래그 — _showExitConfirm과
+  // 분리한 이유(code-auditor 지적, 2026-07-31): 도착 트리거는 _showExitConfirm을
+  // GPS 도착 판정 즉시(라이더 조작 없이) true로 세팅하므로, 이 값 하나만으로
+  // "뒤로가기를 이미 한 번 눌렀는지"를 판단하면 도착 직후 첫 뒤로가기가
+  // _canExit 지오펜스+속도 게이트를 건너뛰고 곧바로 종료돼버린다(안전장치 우회
+  // 버그). 도착 중(_arrivalBannerVisible)엔 이 플래그를 아예 쓰지 않고 항상
+  // _canExit 게이트로만 판단하며, 뒤로가기 트리거(도착과 무관)에서만 "1차
+  // 눌러서 카드 전환 → 2차 눌러서 즉시 종료"의 무장 상태로 사용한다.
+  bool _backExitArmed = false;
+
+  // 하단 ETA 카드 실측 높이(라운드7 우측버튼 줌아웃 가림 버그 근본수정) —
+  // 매직넘버(bottom:125) 대신 카드 자신의 렌더 높이를 실측해 우측 버튼
+  // 컬럼의 bottom 오프셋을 역산한다. SafeArea가 내부에서 이미 기기별
+  // MediaQuery.padding.bottom을 흡수해 패딩으로 반영하므로, 이 높이엔
+  // 하단 인셋이 이미 포함돼 있다.
+  final GlobalKey _etaCardKey = GlobalKey();
+  double _etaCardHeight = 110; // 첫 프레임 측정 전 사용할 대략치(측정 즉시 갱신됨)
 
   // 음성 안내
   FlutterTts? _tts;
@@ -492,6 +526,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         unawaited(_maybeFetchAmbientPois());
         if (!_tourRecorderStarted) {
           _tourRecorderStarted = true;
+          _navStartedAt = DateTime.now();
           unawaited(_tourRecorder.start(loc, DateTime.now()));
         } else {
           _tourRecorder.onFix(loc, next.speedKmh, DateTime.now());
@@ -526,7 +561,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _handleVoice(prog);
         if (prog.arrived && !_arrived && _passedWaypointCount >= widget.waypoints.length) {
           _arrived = true;
-          setState(() => _arrivalBannerVisible = true);
+          setState(() {
+            _arrivalBannerVisible = true;
+            // 도착 트리거 — 하단 카드도 함께 "탐색 유지"/"내비게이션 종료"
+            // 확인 상태로 전환(라운드7 4-a).
+            _showExitConfirm = true;
+            // 도착 중엔 뒤로가기 판정을 전적으로 _canExit 게이트에 맡긴다 —
+            // 혹시 도착 전에 무장돼 있던 값이 남아 있어도(뒤로가기 트리거가
+            // 먼저 있었던 드문 순서) 게이트를 우회하지 않도록 방어적으로 리셋.
+            _backExitArmed = false;
+            _arrivalDurationS = _navStartedAt != null
+                ? DateTime.now().difference(_navStartedAt!).inSeconds
+                : null;
+          });
           _fetchNearbyPois(widget.destination!).then((pois) {
             if (mounted) setState(() => _arrivalPois = pois);
           });
@@ -761,12 +808,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     if (_showCourseSheet) return;
     if (_isRerouting || !mounted) return;
     if (_arrivalBannerVisible) {
+      _exitAutoCloseTimer?.cancel();
       setState(() {
         _arrivalBannerVisible = false;
         _arrivalPois = const [];
         _arrived = false;
         _saidArrival = false;
         _canExit = false;
+        _showExitConfirm = false;
+        _backExitArmed = false;
       });
     }
     final dest = widget.destination;
@@ -999,30 +1049,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _exitNav() {
     unawaited(_finalizeAndPersistTour());
     Navigator.of(context).pop();
-  }
-
-  void _confirmExit(BuildContext ctx) {
-    showDialog<void>(
-      context: ctx,
-      builder: (dlgCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('내비게이션 종료'),
-        content: const Text('내비게이션을 종료할까요?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dlgCtx).pop(),
-            child: const Text('취소'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(dlgCtx).pop();
-              _exitNav();
-            },
-            child: const Text('종료'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// 속도→줌 선형 보간: 0 km/h→18, 20→16, 60+→14
@@ -1841,6 +1867,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final daylightProgress = daylightCycle?.progress ?? 0.5;
     final isDay = daylightCycle?.isDay ?? true;
     final cs = Theme.of(context).colorScheme;
+    // 라운드7: 우측 버튼 5개·속도계·하단 카드 확인버튼의 스킨 연동 색상.
+    final skinColors = ref.watch(skinProvider).colors;
+    final brandColor = skinColors.brand;
+    final successColor = skinColors.success;
+    final dangerColor = skinColors.danger;
     final routeKm = _polylineKm(widget.routePolyline);
     final progress = ref.watch(routeProgressProvider);
     // 후면단속카메라(18번) 게이지 활성 여부 — 접근구간(150m 이내) + 사후구간
@@ -1859,10 +1890,40 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
     });
 
+    // 하단 ETA 카드(_etaCardKey) 실측 높이 갱신 — 우측 버튼 컬럼의 bottom
+    // 오프셋 계산용(1-C). 매 프레임 후 측정해 값이 바뀐 경우에만 setState.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final box = _etaCardKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box != null && box.hasSize && (box.size.height - _etaCardHeight).abs() > 0.5) {
+        setState(() => _etaCardHeight = box.size.height);
+      }
+    });
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, _) {
-        if (!didPop) _confirmExit(context);
+        if (didPop) return;
+        // 도착 트리거(게이트 적용) vs 뒤로가기 트리거(게이트 없음)를 반드시
+        // 구분한다 — _showExitConfirm/_arrivalBannerVisible은 GPS 도착 판정
+        // 즉시(라이더 조작 없이) true가 되므로, 이 값들만으로 "뒤로가기를
+        // 이미 눌렀는지"를 판단하면 도착 직후 첫 뒤로가기가 _canExit
+        // 지오펜스+속도 게이트를 건너뛰고 즉시 종료돼버린다(code-auditor 지적,
+        // 2026-07-31 — 안전장치 우회 버그).
+        final gated = _arrivalBannerVisible;
+        // 도착 중엔 온스크린 "내비게이션 종료" 버튼과 동일하게 _canExit로만
+        // 판단(정차 전엔 뒤로가기를 몇 번 눌러도 종료되지 않음). 도착과 무관한
+        // 뒤로가기 트리거는 _backExitArmed로 "1차: 카드 전환 / 2차: 즉시 종료"의
+        // 시간제한 없는 더블프레스를 그대로 유지한다.
+        final canForceExit = gated ? _canExit : _backExitArmed;
+        if (canForceExit) {
+          _exitNav();
+        } else {
+          setState(() {
+            _showExitConfirm = true;
+            if (!gated) _backExitArmed = true;
+          });
+        }
       },
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -1932,143 +1993,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
 
-          // ── 도착 배너 (비침습, dim 없음) ──────────────────────────────────────
-          if (_arrivalBannerVisible)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-                decoration: BoxDecoration(
-                  color: cs.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.flag_rounded, color: cs.tertiary),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text('목적지 도착',
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            _exitAutoCloseTimer?.cancel();
-                            setState(() {
-                              _arrivalBannerVisible = false;
-                              _canExit = false;
-                            });
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(Icons.close_rounded, size: 20),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_arrivalPois.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      ..._arrivalPois.map((p) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(children: [
-                              Icon(Icons.place, size: 14, color: cs.tertiary),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                  child: Text('${p.type}: ${p.name}',
-                                      style: const TextStyle(fontSize: 12))),
-                            ]),
-                          )),
-                    ],
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (!_canExit)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: Text('정차 후 종료 가능',
-                                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: Text('10초 후 자동 종료',
-                                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12)),
-                          ),
-                        // 목적지 근처에서 정차만 하면(예: 신호 대기, 헬멧 벗는 중) 곧바로
-                        // _canExit이 열리고 10초 뒤 자동 종료되므로, 라이더가 실제로는
-                        // 계속 안내를 원해도 명시적으로 취소할 버튼이 없었다(2026-07-15
-                        // 밤 라이딩 리포트 — "계속 안내" 버튼 부재 + 대기 없이 바로 종료).
-                        GestureDetector(
-                          onTap: () {
-                            _exitAutoCloseTimer?.cancel();
-                            setState(() {
-                              _arrivalBannerVisible = false;
-                              _canExit = false;
-                            });
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerHigh,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text('계속 안내',
-                                style: TextStyle(
-                                  color: cs.onSurfaceVariant,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                )),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: _canExit
-                              ? () {
-                                  _exitAutoCloseTimer?.cancel();
-                                  _exitNav();
-                                }
-                              : null,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: _canExit ? cs.tertiary : cs.surfaceContainerHigh,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text('안내 종료',
-                                style: TextStyle(
-                                  color: _canExit ? Colors.white : cs.onSurfaceVariant,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                )),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // ── 상단 회전 안내 ──────────────────────────────────────────────────
-          // _arrivalBannerVisible(최종 목적지 도착) 중엔 숨긴다 — 이 카드가
-          // Stack에서 도착 배너(위 _arrivalBannerVisible 블록)보다 나중에
-          // 그려져 같은 좌상단 영역을 덮어써 "안내 종료" 배너가 가려지는
-          // 문제가 있었다(2026-07-29 실기 vGPS 테스트로 확인). 최종 도착
-          // 후엔 어차피 다음 턴이 없으므로 숨기는 게 맞다.
-          if (!_arrivalBannerVisible)
+          // ── 상단 카드1/2 (회전 안내 / 도착) ─────────────────────────────────
+          // 라운드7: 독립 도착 배너를 폐기하고 카드1(아래)이 내부에서
+          // _arrivalBannerVisible 분기로 "목적지 도착"까지 표시한다. 카드1은
+          // 이제 항상 렌더링된다(더 이상 이 Positioned 전체를 숨기지 않음).
           Positioned(
             top: MediaQuery.of(context).padding.top,
             left: 0,
@@ -2076,10 +2004,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // (A) 메인 상단 카드
+                // (A) 메인 상단 카드 — 도착 중엔 내부에서 "목적지 도착"으로 분기
                 GestureDetector(
                   onTap: () {
-                    if (_stepIdx < _steps.length - 1) {
+                    if (!_arrivalBannerVisible && _stepIdx < _steps.length - 1) {
                       setState(() => _stepIdx++);
                       _announceStep(_stepIdx);
                     }
@@ -2110,68 +2038,94 @@ class _NavScreenState extends ConsumerState<NavScreen>
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // 아이콘박스: 폭 80 (30% 축소)
+                              // 아이콘박스: 폭 80 (30% 축소) — 도착 중엔 깃발 아이콘
                               SizedBox(
                                 width: 80,
                                 child: ColoredBox(
                                   color: cs.surface,
                                   child: Padding(
                                     padding: const EdgeInsets.all(10),
-                                    child: SvgPicture.asset(upcoming.svgAsset, width: 60, height: 60),
+                                    child: _arrivalBannerVisible
+                                        ? Icon(Icons.flag_rounded, size: 44, color: cs.tertiary)
+                                        : SvgPicture.asset(upcoming.svgAsset, width: 60, height: 60),
                                   ),
                                 ),
                               ),
-                              // 콘텐츠: 거리 + 도로명
+                              // 콘텐츠: 도착 중엔 "목적지 도착" + 소요시간, 평소엔 거리 + 도로명
                               Expanded(
                                 child: Padding(
                                   padding: const EdgeInsets.fromLTRB(10, 14, 10, 14),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      if (_cardRemainingM > 0 || step.dist.isNotEmpty)
-                                        Builder(builder: (ctx) {
-                                          final raw = _cardRemainingM > 0
-                                              ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
-                                              : step.dist;
-                                          final parts = _TurnStep._splitDistStr(raw);
-                                          return RichText(
-                                            text: TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text: parts.$1,
-                                                  style: TextStyle(
-                                                    color: cs.onSurface,
-                                                    fontSize: 53,
-                                                    fontWeight: FontWeight.w800,
-                                                    height: 1.1,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: parts.$2,
-                                                  style: TextStyle(
-                                                    color: cs.onSurface,
-                                                    fontSize: 24,
-                                                    fontWeight: FontWeight.w700,
-                                                    height: 1.1,
-                                                  ),
-                                                ),
-                                              ],
+                                    children: _arrivalBannerVisible
+                                        ? [
+                                            Text(
+                                              '목적지 도착',
+                                              style: TextStyle(
+                                                color: cs.onSurface,
+                                                fontSize: 28,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.1,
+                                              ),
                                             ),
-                                          );
-                                        }),
-                                      if (upcoming.streetNames.isNotEmpty)
-                                        Text(
-                                          upcoming.streetNames.first,
-                                          style: TextStyle(
-                                            color: cs.onSurfaceVariant,
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                    ],
+                                            if (_arrivalDurationS != null)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 4),
+                                                child: Text(
+                                                  '소요시간 ${formatTourDuration(_arrivalDurationS!)}',
+                                                  style: TextStyle(
+                                                    color: cs.onSurfaceVariant,
+                                                    fontSize: 18,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                          ]
+                                        : [
+                                            if (_cardRemainingM > 0 || step.dist.isNotEmpty)
+                                              Builder(builder: (ctx) {
+                                                final raw = _cardRemainingM > 0
+                                                    ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                                                    : step.dist;
+                                                final parts = _TurnStep._splitDistStr(raw);
+                                                return RichText(
+                                                  text: TextSpan(
+                                                    children: [
+                                                      TextSpan(
+                                                        text: parts.$1,
+                                                        style: TextStyle(
+                                                          color: cs.onSurface,
+                                                          fontSize: 53,
+                                                          fontWeight: FontWeight.w800,
+                                                          height: 1.1,
+                                                        ),
+                                                      ),
+                                                      TextSpan(
+                                                        text: parts.$2,
+                                                        style: TextStyle(
+                                                          color: cs.onSurface,
+                                                          fontSize: 24,
+                                                          fontWeight: FontWeight.w700,
+                                                          height: 1.1,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              }),
+                                            if (upcoming.streetNames.isNotEmpty)
+                                              Text(
+                                                upcoming.streetNames.first,
+                                                style: TextStyle(
+                                                  color: cs.onSurfaceVariant,
+                                                  fontSize: 22,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                          ],
                                   ),
                                 ),
                               ),
@@ -2182,8 +2136,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     ),
                   ),
                 ),
-                // (B) 다음 이벤트 별개 카드
-                if (_stepIdx + 2 < _steps.length)
+                // (B) 다음 이벤트 별개 카드 — 도착 중엔 숨김(카드2가 새 목업엔 없음)
+                if (_stepIdx + 2 < _steps.length && !_arrivalBannerVisible)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: SizedBox(
@@ -2254,6 +2208,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 progress: progress,
                 speedKmh: navState?.speedKmh ?? 0,
                 firstFixReceived: navState?.firstFix ?? false,
+                brandColor: brandColor,
               ),
             ),
           ),
@@ -2276,24 +2231,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
               ),
             ),
 
-          // ── 우측: 나침반 + 주유소 버튼 + GPS 버튼 ──────────────────────────────────────
+          // ── 우측 버튼 5개 통합 (라운드7) ──────────────────────────────────────
+          // 주유소→나침반→현위치→줌인→줌아웃 순서, 전부 68px 원형+스킨 브랜드색.
+          // bottom 오프셋은 하단 ETA 카드 실측 높이(_etaCardHeight, 기기별
+          // MediaQuery.padding.bottom을 이미 흡수한 값) 기반으로 역산해
+          // 줌아웃이 카드에 가려지는 문제를 근본적으로 없앤다(매직넘버 폐기).
           Positioned(
             right: 12,
-            bottom: 245,
+            bottom: 12 + _etaCardHeight + 12,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _CompassBtn(
-                  headingDeg: () {
-                    final isNorthUp = !(ref.watch(navHeadingUpProvider).value ?? true);
-                    if (isNorthUp) return 0.0;
-                    return _resolveHeading(navState?.speedKmh ?? 0, navState?.headingDeg) ?? 0.0;
-                  }(),
-                  onTap: _tapCompass,
-                ),
-                const SizedBox(height: 10),
                 _NavIconBtn(
                   icon: Icons.local_gas_station,
+                  color: brandColor,
                   onTap: () {
                     final pos = ref.read(navStateProvider)?.pos;
                     if (pos == null) return;
@@ -2315,8 +2266,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
                   },
                 ),
                 const SizedBox(height: 10),
+                _CompassBtn(
+                  headingDeg: () {
+                    final isNorthUp = !(ref.watch(navHeadingUpProvider).value ?? true);
+                    if (isNorthUp) return 0.0;
+                    return _resolveHeading(navState?.speedKmh ?? 0, navState?.headingDeg) ?? 0.0;
+                  }(),
+                  color: brandColor,
+                  onTap: _tapCompass,
+                ),
+                const SizedBox(height: 10),
                 _NavIconBtn(
                   icon: _isManualMode ? Icons.gps_fixed : Icons.my_location,
+                  color: brandColor,
                   onTap: () {
                     final ns = ref.read(navStateProvider);
                     final pos = ns?.pos;
@@ -2332,24 +2294,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         forceBearingNorth: isNorthUp);
                   },
                 ),
-              ],
-            ),
-          ),
-
-          // ── 우측 하단: 줌 버튼 세트 ──────────────────────────────────────
-          Positioned(
-            right: 12,
-            bottom: 125,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _ZoomBtn(
+                // 현위치 ↔ 줌인 사이만 의도적으로 넓게(라운드3 홈 화면 34dp 재사용).
+                const SizedBox(height: 34),
+                _NavIconBtn(
                   icon: Icons.add,
+                  color: brandColor,
                   onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
                 ),
                 const SizedBox(height: 4),
-                _ZoomBtn(
+                _NavIconBtn(
                   icon: Icons.remove,
+                  color: brandColor,
                   onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
                 ),
               ],
@@ -2364,6 +2319,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Container(
+                key: _etaCardKey,
                 decoration: BoxDecoration(
                   color: cs.surface,
                   borderRadius: BorderRadius.circular(20),
@@ -2390,6 +2346,95 @@ class _NavScreenState extends ConsumerState<NavScreen>
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(0, 14, 0, 14),
                         child: Builder(builder: (_) {
+                          // 라운드7: 도착(4-a) 또는 뒤로가기/온스크린 종료(4-b) 트리거로
+                          // _showExitConfirm이 켜지면 [탐색 유지|내비게이션 종료] 2버튼
+                          // 레이아웃으로 통째로 스왑한다. 게이트(_canExit)는 도착
+                          // 트리거(_arrivalBannerVisible)일 때만 적용 — 뒤로가기/온스크린
+                          // 종료 경로는 도착과 무관하므로 게이트 없이 즉시 활성.
+                          if (_showExitConfirm) {
+                            final gated = _arrivalBannerVisible;
+                            final exitEnabled = !gated || _canExit;
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (gated)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Text(
+                                      _canExit ? '10초 후 자동 종료' : '정차 후 종료 가능',
+                                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                                    ),
+                                  ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Row(
+                                    children: [
+                                      // ── 탐색 유지 ──
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            _exitAutoCloseTimer?.cancel();
+                                            setState(() {
+                                              _showExitConfirm = false;
+                                              _backExitArmed = false;
+                                              if (_arrivalBannerVisible) {
+                                                _arrivalBannerVisible = false;
+                                                _canExit = false;
+                                              }
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: successColor,
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: const Text(
+                                              '탐색 유지',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // ── 내비게이션 종료 ──
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: exitEnabled
+                                              ? () {
+                                                  _exitAutoCloseTimer?.cancel();
+                                                  _exitNav();
+                                                }
+                                              : null,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
+                                              color: exitEnabled ? dangerColor : cs.surfaceContainerHigh,
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: Text(
+                                              '내비게이션 종료',
+                                              style: TextStyle(
+                                                color: exitEnabled ? Colors.white : cs.onSurfaceVariant,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
                           final canReroute = navState?.pos != null && !_isRerouting;
                           return Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2446,9 +2491,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                 ),
                               ),
                               Container(width: 1, height: 44, color: cs.outline.withValues(alpha: 0.4)),
-                              // ── 종료 버튼 (오른쪽) ──
+                              // ── 종료 버튼 (오른쪽) — 즉시 종료 대신 확인 카드로 전환
+                              // (온스크린 종료도 뒤로가기와 동일하게 2단계로 통일, 2026-07-30 마스터 승인).
+                              // 이 행은 !_showExitConfirm일 때만 보이고 도착 트리거는 항상
+                              // _showExitConfirm을 강제로 켜므로, 여기 도달했다는 건 항상
+                              // 뒤로가기와 동일한 "게이트 없는" 트리거(b)라는 뜻 — _backExitArmed도
+                              // 함께 세워 이후 물리 뒤로가기 한 번으로 바로 종료되게 한다. ──
                               GestureDetector(
-                                onTap: () => _exitNav(),
+                                onTap: () => setState(() {
+                                  _showExitConfirm = true;
+                                  _backExitArmed = true;
+                                }),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                                   child: Column(
@@ -2800,7 +2853,12 @@ class _GasStationSelectionCard extends StatelessWidget {
 class _Speedometer extends StatefulWidget {
   final double speedKmh;
   final bool firstFixReceived;
-  const _Speedometer({required this.speedKmh, required this.firstFixReceived});
+  final Color brandColor;
+  const _Speedometer({
+    required this.speedKmh,
+    required this.firstFixReceived,
+    required this.brandColor,
+  });
 
   @override
   State<_Speedometer> createState() => _SpeedometerState();
@@ -2841,8 +2899,8 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: cs.surface,
-        border: Border.all(color: cs.tertiary, width: 2.5),
-        boxShadow: [BoxShadow(color: cs.tertiary.withValues(alpha: 0.25), blurRadius: 16)],
+        border: Border.all(color: widget.brandColor, width: 2.5),
+        boxShadow: [BoxShadow(color: widget.brandColor.withValues(alpha: 0.25), blurRadius: 16)],
       ),
       child: widget.firstFixReceived
           ? Column(
@@ -2850,7 +2908,7 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
               children: [
                 Text(
                   widget.speedKmh.toStringAsFixed(0),
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.0),
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: widget.brandColor, height: 1.0),
                 ),
                 Text('km/h', style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant)),
               ],
@@ -2860,8 +2918,8 @@ class _SpeedometerState extends State<_Speedometer> with SingleTickerProviderSta
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('GPS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: cs.tertiary, height: 1.1)),
-                  Text('검색 중', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+                  Text('GPS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.brandColor, height: 1.1)),
+                  Text('검색 중', style: TextStyle(fontSize: 11, color: widget.brandColor)),
                 ],
               ),
             ),
@@ -2887,11 +2945,13 @@ class RearCameraGaugeSwitcher extends StatefulWidget {
   final RouteProgress? progress;
   final double speedKmh;
   final bool firstFixReceived;
+  final Color brandColor;
   const RearCameraGaugeSwitcher({
     super.key,
     required this.progress,
     required this.speedKmh,
     required this.firstFixReceived,
+    required this.brandColor,
   });
 
   @override
@@ -2947,6 +3007,7 @@ class _RearCameraGaugeSwitcherState extends State<RearCameraGaugeSwitcher> {
         content = _Speedometer(
           speedKmh: widget.speedKmh,
           firstFixReceived: widget.firstFixReceived,
+          brandColor: widget.brandColor,
         );
         break;
       case _CamGaugeMode.approach:
@@ -2986,12 +3047,18 @@ class _RearCameraGaugeSwitcherState extends State<RearCameraGaugeSwitcher> {
   }
 }
 
+/// 우측 버튼 5개(주유소→나침반→현위치→줌인→줌아웃) 공용 원형 아이콘 버튼
+/// (라운드7 — 기존 `_ZoomBtn`의 46×46 사각 스타일을 폐기하고 이 스타일로
+/// 통합, 줌 인/아웃도 이 위젯을 재사용한다). 지름 68px, 아이콘 색은
+/// 호출부에서 스킨 브랜드색(`skinProvider.colors.brand`)을 전달한다.
 class _NavIconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
+  final Color color;
   const _NavIconBtn({
     required this.icon,
     required this.onTap,
+    required this.color,
   });
 
   @override
@@ -3000,15 +3067,15 @@ class _NavIconBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 57,
-        height: 57,
+        width: 68,
+        height: 68,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: cs.surface,
           border: Border.all(color: cs.outline, width: 1),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8)],
         ),
-        child: Icon(icon, color: cs.tertiary, size: 26),
+        child: Icon(icon, color: color, size: 32),
       ),
     );
   }
@@ -3209,35 +3276,13 @@ class _StructureCurveAlert extends StatelessWidget {
   IconData _structureIcon(StructureType type) => Icons.warning_amber_rounded;
 }
 
-class _ZoomBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _ZoomBtn({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 6)],
-        ),
-        child: Icon(icon, color: cs.onSurface, size: 22),
-      ),
-    );
-  }
-}
-
+/// 나침반 버튼(라운드7: 68px로 확대, 고정 화살표만 스킨 브랜드색 — N/S/E/W
+/// 라벨은 가독성 우선으로 기존 대비색 유지, PROGRESS.md 확인질문 Q1 참고).
 class _CompassBtn extends StatelessWidget {
   final double headingDeg;
   final VoidCallback onTap;
-  const _CompassBtn({required this.headingDeg, required this.onTap});
+  final Color color;
+  const _CompassBtn({required this.headingDeg, required this.onTap, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -3245,8 +3290,8 @@ class _CompassBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 57,
-        height: 57,
+        width: 68,
+        height: 68,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: cs.surface,
@@ -3260,28 +3305,28 @@ class _CompassBtn extends StatelessWidget {
             Transform.rotate(
               angle: -headingDeg * math.pi / 180,
               child: SizedBox(
-                width: 57,
-                height: 57,
+                width: 68,
+                height: 68,
                 child: Stack(
                   children: [
-                    Positioned(top: 5, left: 0, right: 0,
+                    Positioned(top: 6, left: 0, right: 0,
                       child: Text('N', textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.error, height: 1))),
-                    Positioned(bottom: 5, left: 0, right: 0,
+                    Positioned(bottom: 6, left: 0, right: 0,
                       child: Text('S', textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))),
-                    Positioned(top: 0, bottom: 0, right: 6,
+                    Positioned(top: 0, bottom: 0, right: 7,
                       child: Column(mainAxisAlignment: MainAxisAlignment.center,
                           children: [Text('E', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))])),
-                    Positioned(top: 0, bottom: 0, left: 6,
+                    Positioned(top: 0, bottom: 0, left: 7,
                       child: Column(mainAxisAlignment: MainAxisAlignment.center,
                           children: [Text('W', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant, height: 1))])),
                   ],
                 ),
               ),
             ),
-            // 고정 화살표 (항상 위를 가리킴)
-            Icon(Icons.navigation_rounded, size: 16, color: cs.tertiary),
+            // 고정 화살표 (항상 위를 가리킴) — 스킨 브랜드색
+            Icon(Icons.navigation_rounded, size: 19, color: color),
           ],
         ),
       ),
