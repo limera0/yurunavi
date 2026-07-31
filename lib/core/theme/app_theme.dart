@@ -14,8 +14,9 @@ class AppColors {
 
   // Brand
   static const primary = Color(0xFFF28C28);    // Orange – action, active
-  static const secondary = Color(0xFF1A2B3C);  // Dark Navy – appbar, text
+  static const secondary = Color(0xFF1A2B3C);  // Dark Navy – text
   static const tertiary = Color(0xFF00B1F0);   // Light Blue – highlights
+  static const brandMoss = Color(0xFF8CA283);  // Moss Green – appbar (라운드10)
 
   // Background / Surface
   static const background = Color(0xFFF9F7F2); // Off-white scaffold
@@ -157,7 +158,7 @@ class AppTheme {
     return base.copyWith(
       appBarTheme: AppBarTheme(
         elevation: 0,
-        backgroundColor: AppColors.secondary,
+        backgroundColor: AppColors.brandMoss,
         foregroundColor: Colors.white,
         centerTitle: false,
         titleTextStyle: AppTextStyles.headlineMD.copyWith(color: Colors.white),
