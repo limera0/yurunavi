@@ -2630,11 +2630,15 @@ class _GasStationSheetState extends State<_GasStationSheet> {
               children: [
                 Icon(Icons.local_gas_station, color: cs.primary, size: 20),
                 const SizedBox(width: 8),
-                Text(
-                  '근처 최저가 주유소',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
+                Expanded(
+                  child: Text(
+                    '근처 최저가 주유소',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 // 연료 토글 칩
                 _FuelChip(label: '휘발유', selected: _fuel == 'B027', onTap: () => _switchFuel('B027')),
                 const SizedBox(width: 6),
