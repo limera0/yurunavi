@@ -13,7 +13,6 @@ import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/map_language.dart';
 import '../../../models/tour_log.dart';
-import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/tour_log_providers.dart';
@@ -194,20 +193,17 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
       );
     }
 
-    final riderMode = ref.read(riderModeProvider);
     await ctrl.addCircle(ml.CircleOptions(
       geometry: _toMl(_track.first),
       circleRadius: 8.0,
-      circleColor: colorToHex(
-          riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin),
+      circleColor: colorToHex(AppColors.mapOrigin),
       circleStrokeColor: '#FFFFFF',
       circleStrokeWidth: 2.0,
     ));
     await ctrl.addCircle(ml.CircleOptions(
       geometry: _toMl(_track.last),
       circleRadius: 8.0,
-      circleColor: colorToHex(
-          riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination),
+      circleColor: colorToHex(AppColors.mapDestination),
       circleStrokeColor: '#FFFFFF',
       circleStrokeWidth: 2.0,
     ));

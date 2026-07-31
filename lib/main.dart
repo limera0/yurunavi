@@ -10,7 +10,6 @@ import 'core/crash_reporting.dart';
 import 'core/logging/file_logger.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
-import 'features/map/providers/map_providers.dart';
 import 'firebase_options.dart';
 import 'services/tour_recovery_service.dart';
 
@@ -38,24 +37,16 @@ class YuruNaviApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final riderMode = ref.watch(riderModeProvider);
-    final isNight = ref.watch(isNightProvider);
-    final theme = riderMode
-        ? AppTheme.rider
-        : (isNight ? AppTheme.night : AppTheme.light);
-    final isDark = riderMode || isNight;
-
-    // Status bar brightness flips with theme.
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    // Status bar brightness — single light theme, always dark icons.
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
+      statusBarIconBrightness: Brightness.dark,
     ));
 
     return MaterialApp(
       title: 'YuruNavi',
       debugShowCheckedModeBanner: false,
-      theme: theme,
+      theme: AppTheme.light,
       // 다국어 지원: 한국어(기본) + 일본어. ARB는 lib/l10n/, flutter gen-l10n 으로 생성.
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,

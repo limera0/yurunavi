@@ -348,11 +348,6 @@ final isDayProvider = Provider<bool>((ref) {
   return ref.watch(daylightCycleProvider)?.isDay ?? true;
 });
 
-// ── Night mode (auto-detect via BMNT/EENT) ────────────────────────────────────
-
-/// 현재 밤 여부 — isDayProvider 의 역수. 야간 UI 연동 시 사용.
-final isNightProvider = Provider<bool>((ref) => !ref.watch(isDayProvider));
-
 // ── POI ───────────────────────────────────────────────────────────────────────
 
 final poiServiceProvider = Provider((_) => PoiService());
@@ -456,19 +451,4 @@ class _RouteTypeNotifier extends Notifier<RouteTypeFilter> {
   @override
   RouteTypeFilter build() => RouteTypeFilter.national;
   void set(RouteTypeFilter t) => state = t;
-}
-
-// ── Rider Mode ────────────────────────────────────────────────────────────────
-
-/// Toggles High-Contrast Rider Mode (pitch black / neon green / safety orange).
-/// When true the app switches to [AppTheme.rider] and map overlays use
-/// [RiderModeColors] for maximum sunlight legibility.
-final riderModeProvider =
-    NotifierProvider<_RiderModeNotifier, bool>(_RiderModeNotifier.new);
-
-class _RiderModeNotifier extends Notifier<bool> {
-  @override
-  bool build() => false;
-  void toggle() => state = !state;
-  void set(bool v) => state = v;
 }

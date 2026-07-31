@@ -1580,8 +1580,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       (_, next) => _updateFavPoiLayer(next.value ?? const []),
     );
     final isOnline = ref.watch(isOnlineProvider);
-    final riderMode = ref.watch(riderModeProvider);
     final isDay = ref.watch(isDayProvider);
+    final mapNightDimEnabled =
+        ref.watch(mapNightDimEnabledProvider).value ?? true;
 
     ref.listen<AsyncValue<MapLanguage>>(mapLanguageProvider, (_, next) {
       final raw = _rawStyle;
@@ -1590,13 +1591,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
     });
 
-    // Theme-adaptive colors for map overlays. (M2~M3에서 마커에 재사용)
+    // Map overlay colors. (M2~M3에서 마커에 재사용)
     // ignore: unused_local_variable
-    final originColor =
-        riderMode ? RiderModeColors.mapOrigin : AppColors.mapOrigin;
+    final originColor = AppColors.mapOrigin;
     // ignore: unused_local_variable
-    final destColor =
-        riderMode ? RiderModeColors.mapDestination : AppColors.mapDestination;
+    final destColor = AppColors.mapDestination;
 
     return PopScope(
       canPop: false,
@@ -1617,8 +1616,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         );
       },
       child: Scaffold(
-        backgroundColor:
-            riderMode ? RiderModeColors.background : AppColors.background,
+        backgroundColor: AppColors.background,
       body: Stack(
         children: [
           // ══════════════════════════════════════════════════════
@@ -1848,19 +1846,37 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             child: SafeArea(
               bottom: false,
               child: _MapHeader(
-                riderMode: riderMode,
-                onRiderModeToggle: () =>
-                    ref.read(riderModeProvider.notifier).toggle(),
-                onCourseRegister: () {},
-                onTourSummary: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const TourSummaryListScreen()),
-                ),
-                onSavedCourses: _showPlacesSheet,
                 onSettings: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
                 onPoiSearch: _showPoiExploreSheet,
               ),
+            ),
+          ),
+
+          // ══════════════════════════════════════════════════════
+          // LAYER 3.4 · 기록·즐겨찾기 (헤더 바로 아래, 상단 고정 그룹)
+          // top = SafeArea.top + 헤더행높이(68) + 헤더상단패딩(12) + 그룹간격(8)
+          // ══════════════════════════════════════════════════════
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 68 + 12 + 8,
+            right: 12,
+            child: Column(
+              children: [
+                _MapCtrlBtn(
+                  icon: Icons.history_rounded,
+                  size: 68,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const TourSummaryListScreen()),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _MapCtrlBtn(
+                  icon: Icons.bookmark_border_rounded,
+                  size: 68,
+                  onTap: _showPlacesSheet,
+                ),
+              ],
             ),
           ),
 
@@ -1875,19 +1891,16 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           ),
 
           // ══════════════════════════════════════════════════════
-          // LAYER 4 · Right panel  (Daylight + map controls)
+          // LAYER 4 · Right panel  (현위치·줌인·줌아웃, 하단 고정 그룹)
+          // 코스 시트 열림/닫힘과 무관하게 항상 같은 하단 오프셋 사용.
           // ══════════════════════════════════════════════════════
           Positioned(
             right: 12,
-            top: 0,
-            bottom: 0,
-            child: SafeArea(
-              child: _RightPanel(
-                showCourseSheet: _showCourseSheet,
-                onRecenter: _recenterMap,
-                onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
-                onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
-              ),
+            bottom: MediaQuery.of(context).padding.bottom + 96,
+            child: _RightPanel(
+              onRecenter: _recenterMap,
+              onZoomIn: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
+              onZoomOut: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
             ),
           ),
 
@@ -1971,7 +1984,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           // 색 재지정 없이 반투명 검정으로 화면 밝기를 낮춤.
           // IgnorePointer로 터치 투명하게 처리.
           // ══════════════════════════════════════════════════════
-          if (!isDay)
+          if (!isDay && mapNightDimEnabled)
             Positioned.fill(
               child: IgnorePointer(
                 child: Container(
@@ -1991,210 +2004,62 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MapHeader extends StatelessWidget {
-  final bool riderMode;
-  final VoidCallback onRiderModeToggle;
-  final VoidCallback onCourseRegister;
-  final VoidCallback onTourSummary;
-  final VoidCallback onSavedCourses;
   final VoidCallback onSettings;
   final VoidCallback onPoiSearch;
 
   const _MapHeader({
-    required this.riderMode,
-    required this.onRiderModeToggle,
-    required this.onCourseRegister,
-    required this.onTourSummary,
-    required this.onSavedCourses,
     required this.onSettings,
     required this.onPoiSearch,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = riderMode
-        ? RiderModeColors.surface.withValues(alpha: 0.95)
-        : Colors.white.withValues(alpha: 0.95);
-
-    return Container(
-      color: bgColor,
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // ── 로고 ─────────────────────────────────────────────
-              _LogoBadge(riderMode: riderMode),
-              const Spacer(),
-              // ── 라이더 모드 토글 (햇빛 아이콘) ───────────────────
-              _HeaderIcon(
-                icon: riderMode ? Icons.wb_sunny : Icons.wb_sunny_outlined,
-                onTap: onRiderModeToggle,
-                active: riderMode,
-                activeColor: RiderModeColors.primary,
-                activeBg: RiderModeColors.surface,
-              ),
-              const SizedBox(width: 6),
-              _HeaderIcon(icon: Icons.image_outlined, onTap: onCourseRegister),
-              const SizedBox(width: 6),
-              _HeaderIcon(icon: Icons.history_rounded, onTap: onTourSummary),
-              const SizedBox(width: 6),
-              _HeaderIcon(icon: Icons.bookmark_border_rounded, onTap: onSavedCourses),
-              const SizedBox(width: 6),
-              _HeaderIcon(icon: Icons.settings_outlined, onTap: onSettings),
-            ],
-          ),
-          const SizedBox(height: 8),
           // ── 장소 검색 진입 버튼 (탭하면 POI 탐색 시트가 열림) ─────
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: onPoiSearch,
-              child: Container(
-                height: 42,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.secondary.withValues(alpha: 0.13),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search, size: 20, color: AppColors.secondary),
-                    const SizedBox(width: 8),
-                    Text(
-                      '장소 검색',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textHint,
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(34),
+                onTap: onPoiSearch,
+                child: Container(
+                  height: 68,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(34),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.secondary.withValues(alpha: 0.13),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search, size: 24, color: AppColors.secondary),
+                      const SizedBox(width: 8),
+                      Text(
+                        '장소 검색',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: AppColors.textHint,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+          const SizedBox(width: 12),
+          _MapCtrlBtn(icon: Icons.settings_outlined, onTap: onSettings, size: 68),
         ],
-      ),
-    );
-  }
-}
-
-class _LogoBadge extends StatelessWidget {
-  final bool riderMode;
-  const _LogoBadge({this.riderMode = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: riderMode
-            ? RiderModeColors.surface
-            : AppColors.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: riderMode
-              ? RiderModeColors.primary.withValues(alpha: 0.4)
-              : AppColors.primary.withValues(alpha: 0.18),
-          width: 1,
-        ),
-      ),
-      child: Image.asset(
-        'assets/images/yuru_2line.jpeg',
-        height: 32,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) {
-          return RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: 'YURU',
-                  style: GoogleFontsHelper.logoStyle.copyWith(
-                    color: riderMode
-                        ? RiderModeColors.primary
-                        : AppColors.primary,
-                  ),
-                ),
-                TextSpan(
-                  text: 'NAVI',
-                  style: GoogleFontsHelper.logoStyle.copyWith(
-                    color: riderMode
-                        ? RiderModeColors.secondary
-                        : AppColors.secondary,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// google_fonts 없이도 동작하는 helper
-class GoogleFontsHelper {
-  static TextStyle get logoStyle => const TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.w900,
-        letterSpacing: 1.5,
-        height: 1.0,
-      );
-}
-
-class _HeaderIcon extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool active;
-  final Color? activeColor;
-  final Color? activeBg;
-
-  const _HeaderIcon({
-    required this.icon,
-    required this.onTap,
-    this.active = false,
-    this.activeColor,
-    this.activeBg,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: active
-              ? (activeBg ?? AppColors.primary.withValues(alpha: 0.15))
-              : Colors.white.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(9),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.secondary.withValues(alpha: 0.10),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Icon(
-          icon,
-          size: 19,
-          color: active
-              ? (activeColor ?? AppColors.primary)
-              : AppColors.secondary,
-        ),
       ),
     );
   }
@@ -2229,18 +2094,15 @@ class _LeftDaylightBar extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Right Panel  (compass + zoom controls)
-// 와이어프레임: 나침반 → + → 슬라이더 → -
+// Right Panel  (현위치 · 줌인 · 줌아웃 — 하단 고정 그룹)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RightPanel extends StatelessWidget {
-  final bool showCourseSheet;
   final VoidCallback onRecenter;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
 
   const _RightPanel({
-    required this.showCourseSheet,
     required this.onRecenter,
     required this.onZoomIn,
     required this.onZoomOut,
@@ -2248,49 +2110,23 @@ class _RightPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 코스 시트가 올라왔을 때 패널 하단 여유 조절
-    final bottomPad = showCourseSheet ? 220.0 : 60.0;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // ── 내 위치 복귀 ────────────────────────────────────
+        _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter, size: 68),
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomPad, top: 56),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // ── 내 위치 복귀 ────────────────────────────────────
-          _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter),
+        const SizedBox(height: 34),
 
-          const SizedBox(height: 20),
+        // ── 줌 인 ─────────────────────────────────────────
+        _MapCtrlBtn(icon: Icons.add, onTap: onZoomIn, bold: true, size: 68),
 
-          // ── 줌 인 ─────────────────────────────────────────
-          _MapCtrlBtn(icon: Icons.add, onTap: onZoomIn, bold: true),
+        const SizedBox(height: 4),
 
-          const SizedBox(height: 4),
-
-          // ── 줌 슬라이더 (시각 요소) ─────────────────────────
-          _ZoomTrackDivider(),
-
-          const SizedBox(height: 4),
-
-          // ── 줌 아웃 ───────────────────────────────────────
-          _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true),
-        ],
-      ),
-    );
-  }
-}
-
-/// 줌 +/- 사이의 점선 구분선
-class _ZoomTrackDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 2,
-      height: 24,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(1),
-        color: AppColors.textHint.withValues(alpha: 0.35),
-      ),
+        // ── 줌 아웃 ───────────────────────────────────────
+        _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true, size: 68),
+      ],
     );
   }
 }
@@ -2299,11 +2135,13 @@ class _MapCtrlBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final bool bold;
+  final double size;
 
   const _MapCtrlBtn({
     required this.icon,
     required this.onTap,
     this.bold = false,
+    this.size = 42,
   });
 
   @override
@@ -2311,8 +2149,8 @@ class _MapCtrlBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 42,
-        height: 42,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: Colors.white,
           shape: BoxShape.circle,
@@ -2326,7 +2164,7 @@ class _MapCtrlBtn extends StatelessWidget {
         ),
         child: Icon(
           icon,
-          size: bold ? 22 : 20,
+          size: size * (bold ? 0.52 : 0.48),
           color: AppColors.secondary,
           weight: bold ? 700 : 400,
         ),

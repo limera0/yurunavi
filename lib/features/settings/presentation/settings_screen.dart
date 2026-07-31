@@ -55,6 +55,18 @@ class SettingsScreen extends ConsumerWidget {
               onChanged: (v) => ref.read(navHeadingUpProvider.notifier).set(v),
             );
           }),
+          Consumer(builder: (ctx, ref, _) {
+            final nightDimEnabled =
+                ref.watch(mapNightDimEnabledProvider).value ?? true;
+            return SwitchListTile(
+              secondary: const Icon(Icons.dark_mode_outlined),
+              title: const Text('야간 지도 어둡게'),
+              subtitle: const Text('일몰 후 지도 화면을 어둡게 표시'),
+              value: nightDimEnabled,
+              onChanged: (v) =>
+                  ref.read(mapNightDimEnabledProvider.notifier).set(v),
+            );
+          }),
           const Divider(height: 1),
           // TODO Phase 2: 안내 음성 / 안내 언어
 
