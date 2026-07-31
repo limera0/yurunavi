@@ -56,13 +56,13 @@ class GasStationService {
           .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
           .timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) {
-        debugPrint('[GasStation] HTTP ${resp.statusCode}');
+        debugPrint('YNAV_GASSTATION_ERR status=${resp.statusCode}');
         return [];
       }
       final list = jsonDecode(resp.body) as List<dynamic>;
       return list.map((e) => GasStation.fromJson(e as Map<String, dynamic>)).toList();
     } catch (e) {
-      debugPrint('[GasStation] 오류: $e');
+      debugPrint('YNAV_GASSTATION_ERR error=$e');
       return [];
     }
   }

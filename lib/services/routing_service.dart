@@ -313,6 +313,9 @@ class RoutingService {
           name: 'RoutingService',
           level: 900,
         );
+        debugPrint(
+          'YNAV_ROUTE_ERR attempt=$attempt type=${e.type.name} detail=${e.detail}',
+        );
         lastError = e;
         if (e.type != RoutingError.serverDown) break;
       }
@@ -345,12 +348,15 @@ class RoutingService {
       responses = await Future.wait(futures);
     } on TimeoutException catch (e) {
       dev.log('Valhalla timeout: $e', name: 'RoutingService', level: 900);
+      debugPrint('YNAV_ROUTE_ERR type=timeout error=$e');
       throw const RoutingException(RoutingError.serverDown);
     } on SocketException catch (e) {
       dev.log('Valhalla socket error: $e', name: 'RoutingService', level: 900);
+      debugPrint('YNAV_ROUTE_ERR type=socket error=$e');
       throw const RoutingException(RoutingError.serverDown);
     } catch (e) {
       dev.log('Valhalla fetchRoutes 실패: $e', name: 'RoutingService', level: 900);
+      debugPrint('YNAV_ROUTE_ERR type=fetch_fail error=$e');
       throw RoutingException(RoutingError.serverDown, detail: e.toString());
     }
 
@@ -363,6 +369,9 @@ class RoutingService {
           '${resp.body.substring(0, resp.body.length.clamp(0, 200))}',
           name: 'RoutingService',
           level: 900,
+        );
+        debugPrint(
+          'YNAV_ROUTE_ERR type=http_status costing=${_courseNames[i]} status=${resp.statusCode}',
         );
         throw RoutingException(RoutingError.serverError,
             detail: 'HTTP ${resp.statusCode}');
@@ -479,6 +488,7 @@ class RoutingService {
         } catch (e) {
           dev.log('balanced 폴백 실패 → 기존 시골 경로 유지: $e',
               name: 'RoutingService', level: 900);
+          debugPrint('YNAV_ROUTE_ERR type=balanced_fallback_fail course=rural error=$e');
         }
       }
 
@@ -548,6 +558,7 @@ class RoutingService {
         } catch (e) {
           dev.log('balanced 폴백 실패 → 기존 지방도 경로 유지: $e',
               name: 'RoutingService', level: 900);
+          debugPrint('YNAV_ROUTE_ERR type=balanced_fallback_fail course=provincial error=$e');
         }
       }
     }
@@ -576,6 +587,7 @@ class RoutingService {
         ).catchError((Object e) {
           dev.log('루프 회피 로직 실패(무시, 원본 유지): $e',
               name: 'RoutingService', level: 900);
+          debugPrint('YNAV_ROUTE_ERR type=loop_escape_fail error=$e');
           return results[i];
         }),
     ]);

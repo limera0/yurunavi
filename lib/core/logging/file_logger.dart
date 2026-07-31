@@ -34,6 +34,10 @@ class FileLogger {
         _sink?.writeln('${DateTime.now().toIso8601String()} $msg');
       };
       orig('YNAV_LOGINIT ok path=${f.path}', wrapWidth: null);
+      debugPrint(
+        'YNAV_SESSION os=${Platform.operatingSystem} '
+        'osVer="${Platform.operatingSystemVersion}" release=$kReleaseMode',
+      );
     } catch (e, st) {
       orig('YNAV_LOGINIT FAIL $e', wrapWidth: null);
       orig('$st', wrapWidth: null);

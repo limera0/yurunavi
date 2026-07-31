@@ -453,6 +453,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 호출하면 안전하지 않을 수 있어 isPipAvailable로 먼저 확인한다.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint('YNAV_LIFECYCLE state=${state.name}');
     // onUserLeaveHint가 발화하지 않는 화면 꺼짐·전원 버튼 케이스 보완.
     // inactive: activity가 포커스를 잃기 시작(onPause 시작 전) — enterPipMode() 호출 가능한 마지막 시점.
     // hidden: 일부 Flutter 버전에서 onPause 완료 시 발화.
@@ -473,6 +474,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     if (!await AndroidPIP.isPipAvailable) return;
     await pip.enterPipMode();
+    debugPrint('YNAV_PIP enter ok');
   }
 
   @override

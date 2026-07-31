@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'dart:math' as math;
 
@@ -264,6 +265,7 @@ class NativeEngine {
       }
     } catch (e) {
       dev.log('scoreFunV2 failed: $e', name: 'NativeEngine');
+      debugPrint('YNAV_ENGINE_ERR scoreFunV2 failed error=$e');
     }
     // Fallback: use local winding score
     final ws = calcWindingScore(
@@ -389,6 +391,7 @@ class NativeEngine {
     if (accuracyM < 0) {
       dev.log('[YuruNavi/Dart] checkGpsAccuracy: negative accuracy → Poor',
           name: 'NativeEngine', level: 900);
+      debugPrint('YNAV_ENGINE_ERR checkGpsAccuracy negative_accuracy accuracyM=$accuracyM');
       return GpsQuality.poor;
     }
     final ageS = ageMs ~/ 1000;
@@ -412,6 +415,7 @@ class NativeEngine {
     if (route.length < 2) {
       dev.log('[YuruNavi/Dart] isOffRoute: route < 2 points',
           name: 'NativeEngine', level: 900);
+      debugPrint('YNAV_ENGINE_ERR isOffRoute route_too_short len=${route.length}');
       return OffRouteStatus(
         isOffRoute: true,
         closestPointDistanceM: double.maxFinite,
@@ -464,6 +468,7 @@ class NativeEngine {
     if (distM < 10) {
       dev.log('[YuruNavi/Dart] checkDestinationReachable: same_location',
           name: 'NativeEngine', level: 900);
+      debugPrint('YNAV_ENGINE_ERR checkDestinationReachable same_location');
       return const ReachabilityResult(
           isReachable: false, reason: 'same_location');
     }
@@ -472,6 +477,9 @@ class NativeEngine {
         '[YuruNavi/Dart] checkDestinationReachable: too_far (${(distM / 1000).toStringAsFixed(0)}km)',
         name: 'NativeEngine',
         level: 900,
+      );
+      debugPrint(
+        'YNAV_ENGINE_ERR checkDestinationReachable too_far distKm=${(distM / 1000).toStringAsFixed(0)}',
       );
       return const ReachabilityResult(isReachable: false, reason: 'too_far');
     }

@@ -22,7 +22,7 @@ class _OnlineNotifier extends Notifier<bool> {
       final online = next.value;
       if (online != null && state != online) {
         state = online;
-        debugPrint('[Connectivity] → ${online ? "ONLINE" : "OFFLINE"}');
+        debugPrint('YNAV_CONNECTIVITY state=${online ? "ONLINE" : "OFFLINE"}');
       }
     });
     return true; // optimistic default

@@ -15,9 +15,17 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 Future<void> initCrashReporting(FirebaseOptions options) async {
   await Firebase.initializeApp(options: options);
 
-  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrint('YNAV_CRASH fatal error=${_truncate(details.exception.toString())}');
+    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+  };
   PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('YNAV_CRASH fatal error=${_truncate(error.toString())}');
     FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
     return true;
   };
 }
+
+/// Crashlytics has the full detail — the file log only needs a short summary.
+String _truncate(String s, [int maxLen = 300]) =>
+    s.length <= maxLen ? s : '${s.substring(0, maxLen)}...';

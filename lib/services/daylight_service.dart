@@ -84,6 +84,7 @@ class DaylightService {
       return r;
     } catch (e) {
       dev.log('DaylightService API 실패: $e — 로컬 계산 사용', name: 'DaylightService');
+      debugPrint('YNAV_DAYLIGHT_ERR error=$e');
       return null;
     }
   }
