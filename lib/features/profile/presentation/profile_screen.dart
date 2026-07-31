@@ -1,6 +1,12 @@
+import 'dart:io';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../models/bike_profile.dart';
@@ -36,18 +42,35 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _save() async {
     final current = ref.read(userProfileProvider).value ?? UserProfile.empty;
-    await ref.read(userProfileProvider.notifier).save(
+    await ref
+        .read(userProfileProvider.notifier)
+        .save(
           current.copyWith(
             nickname: _nicknameCtrl.text.trim(),
-            instagramHandle:
-                _instaCtrl.text.trim().replaceFirst('@', ''),
+            instagramHandle: _instaCtrl.text.trim().replaceFirst('@', ''),
           ),
         );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('프로필이 저장되었습니다')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('프로필이 저장되었습니다')));
     }
+  }
+
+  Future<void> _pickAvatar() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+    final docsDir = await getApplicationDocumentsDirectory();
+    final ext = p.extension(picked.path);
+    final savedPath = p.join(
+      docsDir.path,
+      'avatar_${DateTime.now().millisecondsSinceEpoch}$ext',
+    );
+    await File(picked.path).copy(savedPath);
+    final current = ref.read(userProfileProvider).value ?? UserProfile.empty;
+    await ref
+        .read(userProfileProvider.notifier)
+        .save(current.copyWith(avatarPath: savedPath));
   }
 
   Future<void> _addBike() async {
@@ -79,19 +102,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final profile =
-        ref.watch(userProfileProvider).value ?? UserProfile.empty;
+    final profile = ref.watch(userProfileProvider).value ?? UserProfile.empty;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('프로필 설정'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
         actions: [
           TextButton(
             onPressed: _save,
-            child:
-                const Text('저장', style: TextStyle(color: Colors.white)),
+            child: const Text('저장', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -100,24 +119,39 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         children: [
           // ── 아바타 ────────────────────────────────────────
           Center(
-            child: Stack(
-              children: [
-                const CircleAvatar(
-                  radius: 48,
-                  backgroundColor: AppColors.primary,
-                  child: Icon(Icons.person, size: 56, color: Colors.white),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Colors.white,
-                    child: Icon(Icons.edit,
-                        size: 18, color: Colors.grey.shade700),
+            child: GestureDetector(
+              onTap: _pickAvatar,
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 48,
+                    backgroundColor: AppColors.primary,
+                    backgroundImage: profile.avatarPath != null
+                        ? FileImage(File(profile.avatarPath!))
+                        : null,
+                    child: profile.avatarPath == null
+                        ? const Icon(
+                            Icons.person,
+                            size: 56,
+                            color: Colors.white,
+                          )
+                        : null,
                   ),
-                ),
-              ],
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.white,
+                      child: Icon(
+                        Icons.edit,
+                        size: 18,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 28),
@@ -140,7 +174,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             label: '인스타그램',
             controller: _instaCtrl,
             hint: '@username',
-            icon: Icons.alternate_email,
+            svgIcon: 'assets/images/instagram_icon.svg',
             prefixText: '@',
           ),
           const SizedBox(height: 28),
@@ -154,8 +188,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 onPressed: _addBike,
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('추가'),
-                style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primary),
+                style: TextButton.styleFrom(foregroundColor: AppColors.primary),
               ),
             ],
           ),
@@ -169,8 +202,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Center(
-                child: Text('등록된 바이크가 없습니다',
-                    style: TextStyle(color: Colors.grey)),
+                child: Text(
+                  '등록된 바이크가 없습니다',
+                  style: TextStyle(color: Colors.grey),
+                ),
               ),
             )
           else
@@ -206,6 +241,34 @@ class _BikeCard extends StatelessWidget {
     required this.onDelete,
   });
 
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('바이크 삭제'),
+        content: const Text('등록한 바이크 정보가 삭제됩니다'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dlgCtx).pop(false),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(dlgCtx).pop(true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      onDelete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -213,17 +276,14 @@ class _BikeCard extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(bottom: 10),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
               ? AppColors.primary.withValues(alpha: 0.1)
               : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSelected
-                ? AppColors.primary
-                : Colors.grey.shade200,
+            color: isSelected ? AppColors.primary : Colors.grey.shade200,
             width: isSelected ? 2 : 1,
           ),
           boxShadow: [
@@ -257,20 +317,25 @@ class _BikeCard extends StatelessWidget {
                   ),
                   Text(
                     '${bike.displacement}cc · ${bike.year}년',
-                    style:
-                        const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ),
             ),
             if (isSelected)
-              const Icon(Icons.check_circle,
-                  color: AppColors.primary, size: 20),
+              const Icon(
+                Icons.check_circle,
+                color: AppColors.primary,
+                size: 20,
+              ),
             const SizedBox(width: 8),
             GestureDetector(
-              onTap: onDelete,
-              child: Icon(Icons.delete_outline,
-                  color: Colors.red.shade300, size: 20),
+              onTap: () => _confirmDelete(context),
+              child: Icon(
+                Icons.delete_outline,
+                color: Colors.red.shade300,
+                size: 20,
+              ),
             ),
           ],
         ),
@@ -292,8 +357,7 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
   final _brandCtrl = TextEditingController();
   final _modelCtrl = TextEditingController();
   final _ccCtrl = TextEditingController();
-  final _yearCtrl =
-      TextEditingController(text: DateTime.now().year.toString());
+  final _yearCtrl = TextEditingController(text: DateTime.now().year.toString());
 
   @override
   void dispose() {
@@ -308,8 +372,7 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('바이크 추가'),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -356,12 +419,13 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
           onPressed: () {
             final cc = int.tryParse(_ccCtrl.text.trim()) ?? 0;
-            final year = int.tryParse(_yearCtrl.text.trim()) ??
-                DateTime.now().year;
+            final year =
+                int.tryParse(_yearCtrl.text.trim()) ?? DateTime.now().year;
             if (_brandCtrl.text.trim().isEmpty ||
                 _modelCtrl.text.trim().isEmpty) {
               return;
@@ -369,9 +433,7 @@ class _BikeEditDialogState extends State<_BikeEditDialog> {
             Navigator.pop(
               context,
               BikeProfile(
-                id: DateTime.now()
-                    .millisecondsSinceEpoch
-                    .toString(),
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
                 brand: _brandCtrl.text.trim(),
                 model: _modelCtrl.text.trim(),
                 displacement: cc,
@@ -405,9 +467,9 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
       await ref.read(authServiceProvider).signInWithGoogle();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그인에 실패했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('로그인에 실패했습니다: $e')));
       }
     } finally {
       if (mounted) setState(() => _signingIn = false);
@@ -419,9 +481,9 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
       await ref.read(authServiceProvider).signOut();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그아웃에 실패했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('로그아웃에 실패했습니다: $e')));
       }
     }
   }
@@ -462,8 +524,7 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
         foregroundColor: const Color(0xFF333333),
         side: BorderSide(color: Colors.grey.shade300),
         padding: const EdgeInsets.symmetric(vertical: 14),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       child: _signingIn
           ? const SizedBox(
@@ -473,11 +534,14 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                Icon(Icons.g_mobiledata,
-                    size: 26, color: Color(0xFF4285F4)),
-                SizedBox(width: 6),
-                Text('Google로 로그인'),
+              children: [
+                SvgPicture.asset(
+                  'assets/images/google_g_logo.svg',
+                  width: 20,
+                  height: 20,
+                ),
+                const SizedBox(width: 10),
+                const Text('Google로 로그인'),
               ],
             ),
     );
@@ -491,10 +555,7 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-          ),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8),
         ],
       ),
       child: Row(
@@ -502,8 +563,9 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
           CircleAvatar(
             radius: 22,
             backgroundColor: AppColors.primary,
-            backgroundImage:
-                user.photoURL != null ? NetworkImage(user.photoURL!) : null,
+            backgroundImage: user.photoURL != null
+                ? NetworkImage(user.photoURL!)
+                : null,
             child: user.photoURL == null
                 ? const Icon(Icons.person, color: Colors.white)
                 : null,
@@ -524,16 +586,12 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
                 if (user.email != null)
                   Text(
                     user.email!,
-                    style:
-                        const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
               ],
             ),
           ),
-          TextButton(
-            onPressed: _signOut,
-            child: const Text('로그아웃'),
-          ),
+          TextButton(onPressed: _signOut, child: const Text('로그아웃')),
         ],
       ),
     );
@@ -563,7 +621,8 @@ class _LabeledField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
   final String hint;
-  final IconData icon;
+  final IconData? icon;
+  final String? svgIcon;
   final String? prefixText;
   final TextInputType? keyboardType;
 
@@ -571,7 +630,8 @@ class _LabeledField extends StatelessWidget {
     required this.label,
     required this.controller,
     required this.hint,
-    required this.icon,
+    this.icon,
+    this.svgIcon,
     this.prefixText,
     this.keyboardType,
   });
@@ -581,8 +641,7 @@ class _LabeledField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
@@ -590,10 +649,22 @@ class _LabeledField extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             prefixText: prefixText,
-            prefixIcon:
-                Icon(icon, size: 18, color: AppColors.primary),
+            prefixIcon: svgIcon != null
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SvgPicture.asset(
+                      svgIcon!,
+                      colorFilter: const ColorFilter.mode(
+                        AppColors.primary,
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  )
+                : Icon(icon, size: 18, color: AppColors.primary),
             contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 12),
+              horizontal: 16,
+              vertical: 12,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: Colors.grey.shade200),
@@ -604,8 +675,7 @@ class _LabeledField extends StatelessWidget {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                  color: AppColors.primary, width: 2),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
             ),
             filled: true,
             fillColor: Colors.grey.shade50,
