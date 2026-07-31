@@ -407,6 +407,15 @@ class FavoritePlacesNotifier extends AsyncNotifier<List<FavoritePlace>> {
     await ref.read(placesServiceProvider).removeFavorite(id);
     ref.invalidateSelf();
   }
+
+  /// [from] 카테고리로 저장된 모든 즐겨찾기를 [to]로 일괄 재배정한다(카테고리
+  /// 삭제 시 소속 즐겨찾기를 미분류로 이동시키는 용도). 원본 저장 순서를
+  /// 보존하는 `PlacesService.reassignFavoriteCategory`를 그대로 호출 — 뒤집힌
+  /// 표시용 `state.value`를 재저장하지 않는다.
+  Future<void> reassignCategory(String from, String to) async {
+    await ref.read(placesServiceProvider).reassignFavoriteCategory(from, to);
+    ref.invalidateSelf();
+  }
 }
 
 /// 즐겨찾기 카테고리 목록(설정 > 즐겨찾기 카테고리 관리에서 편집). 즐겨찾기
@@ -442,6 +451,19 @@ class FavoriteCategoriesNotifier extends AsyncNotifier<List<String>> {
 
   Future<void> remove(String name) async {
     final current = [...(state.value ?? const <String>[])]..remove(name);
+    await ref.read(placesServiceProvider).saveCategories(current);
+    state = AsyncData(current);
+  }
+
+  /// 카테고리 목록 내 순서만 바꾼다(모델 없이 `List<String>`으로만 관리되므로
+  /// 리스트 인덱스 자체가 순서). [newIndex]는 `ReorderableListView.onReorderItem`
+  /// 이 이미 gap-보정해 넘겨주는 최종 인덱스를 그대로 받는다.
+  Future<void> reorder(int oldIndex, int newIndex) async {
+    final current = [...(state.value ?? const <String>[])];
+    if (oldIndex < 0 || oldIndex >= current.length) return;
+    final item = current.removeAt(oldIndex);
+    final insertAt = newIndex.clamp(0, current.length);
+    current.insert(insertAt, item);
     await ref.read(placesServiceProvider).saveCategories(current);
     state = AsyncData(current);
   }

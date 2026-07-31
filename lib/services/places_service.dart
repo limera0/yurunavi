@@ -45,6 +45,31 @@ class PlacesService {
     await prefs.setStringList(_favKey, raw);
   }
 
+  /// [from] 카테고리로 저장된 즐겨찾기를 전부 [to]로 재배정한다(카테고리 삭제
+  /// 시 미분류로 이동시키는 용도). `loadFavorites()`와 달리 저장 순서를
+  /// 뒤집지 않고 raw 문자열 리스트를 그대로 순회·재저장해 원본 저장 순서를
+  /// 보존한다 — 표시용으로 뒤집힌 리스트를 다시 저장하면 순서가 오염된다.
+  Future<void> reassignFavoriteCategory(String from, String to) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_favKey) ?? [];
+    final updated = raw.map((s) {
+      try {
+        final place = FavoritePlace.fromJsonString(s);
+        if (place.category != from) return s;
+        return FavoritePlace(
+          id: place.id,
+          name: place.name,
+          lat: place.lat,
+          lng: place.lng,
+          category: to,
+        ).toJsonString();
+      } catch (_) {
+        return s;
+      }
+    }).toList();
+    await prefs.setStringList(_favKey, updated);
+  }
+
   // ── Recent routes ─────────────────────────────────────────────────────────
 
   Future<List<RecentRoute>> loadRecent() async {

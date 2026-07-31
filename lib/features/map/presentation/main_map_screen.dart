@@ -2625,7 +2625,10 @@ class _PlacesSheet extends ConsumerWidget {
                           ),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline, size: 18),
-                            onPressed: () => onRemoveFavorite(p.id),
+                            onPressed: () => _confirmDeleteFavorite(
+                              context,
+                              () => onRemoveFavorite(p.id),
+                            ),
                           ),
                           onTap: () => onSelectDest(p.lat, p.lng),
                         )).toList(),
@@ -2659,6 +2662,11 @@ class _PlacesSheet extends ConsumerWidget {
                             ),
                             subtitle: Text(date,
                                 style: const TextStyle(fontSize: 10)),
+                            trailing: _FavoriteStarButton(
+                              lat: r.destLat,
+                              lng: r.destLng,
+                              initialName: _routeTitle(r),
+                            ),
                             onTap: () => onSelectDest(r.destLat, r.destLng),
                           );
                         }).toList(),
@@ -2680,6 +2688,37 @@ class _PlacesSheet extends ConsumerWidget {
     final n = r.destName;
     if (n != null && n.trim().isNotEmpty) return n;
     return '→ ${r.destLat.toStringAsFixed(3)}, ${r.destLng.toStringAsFixed(3)}';
+  }
+
+  /// 즐겨찾기 삭제 확인 다이얼로그 — `tour_summary_list_screen.dart`의
+  /// `_confirmDelete` 패턴(AlertDialog, 제목+본문+취소/삭제)을 복제.
+  Future<void> _confirmDeleteFavorite(
+    BuildContext context,
+    VoidCallback onConfirmed,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('즐겨찾기 삭제'),
+        content: const Text('이 즐겨찾기를 삭제할까요?\n삭제하면 되돌릴 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dlgCtx).pop(false),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(dlgCtx).pop(true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onConfirmed();
   }
 }
 
