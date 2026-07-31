@@ -33,6 +33,9 @@ class TourSummaryDetailScreen extends ConsumerStatefulWidget {
 class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScreen> {
   static const _routeSourceId = 'tour_detail_route';
   static const _routeLayerId = 'tour_detail_route_layer';
+  static const _kStartIcon = 'pointer_start';
+  static const _kDestIcon = 'pointer_red';
+  static const _kPinIconSize = 1.05; // main_map_screen과 동일 배율(96px 핀 기준)
 
   ml.MapLibreMapController? _mlCtrl;
   String? _styleJson;
@@ -185,7 +188,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
         _routeSourceId,
         _routeLayerId,
         ml.LineLayerProperties(
-          lineColor: colorToHex(ref.read(skinProvider).colors.courseLineColor[2]!),
+          lineColor: colorToHex(ref.read(skinProvider).colors.routeLine),
           lineWidth: 5.0,
           lineCap: 'round',
           lineJoin: 'round',
@@ -193,19 +196,20 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
       );
     }
 
-    await ctrl.addCircle(ml.CircleOptions(
+    final startBytes = await rootBundle.load('assets/images/pointer_start.png');
+    await ctrl.addImage(_kStartIcon, startBytes.buffer.asUint8List());
+    final destBytes = await rootBundle.load('assets/images/pointer_red.png');
+    await ctrl.addImage(_kDestIcon, destBytes.buffer.asUint8List());
+
+    await ctrl.addSymbol(ml.SymbolOptions(
       geometry: _toMl(_track.first),
-      circleRadius: 8.0,
-      circleColor: colorToHex(AppColors.mapOrigin),
-      circleStrokeColor: '#FFFFFF',
-      circleStrokeWidth: 2.0,
+      iconImage: _kStartIcon,
+      iconSize: _kPinIconSize,
     ));
-    await ctrl.addCircle(ml.CircleOptions(
+    await ctrl.addSymbol(ml.SymbolOptions(
       geometry: _toMl(_track.last),
-      circleRadius: 8.0,
-      circleColor: colorToHex(AppColors.mapDestination),
-      circleStrokeColor: '#FFFFFF',
-      circleStrokeWidth: 2.0,
+      iconImage: _kDestIcon,
+      iconSize: _kPinIconSize,
     ));
 
     // 0/1개 좌표는 bounds가 퇴화하므로 카메라 fit을 건너뛴다.
@@ -305,7 +309,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                   margin: const EdgeInsets.all(12),
                   padding: const EdgeInsets.fromLTRB(12, 12, 16, 16),
                   decoration: BoxDecoration(
-                    color: cs.surfaceContainerHigh,
+                    color: AppColors.brandMoss,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
@@ -322,16 +326,16 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                         children: [
                           GestureDetector(
                             onTap: () => Navigator.of(context).pop(),
-                            child: Icon(Icons.arrow_back, color: cs.onSurface),
+                            child: const Icon(Icons.arrow_back, color: Colors.white),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               timeRange,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w600,
-                                color: cs.onSurface,
+                                color: Colors.white,
                               ),
                             ),
                           ),
@@ -342,8 +346,8 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                                   ? Icons.edit_note
                                   : Icons.edit_note_outlined,
                               color: (_currentMemo?.isNotEmpty ?? false)
-                                  ? cs.primary
-                                  : cs.onSurface,
+                                  ? Colors.white
+                                  : Colors.white70,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -356,7 +360,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                             onTap: _sharing ? null : _shareTour,
                             child: Opacity(
                               opacity: _sharing ? 0.4 : 1.0,
-                              child: Icon(Icons.ios_share, color: cs.onSurface),
+                              child: const Icon(Icons.ios_share, color: Colors.white),
                             ),
                           ),
                         ],
@@ -364,9 +368,24 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                       const SizedBox(height: 12),
                       Row(
                         children: [
-                          _StatItem(label: '거리', value: formatTourDistanceKm(tourLog.distanceM)),
-                          _StatItem(label: '평균', value: formatTourSpeedKmh(tourLog.avgSpeedKmh)),
-                          _StatItem(label: '최고', value: formatTourSpeedKmh(tourLog.maxSpeedKmh)),
+                          _StatItem(
+                            label: '거리',
+                            value: formatTourDistanceKm(tourLog.distanceM),
+                            labelColor: Colors.white70,
+                            valueColor: Colors.white,
+                          ),
+                          _StatItem(
+                            label: '평균',
+                            value: formatTourSpeedKmh(tourLog.avgSpeedKmh),
+                            labelColor: Colors.white70,
+                            valueColor: Colors.white,
+                          ),
+                          _StatItem(
+                            label: '최고',
+                            value: formatTourSpeedKmh(tourLog.maxSpeedKmh),
+                            labelColor: Colors.white70,
+                            valueColor: Colors.white,
+                          ),
                         ],
                       ),
                     ],
@@ -387,7 +406,11 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeInOut,
                 alignment: Alignment.bottomCenter,
-                child: _memoExpanded ? _buildMemoPanel(cs) : const SizedBox.shrink(),
+                child: _memoExpanded
+                    ? _buildMemoPanel(cs)
+                    : ((_currentMemo?.isNotEmpty ?? false)
+                        ? _buildMemoDisplay(cs)
+                        : const SizedBox.shrink()),
               ),
             ),
           ),
@@ -444,12 +467,46 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
       ),
     );
   }
+
+  /// 메모가 있고 편집 패널이 닫혀 있을 때 지도 위에 항상 떠 있는
+  /// 반투명 표시 카드 — 탭 핸들러 없음(편집은 상단 연필 아이콘으로만).
+  Widget _buildMemoDisplay(ColorScheme cs) {
+    final routeLineColor = ref.read(skinProvider).colors.routeLine;
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: routeLineColor.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        _currentMemo ?? '',
+        maxLines: 6,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white),
+      ),
+    );
+  }
 }
 
 class _StatItem extends StatelessWidget {
   final String label;
   final String value;
-  const _StatItem({required this.label, required this.value});
+  final Color? labelColor;
+  final Color? valueColor;
+  const _StatItem({
+    required this.label,
+    required this.value,
+    this.labelColor,
+    this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -458,11 +515,18 @@ class _StatItem extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+          Text(
+            label,
+            style: TextStyle(fontSize: 11, color: labelColor ?? cs.onSurfaceVariant),
+          ),
           const SizedBox(height: 2),
           Text(
             value,
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cs.onSurface),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: valueColor ?? cs.onSurface,
+            ),
           ),
         ],
       ),
