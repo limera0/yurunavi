@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:developer' as dev;
 import 'dart:math' show Point, cos, sqrt, asin;
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart'
+    show kDebugMode, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show MethodChannel, SystemNavigator, rootBundle;
@@ -159,9 +160,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   bool _e2eHarnessFired = false;
   static const _e2eHarnessChannel =
       MethodChannel('com.westinx.yurunavi/e2e_harness');
-
-  // 뒤로 연타 종료
-  DateTime? _lastBackPress;
 
   // 마지막으로 페치한 3경로 전체 — 카드 전환 시 maneuvers 참조용
   List<RouteResult> _fetchedRoutes = const [];
@@ -1614,19 +1612,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        final now = DateTime.now();
-        if (_lastBackPress != null &&
-            now.difference(_lastBackPress!) < const Duration(seconds: 2)) {
-          SystemNavigator.pop(); // Android 완전 종료
-          return;
-        }
-        _lastBackPress = now;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('뒤로 한 번 더 누르면 앱이 종료됩니다'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        if (defaultTargetPlatform != TargetPlatform.android) return; // iOS: 아무 동작 없음
+        _showExitConfirmSheet(context);
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
@@ -2544,6 +2531,132 @@ class _AddFavoriteSheetState extends ConsumerState<_AddFavoriteSheet> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 라운드17 — 앱 종료 확인 카드 (안드로이드 전용)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 하드웨어 뒤로가기(시스템 back) 시 뜨는 하단 슬라이드업 종료 확인 카드.
+/// X 버튼/카드 바깥 탭 = 취소, 카드가 떠 있는 동안 뒤로가기 재입력 = 완전 종료.
+void _showExitConfirmSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    // 프레임워크 기본 barrier-tap(=maybePop)이 canPop:false와 만나 앱을 통째로
+    // 종료시키는 버그가 있어 비활성화하고, 아래 Stack에서 탭-바깥-닫기를 직접 구현한다.
+    isDismissible: false,
+    builder: (_) => const _ExitConfirmSheet(),
+  );
+}
+
+class _ExitConfirmSheet extends StatelessWidget {
+  const _ExitConfirmSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) SystemNavigator.pop(); // 카드가 뜬 상태에서 재입력 → 완전 종료
+      },
+      child: Stack(
+        children: [
+          // 카드 바깥(화면 전체) 탭 = 취소. Navigator.pop()을 직접 호출(=canPop 무시)하므로
+          // X 버튼과 동일하게 안전하게 카드만 닫히고 앱이 종료되지 않는다.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).pop(),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {}, // 카드 자체 탭은 무시(닫히지 않음)
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 10),
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.textHint.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '앱을 종료하시겠습니까?',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: AppColors.textHint),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(20, 0, 20, 16),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '뒤로 한 번 더 누르면 앱이 종료됩니다',
+                            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                        child: Container(
+                          height: 90,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.textHint.withValues(alpha: 0.25)),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Text(
+                            '광고 영역',
+                            style: TextStyle(fontSize: 13, color: AppColors.textHint),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
