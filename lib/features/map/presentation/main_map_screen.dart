@@ -43,7 +43,7 @@ import 'waypoint_management_sheet.dart';
 
 export 'main_map_screen.dart';
 
-enum _TapAction { destination, waypoint, origin }
+enum _TapAction { destination, origin }
 
 /// 검색 결과 "어디로 추가할까요?" 시트의 선택 결과
 enum _RouteAddAction { origin, waypoint, destination }
@@ -991,8 +991,23 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
 
     final poi = await _resolveTappedPoi(tapped);
     if (!mounted) return;
-    final hasRoute = _showCourseSheet;
-    final act = await _showTapConfirmSheet(tapped, poi, hasRoute);
+
+    // 코스 시트가 열려 있으면(=경로가 이미 표시 중) 지도 탭도 검색결과 탭과
+    // 동일한 4번 카드(_AddToRouteSheet)로 통일 — POI 없으면 이름 자리에 좌표를 보여준다.
+    if (_showCourseSheet) {
+      final name = poi?.name ??
+          '${tapped.latitude.toStringAsFixed(5)}, ${tapped.longitude.toStringAsFixed(5)}';
+      final act = await _showAddToRouteSheet(
+        location: tapped,
+        name: name,
+        hasDest: true,
+      );
+      if (!mounted || act == null) return;
+      await _applyRouteAddAction(act, tapped, name, origin);
+      return;
+    }
+
+    final act = await _showTapConfirmSheet(tapped, poi);
     if (!mounted) return;
     await _applyTapAction(act, tapped, origin, preResolvedName: poi?.name);
   }
@@ -1014,22 +1029,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           await _fetchAndStoreAllRoutes(loc, dest);
         } finally {
           if (mounted) ref.read(mapInteractionProvider.notifier).setLoading(false);
-        }
-      }
-      return;
-    }
-    if (act == _TapAction.waypoint) {
-      ref.read(mapInteractionProvider.notifier)
-          .addWaypoint(loc, name: preResolvedName);
-      final dest = ref.read(mapInteractionProvider).destination;
-      if (dest != null) {
-        ref.read(mapInteractionProvider.notifier).setLoading(true);
-        try {
-          await _fetchAndStoreAllRoutes(origin, dest);
-        } finally {
-          if (mounted) {
-            ref.read(mapInteractionProvider.notifier).setLoading(false);
-          }
         }
       }
       return;
@@ -1104,6 +1103,17 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     await _removeSearchPreviewMarker();
 
     if (act == null) return;
+    await _applyRouteAddAction(act, location, name, origin);
+  }
+
+  /// `_handleLocationTap`(검색결과 탭)과 `_onMapTap`(코스 시트 열린 상태의 지도 탭)이
+  /// 공유하는 `_AddToRouteSheet` 결과(`_RouteAddAction`) 적용 로직.
+  Future<void> _applyRouteAddAction(
+    _RouteAddAction act,
+    LatLng location,
+    String name,
+    LatLng origin,
+  ) async {
     switch (act) {
       case _RouteAddAction.origin:
         ref.read(mapInteractionProvider.notifier).setOrigin(location, name: name);
@@ -1133,7 +1143,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         category: '주소',
       );
 
-  Future<_TapAction?> _showTapConfirmSheet(LatLng tapped, _TappedPoi? poi, bool hasRoute) {
+  Future<_TapAction?> _showTapConfirmSheet(LatLng tapped, _TappedPoi? poi) {
     final title = poi?.name ?? '선택 위치';
     final subtitle = poi?.category ??
         '${tapped.latitude.toStringAsFixed(5)}, ${tapped.longitude.toStringAsFixed(5)}';
@@ -1202,15 +1212,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                   title: const Text('여기로 안내'),
                   onTap: () => Navigator.pop(context, _TapAction.destination),
                 ),
-                if (hasRoute)
-                  ListTile(
-                    leading: const Icon(Icons.add_location_alt_outlined,
-                        color: AppColors.primary),
-                    title: const Text('경유지 추가'),
-                    subtitle: const Text('현재 경로에 경유지를 삽입합니다',
-                        style: TextStyle(fontSize: 12)),
-                    onTap: () => Navigator.pop(context, _TapAction.waypoint),
-                  ),
                 ListTile(
                   leading: const Icon(Icons.close, color: Colors.grey),
                   title: const Text('닫기'),
@@ -1888,7 +1889,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
           Positioned(
             left: 12,
             top: MediaQuery.of(context).size.height * 0.30 + 100,
-            bottom: 160,
+            bottom: _showCourseSheet ? 380 : 160,
             child: _LeftDaylightBar(),
           ),
 
@@ -1966,6 +1967,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                       onStart: _startNavigation,
                       onClose: _clearDestination,
                       waypointCount: interaction.waypoints.length,
+                      waypointNames: interaction.waypointNames,
                       onWaypointEntryTap: () => _showWaypointSheet(context),
                       originName: interaction.stops.isNotEmpty
                           ? (interaction.stops.first.isCurrentLocation
@@ -1973,7 +1975,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                               : interaction.stops.first.name)
                           : null,
                       destinationName: interaction.stops.length >= 2
-                          ? interaction.stops.last.name
+                          ? (interaction.destinationName ?? interaction.stops.last.name)
                           : null,
                     ),
                   ),

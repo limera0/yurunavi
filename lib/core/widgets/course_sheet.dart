@@ -18,10 +18,13 @@ class CourseSheet extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onClose;
 
-  /// 경유지 수 (0이면 "+ 경유지 추가" 텍스트 버튼, 1 이상이면 "경유지 N개 · 편집" 칩)
+  /// 경유지 수 (0이면 회색 "경유지" 텍스트, 1개면 지명, 2개 이상이면 "경유지 N곳")
   final int waypointCount;
 
-  /// 경유지 진입점 탭 콜백 (null이면 버튼 미표시)
+  /// 경유지 지명 목록 (`waypointCount == 1`일 때 첫 항목을 표시)
+  final List<String?> waypointNames;
+
+  /// 경유지 진입점 탭 콜백 (null이면 탭 비활성)
   final VoidCallback? onWaypointEntryTap;
 
   /// 출발지 이름 (null이면 stops 요약 행 미표시)
@@ -38,6 +41,7 @@ class CourseSheet extends StatelessWidget {
     required this.onStart,
     required this.onClose,
     this.waypointCount = 0,
+    this.waypointNames = const [],
     this.onWaypointEntryTap,
     this.originName,
     this.destinationName,
@@ -92,18 +96,12 @@ class CourseSheet extends StatelessWidget {
             ),
           ),
 
-          // 출발·도착 요약 (originName / destinationName 있을 때만)
+          // 출발 >> 경유지 >> 도착 요약 (originName / destinationName 있을 때만)
           if (originName != null || destinationName != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
               child: Row(
                 children: [
-                  Container(
-                    width: 10, height: 10,
-                    decoration: const BoxDecoration(
-                        color: Colors.blue, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       originName ?? '현재 위치',
@@ -113,23 +111,41 @@ class CourseSheet extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
                     child: Text(
-                      waypointCount > 0 ? '· 경유 $waypointCount개 ·' : '→',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textHint),
+                      '>>',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textHint),
                     ),
                   ),
-                  Container(
-                    width: 10, height: 10,
-                    decoration: BoxDecoration(
-                        color: Colors.red.shade400, shape: BoxShape.circle),
+                  Expanded(
+                    flex: 2,
+                    child: GestureDetector(
+                      onTap: onWaypointEntryTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: _WaypointSummarySegment(
+                        count: waypointCount,
+                        names: waypointNames,
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 6),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      '>>',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textHint),
+                    ),
+                  ),
                   Expanded(
                     child: Text(
                       destinationName ?? '목적지',
+                      textAlign: TextAlign.end,
                       style: const TextStyle(
                           fontSize: 12, color: AppColors.textSecondary),
                       maxLines: 1,
@@ -137,26 +153,6 @@ class CourseSheet extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-            ),
-
-          // 경유지 진입점 (경유지 있으면 칩, 없으면 텍스트 버튼)
-          if (onWaypointEntryTap != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: waypointCount > 0
-                    ? ActionChip(
-                        avatar: const Icon(Icons.route, size: 16),
-                        label: Text('경유지 $waypointCount개 · 편집'),
-                        onPressed: onWaypointEntryTap,
-                      )
-                    : TextButton.icon(
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('경유지 추가'),
-                        onPressed: onWaypointEntryTap,
-                      ),
               ),
             ),
 
@@ -169,12 +165,8 @@ class CourseSheet extends StatelessWidget {
                 final hasMeta = routeMeta.length > i;
                 final distKm = hasMeta ? routeMeta[i].km : 0.0;
                 final mins = hasMeta ? routeMeta[i].mins : 0;
-                final ws = hasMeta ? routeMeta[i].windingScore : 0.0;
                 final distStr = hasMeta ? '${distKm.toStringAsFixed(0)}km' : '---';
                 final durStr = hasMeta ? _durFromMins(mins) : '---';
-                // best fun score among loaded routes
-                final bestWs = routeMeta.isEmpty ? 0.0
-                    : routeMeta.map((m) => m.windingScore).reduce((a, b) => a > b ? a : b);
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
@@ -185,8 +177,6 @@ class CourseSheet extends StatelessWidget {
                       info: r,
                       distStr: distStr,
                       duration: durStr,
-                      windingScore: ws,
-                      isBestFun: hasMeta && ws >= bestWs && ws > 0,
                       isSelected: selectedIdx == i,
                       onTap: () => onSelect(i),
                     ),
@@ -210,6 +200,43 @@ class CourseSheet extends StatelessWidget {
   }
 }
 
+/// 코스 요약 행 가운데 세그먼트 — 경유지 0개면 회색 "경유지" 텍스트, 1개면
+/// 지명, 2개 이상이면 "경유지 N곳". 전체가 [CourseSheet]에서 탭 가능하게
+/// 감싸져 `onWaypointEntryTap`으로 연결된다.
+class _WaypointSummarySegment extends StatelessWidget {
+  final int count;
+  final List<String?> names;
+
+  const _WaypointSummarySegment({required this.count, required this.names});
+
+  @override
+  Widget build(BuildContext context) {
+    final String text;
+    final bool isPlaceholder;
+    if (count <= 0) {
+      text = '경유지';
+      isPlaceholder = true;
+    } else if (count == 1) {
+      text = names.isNotEmpty ? (names.first ?? '경유지') : '경유지';
+      isPlaceholder = false;
+    } else {
+      text = '경유지 $count곳';
+      isPlaceholder = false;
+    }
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 12,
+        color: isPlaceholder ? AppColors.textHint : AppColors.textSecondary,
+        fontWeight: isPlaceholder ? FontWeight.w400 : FontWeight.w600,
+      ),
+    );
+  }
+}
+
 class RouteInfo {
   final String label;
   final Color color;
@@ -220,8 +247,6 @@ class RouteCard extends StatelessWidget {
   final RouteInfo info;
   final String distStr;
   final String duration;
-  final double windingScore;
-  final bool isBestFun;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -230,8 +255,6 @@ class RouteCard extends StatelessWidget {
     required this.info,
     required this.distStr,
     required this.duration,
-    this.windingScore = 0.0,
-    this.isBestFun = false,
     required this.isSelected,
     required this.onTap,
   });
@@ -244,20 +267,22 @@ class RouteCard extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
         decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.09) : Colors.white,
+          color: isSelected
+              ? color.withValues(alpha: 0.14)
+              : color.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? color : AppColors.textHint.withValues(alpha: 0.28),
-            width: isSelected ? 1.8 : 1.0,
+            color: isSelected ? color : AppColors.textHint.withValues(alpha: 0.22),
+            width: isSelected ? 2.0 : 1.0,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: color.withValues(alpha: 0.18),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
+                    color: color.withValues(alpha: 0.24),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
                   ),
                 ]
               : [],
@@ -265,54 +290,40 @@ class RouteCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text(
-              info.label,
-              textAlign: TextAlign.center,
-              style: AppTextStyles.labelMD.copyWith(
-                color: isSelected ? color : AppColors.textPrimary,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                height: 1.35,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: isSelected ? 0.20 : 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                info.label,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.labelMD.copyWith(
+                  fontSize: 13,
+                  color: isSelected ? color : AppColors.textPrimary,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  height: 1.3,
+                ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(
               distStr,
               style: AppTextStyles.titleSM.copyWith(
                 color: color,
                 fontWeight: FontWeight.w800,
-                fontSize: 15,
+                fontSize: 19,
               ),
             ),
+            const SizedBox(height: 2),
             Text(
               duration,
               style: AppTextStyles.labelSM.copyWith(
                 color: AppColors.textSecondary,
-                fontSize: 10,
+                fontSize: 12,
               ),
             ),
-            if (windingScore > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: isBestFun
-                        ? info.color.withValues(alpha: 0.15)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isBestFun
-                        ? '★ 재미 ${windingScore.toStringAsFixed(0)}'
-                        : '재미 ${windingScore.toStringAsFixed(0)}',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: isBestFun ? FontWeight.w700 : FontWeight.w400,
-                      color: isBestFun ? info.color : AppColors.textHint,
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),

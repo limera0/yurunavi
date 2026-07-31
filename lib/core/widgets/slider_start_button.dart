@@ -132,13 +132,20 @@ class _SliderStartButtonState extends State<SliderStartButton>
               width: trackWidth,
               height: _trackHeight,
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(14),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(_trackHeight / 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.secondary.withValues(alpha: 0.13),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Stack(
                 children: [
                   const Align(
-                    alignment: Alignment(0.15, 0),
+                    alignment: Alignment(0.1, 0),
                     child: _StartLabel(),
                   ),
                   Positioned(
@@ -147,14 +154,21 @@ class _SliderStartButtonState extends State<SliderStartButton>
                     child: Container(
                       width: _thumbSize,
                       height: _thumbSize,
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.secondary.withValues(alpha: 0.20),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
                       child: const Icon(
-                        Icons.double_arrow_rounded,
-                        color: Colors.white,
-                        size: 26,
+                        Icons.chevron_right_rounded,
+                        color: AppColors.primary,
+                        size: 30,
                       ),
                     ),
                   ),
@@ -173,14 +187,9 @@ class _StartLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      'Start your Engine',
-      style: AppTextStyles.labelLG.copyWith(
-        color: AppColors.secondary,
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
-      ),
+    return Image.asset(
+      'assets/images/slide_to_ride_label.png',
+      height: 20,
     );
   }
 }
