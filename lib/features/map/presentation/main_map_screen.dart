@@ -26,6 +26,7 @@ import '../../../models/saved_place.dart';
 import '../../../services/address_search_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/gas_station_service.dart';
+import '../../../services/geocoding_service.dart';
 import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/poi_icon_renderer.dart';
@@ -985,6 +986,15 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     return _TappedPoi(name: name, category: cat);
   }
 
+  /// POI 없는 지점을 탭했을 때 좌표 대신 보여줄 이름 — 역지오코딩으로 동 단위
+  /// 행정구역 이름을 가져온다. 실패(오프라인/지오코더 없음)하면 좌표로 폴백.
+  Future<String> _resolveFallbackName(LatLng tapped) async {
+    final address = await GeocodingService()
+        .reverseGeocode(tapped.latitude, tapped.longitude);
+    return address ??
+        '${tapped.latitude.toStringAsFixed(5)}, ${tapped.longitude.toStringAsFixed(5)}';
+  }
+
   // ── Map tap ───────────────────────────────────────────────────────────────
 
 Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
@@ -1005,10 +1015,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     if (!mounted) return;
 
     // 코스 시트가 열려 있으면(=경로가 이미 표시 중) 지도 탭도 검색결과 탭과
-    // 동일한 4번 카드(_AddToRouteSheet)로 통일 — POI 없으면 이름 자리에 좌표를 보여준다.
+    // 동일한 4번 카드(_AddToRouteSheet)로 통일 — POI 없으면 역지오코딩한 행정구역
+    // 이름(동 단위)을 보여준다. 실패 시에만 좌표로 최종 폴백.
     if (_showCourseSheet) {
-      final name = poi?.name ??
-          '${tapped.latitude.toStringAsFixed(5)}, ${tapped.longitude.toStringAsFixed(5)}';
+      final name = poi?.name ?? await _resolveFallbackName(tapped);
+      if (!mounted) return;
       final act = await _showAddToRouteSheet(
         location: tapped,
         name: name,
@@ -1033,8 +1044,11 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     String? preResolvedName,
   }) async {
     if (act == _TapAction.origin) {
-      ref.read(mapInteractionProvider.notifier).setOrigin(loc, name: preResolvedName);
-      await _ensureOriginMarker(loc, name: preResolvedName);
+      final name = preResolvedName ?? await _resolveFallbackName(loc);
+      if (!mounted) return;
+      ref.read(mapInteractionProvider.notifier).setOrigin(loc, name: name);
+      await _ensureOriginMarker(loc, name: name);
+      if (!mounted) return;
       final dest = ref.read(mapInteractionProvider).destination;
       if (dest != null) {
         ref.read(mapInteractionProvider.notifier).setLoading(true);
@@ -1317,8 +1331,9 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       ref.read(mapInteractionProvider.notifier).setDestinationName(preResolved);
     } else {
       final resolved = await _resolveTappedPoi(dest);
+      final name = resolved?.name ?? await _resolveFallbackName(dest);
       if (mounted) {
-        ref.read(mapInteractionProvider.notifier).setDestinationName(resolved?.name);
+        ref.read(mapInteractionProvider.notifier).setDestinationName(name);
       }
     }
   }

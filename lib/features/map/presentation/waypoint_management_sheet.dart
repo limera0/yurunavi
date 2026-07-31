@@ -8,7 +8,8 @@ import '../providers/map_providers.dart';
 
 /// 경유지 관리 바텀 시트.
 ///
-/// [DraggableScrollableSheet]로 감싸 초기 60% / 최대 90% / 최소 40% 로 표시.
+/// [DraggableScrollableSheet]로 감싸며, 초기 높이는 정차지 개수에 맞춰 계산한다
+/// (최대 90% / 최소 20%). 제목 없이 핸들 바 아래 바로 리스트가 온다.
 /// stops 배열을 [ReorderableListView]로 나열하고, 순서 변경 / 경유지 삭제 후
 /// [RoutingService.fetchRoutes]로 즉시 경로를 재계산한다.
 /// 출발지·도착지 행의 `+` 버튼은 시트를 닫고 지도에서 위치를 고르게 한 뒤,
@@ -60,10 +61,16 @@ class _WaypointManagementSheetState
   // ── 장소명 표시 헬퍼 ────────────────────────────────────────────────────────
 
   String _stopLabel(int idx, int total) {
-    final stops = ref.read(mapInteractionProvider).stops;
+    final state = ref.read(mapInteractionProvider);
+    final stops = state.stops;
     if (stops.isEmpty || idx >= stops.length) return '위치 ${idx + 1}';
     final stop = stops[idx];
     if (idx == 0 && stop.isCurrentLocation) return '현재 위치';
+    // 도착지는 비동기로 resolve된 destinationName이 stops[last].name보다 늦게
+    // 확정될 수 있어(같은 패턴: main_map_screen.dart의 course_sheet 연동부) 우선한다.
+    if (idx == total - 1) {
+      return state.destinationName ?? stop.name ?? '위치 ${idx + 1}';
+    }
     return stop.name ?? '위치 ${idx + 1}';
   }
 
@@ -71,10 +78,22 @@ class _WaypointManagementSheetState
 
   @override
   Widget build(BuildContext context) {
+    // 정차지 개수에 맞춰 시트 높이를 계산 — 고정 60%면 2정차만 있어도 화면
+    // 절반 이상을 빈 여백으로 채운다(사용자 피드백, 2026-07-31).
+    final total = ref.watch(mapInteractionProvider).stops.length;
+    const rowHeight = 56.0;
+    const chromeHeight = 28.0; // 핸들 바 + 위아래 여백
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final contentHeight =
+        chromeHeight + rowHeight * total + bottomInset + 12;
+    final contentFraction =
+        (contentHeight / screenHeight).clamp(0.2, 0.6);
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.6,
+      initialChildSize: contentFraction,
       maxChildSize: 0.9,
-      minChildSize: 0.4,
+      minChildSize: 0.2,
       expand: false,
       builder: (context, scrollController) {
         return _SheetBody(
@@ -166,29 +185,7 @@ class _SheetBody extends ConsumerWidget {
           else
             const SizedBox(height: 2),
 
-          // ── 헤더 ──────────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    '경유지 관리',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).pop(),
-                  color: AppColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 4),
 
           // ── 리스트 ────────────────────────────────────────────────────────
           Expanded(
@@ -213,6 +210,14 @@ class _SheetBody extends ConsumerWidget {
                         for (int i = 0; i < total; i++)
                           ListTile(
                             key: ValueKey(i),
+                            // 드래그 핸들은 리스트 왼쪽에 고정 (ReorderableListView가 자동 처리).
+                            leading: ReorderableDragStartListener(
+                              index: i,
+                              child: const Icon(
+                                Icons.unfold_more,
+                                color: Colors.grey,
+                              ),
+                            ),
                             title: Text(
                               stopLabel(i, total),
                               style: TextStyle(
@@ -228,43 +233,25 @@ class _SheetBody extends ConsumerWidget {
                             // 경유지(출발지/도착지 아님)만 삭제 버튼 표시.
                             // stops.length < 2이면 삭제 버튼 모두 비활성화.
                             // 출발지/도착지 행에는 대신 지도기반 추가 `+` 버튼.
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (i > 0 && i < total - 1)
-                                  _RemoveBadge(
+                            trailing: i > 0 && i < total - 1
+                                ? _RemoveBadge(
                                     enabled: !(total < 2 || isRecalculating),
                                     // waypoints 기준 0-based idx = stops idx - 1
                                     onPressed: () => onRemove(i - 1),
-                                  ),
-                                if (i == 0)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 4),
-                                    child: MapCtrlBtn(
-                                      icon: Icons.add,
-                                      onTap: onInsertAtStart,
-                                      size: 32,
-                                    ),
-                                  ),
-                                if (i == total - 1 && total > 1)
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 4),
-                                    child: MapCtrlBtn(
-                                      icon: Icons.add,
-                                      onTap: onInsertAtEnd,
-                                      size: 32,
-                                    ),
-                                  ),
-                                // 드래그 핸들 (ReorderableListView가 자동 처리)
-                                ReorderableDragStartListener(
-                                  index: i,
-                                  child: const Icon(
-                                    Icons.unfold_more,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
+                                  )
+                                : i == 0
+                                    ? MapCtrlBtn(
+                                        icon: Icons.add,
+                                        onTap: onInsertAtStart,
+                                        size: 32,
+                                      )
+                                    : (i == total - 1 && total > 1)
+                                        ? MapCtrlBtn(
+                                            icon: Icons.add,
+                                            onTap: onInsertAtEnd,
+                                            size: 32,
+                                          )
+                                        : null,
                           ),
                       ],
                     ),

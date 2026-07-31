@@ -79,6 +79,14 @@ class YuruNaviApp extends ConsumerWidget {
         Locale('ja'),
       ],
       locale: const Locale('ko'),
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.noScaling,
+          ),
+          child: child!,
+        );
+      },
       home: const SplashScreen(),
     );
   }
