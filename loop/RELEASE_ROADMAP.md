@@ -1049,6 +1049,47 @@ Tailscale이 연결돼 있다면, SSH 말고도 이 호스트에 접근할 수 �
 
 1~5순위 전부 완료. 21번 항목 DONE.
 
+### 22. 투어 진단 로그 커버리지 확대 — DONE (2026-07-31, 커밋 `4c8cd03`)
+
+**배경**: 2026-08-01~02(내일부터) 2일간 500km+ 실투어링을 release build로 진행 예정.
+마스터가 투어 후 로그 파일을 뽑아 Claude가 분석해 예상치 못한 문제를 찾아달라고 요청.
+**20번(위치정보 확인자료 로깅)과는 목적이 완전히 다름** — 20번은 위치정보법 제16조에
+따른 백엔드(`native/src/main.rs`) 측 법적 의무 기록이고, 이 22번은 순수 클라이언트
+진단용 디버그 로그(어느 기능이 어떻게 실패했는지 사후 분석용). 커밋 메시지에 "(20번
+관련)"이라 잘못 적었는데 실제로는 무관한 별개 항목 — 이 섹션이 정정 기록.
+
+**발견한 핵심 문제**: `FileLogger`(`lib/core/logging/file_logger.dart`)는
+`debugPrint('YNAV_...')` 프리픽스만 파일로 캡처하는데, 라우팅 서버 타임아웃/HTTP
+실패/no-route 등 핵심 에러 다수가 `dev.log()`로만 찍히고 있어 DevTools 미연결 시(즉
+실사용 중에는 항상) 파일에 전혀 안 남고 있었음. 시골길에서 자체 호스팅 서버
+(Valhalla/navi) 연결 문제가 가장 유력한 장애 시나리오인데 그게 기록조차 안 되는
+상태였던 것이 이번 세션에서 드러난 최우선 갭.
+
+**수정 내용**:
+- `routing_service.dart`: Valhalla 타임아웃/소켓에러/HTTP실패/재시도루프 실패 →
+  `YNAV_ROUTE_ERR`
+- `native_engine.dart`: scoreFunV2 실패, GPS 정확도 이상값, off-route/목적지 도달
+  엣지케이스 → `YNAV_ENGINE_ERR`
+- `daylight_service.dart`/`connectivity_service.dart`/`gas_station_service.dart`:
+  `YNAV_` 프리픽스 누락으로 조용히 버려지던 라인 수정
+- `nav_screen.dart`: 앱 라이프사이클 전환(`YNAV_LIFECYCLE`)·PIP 진입(`YNAV_PIP`) 로그
+- `crash_reporting.dart`: Crashlytics 기록과 별개로 파일 로그에도 `YNAV_CRASH` 요약
+  미러링(마스터만 접근 가능한 Crashlytics 콘솔과 달리, 로그 파일은 Claude가 직접
+  받아서 분석 가능)
+- `file_logger.dart`: 세션 시작 시 OS/버전/release여부 헤더(`YNAV_SESSION`) 기록
+
+새 의존성 추가 없음, 비즈니스 로직 변경 없음(순수 로그 추가). `flutter analyze` 통과,
+code-auditor PASS. **release build 후 M32(`RZ8RC1N3V9W`) 실기기에 설치·기동해
+`YNAV_SESSION os=android osVer="TP1A.220624.014.M325FXXSDDYE3" release=true`가
+`/storage/emulated/0/Android/data/com.westinx.yurunavi/files/ynav_*.log`에 실제로
+기록됨을 확인** — release 빌드에서 로그 파이프라인이 정상 작동함을 스모크 테스트로
+검증 완료.
+
+**주의**: 이 설치 과정에서 기기에 이전에 남아있던 debug 서명 앱과 서명 충돌이 발생해
+`adb uninstall` 후 재설치함 — **기기에 있던 기존 투어 기록/즐겨찾기/설정값 전부
+소실(마스터 확인 후 진행)**. 투어 종료 후 로그 회수는 `adb pull` 또는 파일탐색기로
+위 경로에서 가져오면 됨.
+
 ## 세션 프로토콜
 - 새 세션 시작 시: 이 파일 먼저 읽고 상태 요약표에서 다음 항목 확인
 - 착수 시: 상태 IN_PROGRESS + 체크포인트 커밋
