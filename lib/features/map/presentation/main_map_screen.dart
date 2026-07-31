@@ -1238,6 +1238,8 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       builder: (_) => _AddToRouteSheet(
         name: name,
         hasDest: hasDest,
+        lat: location.latitude,
+        lng: location.longitude,
       ),
     );
   }
@@ -3410,10 +3412,14 @@ class _AddToRouteSheet extends StatelessWidget {
   final String name;
   /// 목적지가 이미 설정된 경우 true — 경유지 추가 버튼 활성화 여부 결정.
   final bool hasDest;
+  final double lat;
+  final double lng;
 
   const _AddToRouteSheet({
     required this.name,
     required this.hasDest,
+    required this.lat,
+    required this.lng,
   });
 
   @override
@@ -3440,27 +3446,21 @@ class _AddToRouteSheet extends StatelessWidget {
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    const Text(
-                      '어디로 추가할까요?',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w500,
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    const SizedBox(width: 8),
+                    _FavoriteStarButton(lat: lat, lng: lng, initialName: name),
                   ],
                 ),
               ),
@@ -3473,10 +3473,16 @@ class _AddToRouteSheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(Icons.trip_origin, size: 16, color: Colors.blue),
-                        label: const Text('출발', style: TextStyle(color: Colors.blue)),
+                        icon: const Icon(Icons.trip_origin, size: 16, color: AppColors.primary),
+                        label: const Text(
+                          '출발',
+                          style: TextStyle(color: AppColors.primary),
+                          softWrap: false,
+                        ),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.blue),
+                          side: const BorderSide(color: AppColors.primary),
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          overlayColor: AppColors.primary.withValues(alpha: 0.15),
                         ),
                         onPressed: () => Navigator.pop(context, _RouteAddAction.origin),
                       ),
@@ -3487,18 +3493,21 @@ class _AddToRouteSheet extends StatelessWidget {
                         icon: Icon(
                           Icons.add_location_alt_outlined,
                           size: 16,
-                          color: hasDest ? Colors.grey.shade600 : Colors.grey.shade300,
+                          color: hasDest ? AppColors.primary : Colors.grey.shade300,
                         ),
                         label: Text(
                           '경유지',
                           style: TextStyle(
-                            color: hasDest ? Colors.grey.shade600 : Colors.grey.shade300,
+                            color: hasDest ? AppColors.primary : Colors.grey.shade300,
                           ),
+                          softWrap: false,
                         ),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(
-                            color: hasDest ? Colors.grey.shade400 : Colors.grey.shade200,
+                            color: hasDest ? AppColors.primary : Colors.grey.shade200,
                           ),
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          overlayColor: AppColors.primary.withValues(alpha: 0.15),
                         ),
                         onPressed: hasDest
                             ? () => Navigator.pop(context, _RouteAddAction.waypoint)
@@ -3508,10 +3517,16 @@ class _AddToRouteSheet extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: Icon(Icons.flag_outlined, size: 16, color: AppColors.primary),
-                        label: Text('도착', style: TextStyle(color: AppColors.primary)),
+                        icon: const Icon(Icons.flag_outlined, size: 16, color: AppColors.primary),
+                        label: const Text(
+                          '도착',
+                          style: TextStyle(color: AppColors.primary),
+                          softWrap: false,
+                        ),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: AppColors.primary),
+                          side: const BorderSide(color: AppColors.primary),
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          overlayColor: AppColors.primary.withValues(alpha: 0.15),
                         ),
                         onPressed: () => Navigator.pop(context, _RouteAddAction.destination),
                       ),
