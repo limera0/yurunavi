@@ -103,6 +103,11 @@ final currentLocationProvider =
 /// - [waypointSelecting]   : 경유지 선택 대기 중 (다음 탭이 경유지 핀으로 확정)
 enum MapInteractionMode { idle, destinationSelected, waypointSelecting }
 
+/// 경유지 관리 카드의 출발지/도착지 `+` 버튼으로 지도에서 위치를 고를 때,
+/// 그 위치를 리스트의 맨 앞(출발지 바로 다음)에 넣을지 맨 뒤(도착지 바로
+/// 앞)에 넣을지를 나타내는 1회성 신호. `null`이면 대기 중인 요청 없음.
+enum WaypointInsertPosition { start, end }
+
 class MapInteractionState {
   final MapInteractionMode mode;
   final List<RouteStop> stops; // [출발지, 경유지..., 도착지] 통합 리스트
@@ -113,6 +118,7 @@ class MapInteractionState {
   final int selectedRouteIdx; // 0: 시골길, 1: 지방도로, 2: 국도
   final List<({double km, int mins, double windingScore})> allRouteMeta; // 각 경로의 거리·시간 메타
   final String? destinationName; // POI 탭 지명 (비동기 해석 전용)
+  final WaypointInsertPosition? pendingWaypointInsert; // 경유지 관리 카드의 지도기반 + 버튼 1회성 신호
 
   const MapInteractionState({
     this.mode = MapInteractionMode.idle,
@@ -124,6 +130,7 @@ class MapInteractionState {
     this.selectedRouteIdx = 2,
     this.allRouteMeta = const [],
     this.destinationName,
+    this.pendingWaypointInsert,
   });
 
   // ── 편의 getter (기존 호출부 호환) ────────────────────────────────────────────
@@ -157,10 +164,12 @@ class MapInteractionState {
     int? selectedRouteIdx,
     List<({double km, int mins, double windingScore})>? allRouteMeta,
     String? destinationName,
+    WaypointInsertPosition? pendingWaypointInsert,
     bool clearStops = false,
     bool clearWaypoints = false,
     bool clearRoute = false,
     bool clearDestinationName = false,
+    bool clearPendingWaypointInsert = false,
   }) {
     List<RouteStop> resolvedStops;
     if (clearStops) {
@@ -181,6 +190,9 @@ class MapInteractionState {
       selectedRouteIdx: selectedRouteIdx ?? this.selectedRouteIdx,
       allRouteMeta: clearRoute ? const [] : allRouteMeta ?? this.allRouteMeta,
       destinationName: clearDestinationName ? null : destinationName ?? this.destinationName,
+      pendingWaypointInsert: clearPendingWaypointInsert
+          ? null
+          : pendingWaypointInsert ?? this.pendingWaypointInsert,
     );
   }
 }
@@ -234,13 +246,24 @@ class MapInteractionNotifier extends Notifier<MapInteractionState> {
     }
   }
 
-  /// 경유지 추가 — stops의 도착지 바로 앞에 삽입
-  void addWaypoint(LatLng wp, {String? name}) {
+  /// 경유지 추가 — 기본은 도착지 바로 앞에 삽입, [atStart]가 true면 출발지
+  /// 바로 다음(맨 앞 경유지)에 삽입.
+  void addWaypoint(LatLng wp, {String? name, bool atStart = false}) {
     final stops = [...state.stops];
-    final insertIdx = stops.length >= 2 ? stops.length - 1 : stops.length;
+    final insertIdx = atStart
+        ? (stops.length >= 2 ? 1 : stops.length)
+        : (stops.length >= 2 ? stops.length - 1 : stops.length);
     stops.insert(insertIdx, RouteStop(latLng: wp, name: name));
     state = state.copyWith(stops: stops, mode: MapInteractionMode.idle);
   }
+
+  /// 경유지 관리 카드의 출발지/도착지 `+` 버튼 클릭 시 삽입 위치 의도를 저장.
+  /// `null`로 호출하면 신호를 명시적으로 지운다(1회성 신호이므로 소비 후 반드시 clear).
+  void setPendingWaypointInsert(WaypointInsertPosition? pos) =>
+      state = state.copyWith(
+        pendingWaypointInsert: pos,
+        clearPendingWaypointInsert: pos == null,
+      );
 
   /// 단일 경유지 설정 (기존 API 호환)
   void setWaypoint(LatLng wp) => addWaypoint(wp);

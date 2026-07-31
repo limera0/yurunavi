@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/map_ctrl_btn.dart';
 import '../../../services/routing_service.dart';
 import '../providers/map_providers.dart';
-import 'address_search_sheet.dart';
 
 /// 경유지 관리 바텀 시트.
 ///
 /// [DraggableScrollableSheet]로 감싸 초기 60% / 최대 90% / 최소 40% 로 표시.
 /// stops 배열을 [ReorderableListView]로 나열하고, 순서 변경 / 경유지 삭제 후
 /// [RoutingService.fetchRoutes]로 즉시 경로를 재계산한다.
-/// "＋ 경유지 추가" 버튼은 인라인으로 [AddressSearchSheet]를 열어 결과를 바로 추가한다.
+/// 출발지·도착지 행의 `+` 버튼은 시트를 닫고 지도에서 위치를 고르게 한 뒤,
+/// 선택이 확정되면(4번 POI 카드) 이 시트를 다시 열어 갱신된 목록을 보여준다.
 class WaypointManagementSheet extends ConsumerStatefulWidget {
   const WaypointManagementSheet({super.key});
 
@@ -57,14 +57,6 @@ class _WaypointManagementSheetState
     }
   }
 
-  // ── 아이콘 색상 헬퍼 ────────────────────────────────────────────────────────
-
-  Color _iconColor(int idx, int total) {
-    if (idx == 0) return AppColors.primary;
-    if (idx == total - 1) return Colors.red;
-    return Colors.grey;
-  }
-
   // ── 장소명 표시 헬퍼 ────────────────────────────────────────────────────────
 
   String _stopLabel(int idx, int total) {
@@ -88,7 +80,6 @@ class _WaypointManagementSheetState
         return _SheetBody(
           scrollController: scrollController,
           isRecalculating: _isRecalculating,
-          iconColor: _iconColor,
           stopLabel: _stopLabel,
           onReorder: (oldIdx, newIdx) {
             ref
@@ -102,7 +93,18 @@ class _WaypointManagementSheetState
                 .removeWaypoint(waypointIdx);
             _recalculate();
           },
-          onRecalculate: _recalculate,
+          onInsertAtStart: () {
+            ref
+                .read(mapInteractionProvider.notifier)
+                .setPendingWaypointInsert(WaypointInsertPosition.start);
+            Navigator.of(context).pop();
+          },
+          onInsertAtEnd: () {
+            ref
+                .read(mapInteractionProvider.notifier)
+                .setPendingWaypointInsert(WaypointInsertPosition.end);
+            Navigator.of(context).pop();
+          },
         );
       },
     );
@@ -114,20 +116,20 @@ class _WaypointManagementSheetState
 class _SheetBody extends ConsumerWidget {
   final ScrollController scrollController;
   final bool isRecalculating;
-  final Color Function(int idx, int total) iconColor;
   final String Function(int idx, int total) stopLabel;
   final void Function(int oldIdx, int newIdx) onReorder;
   final void Function(int waypointIdx) onRemove;
-  final Future<void> Function()? onRecalculate;
+  final VoidCallback onInsertAtStart;
+  final VoidCallback onInsertAtEnd;
 
   const _SheetBody({
     required this.scrollController,
     required this.isRecalculating,
-    required this.iconColor,
     required this.stopLabel,
     required this.onReorder,
     required this.onRemove,
-    this.onRecalculate,
+    required this.onInsertAtStart,
+    required this.onInsertAtEnd,
   });
 
   @override
@@ -211,16 +213,13 @@ class _SheetBody extends ConsumerWidget {
                         for (int i = 0; i < total; i++)
                           ListTile(
                             key: ValueKey(i),
-                            leading: Icon(
-                              Icons.circle,
-                              size: 14,
-                              color: iconColor(i, total),
-                            ),
                             title: Text(
                               stopLabel(i, total),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: (i == 0 || i == total - 1)
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
                                 color: AppColors.textPrimary,
                               ),
                               maxLines: 1,
@@ -228,26 +227,39 @@ class _SheetBody extends ConsumerWidget {
                             ),
                             // 경유지(출발지/도착지 아님)만 삭제 버튼 표시.
                             // stops.length < 2이면 삭제 버튼 모두 비활성화.
+                            // 출발지/도착지 행에는 대신 지도기반 추가 `+` 버튼.
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (i > 0 && i < total - 1)
-                                  IconButton(
-                                    icon: const Icon(
-                                        Icons.remove_circle_outline),
-                                    color: total < 2
-                                        ? Colors.grey[300]
-                                        : Colors.grey[600],
-                                    onPressed: (total < 2 || isRecalculating)
-                                        ? null
-                                        // waypoints 기준 0-based idx = stops idx - 1
-                                        : () => onRemove(i - 1),
+                                  _RemoveBadge(
+                                    enabled: !(total < 2 || isRecalculating),
+                                    // waypoints 기준 0-based idx = stops idx - 1
+                                    onPressed: () => onRemove(i - 1),
+                                  ),
+                                if (i == 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 4),
+                                    child: MapCtrlBtn(
+                                      icon: Icons.add,
+                                      onTap: onInsertAtStart,
+                                      size: 32,
+                                    ),
+                                  ),
+                                if (i == total - 1 && total > 1)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 4),
+                                    child: MapCtrlBtn(
+                                      icon: Icons.add,
+                                      onTap: onInsertAtEnd,
+                                      size: 32,
+                                    ),
                                   ),
                                 // 드래그 핸들 (ReorderableListView가 자동 처리)
                                 ReorderableDragStartListener(
                                   index: i,
                                   child: const Icon(
-                                    Icons.drag_handle,
+                                    Icons.unfold_more,
                                     color: Colors.grey,
                                   ),
                                 ),
@@ -258,35 +270,38 @@ class _SheetBody extends ConsumerWidget {
                     ),
             ),
           ),
-
-          // ── 경유지 추가 버튼 ───────────────────────────────────────────────
-          Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              bottom: MediaQuery.of(context).padding.bottom + 12,
-              top: 4,
-            ),
-            child: TextButton.icon(
-              onPressed: () async {
-                final result = await showModalBottomSheet<
-                    ({LatLng latLng, String name})>(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (_) => const AddressSearchSheet(),
-                );
-                if (result != null && context.mounted) {
-                  ref
-                      .read(mapInteractionProvider.notifier)
-                      .addWaypoint(result.latLng, name: result.name);
-                  await onRecalculate?.call();
-                }
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('경유지 추가'),
-            ),
-          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
         ],
+      ),
+    );
+  }
+}
+
+/// 중간 경유지 삭제 버튼 — 원형 배지 스타일 (⊖).
+class _RemoveBadge extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  const _RemoveBadge({required this.enabled, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      height: 32,
+      margin: const EdgeInsets.only(right: 4),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: enabled
+            ? Colors.red.withValues(alpha: 0.08)
+            : Colors.grey.withValues(alpha: 0.08),
+      ),
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        icon: const Icon(Icons.remove_circle_outline),
+        color: enabled ? Colors.red[400] : Colors.grey[300],
+        onPressed: enabled ? onPressed : null,
       ),
     );
   }

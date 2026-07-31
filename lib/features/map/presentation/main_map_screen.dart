@@ -17,6 +17,7 @@ import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../core/widgets/map_ctrl_btn.dart';
 import '../../../models/address_result.dart';
 import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
@@ -1118,7 +1119,12 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
       case _RouteAddAction.origin:
         ref.read(mapInteractionProvider.notifier).setOrigin(location, name: name);
       case _RouteAddAction.waypoint:
-        ref.read(mapInteractionProvider.notifier).addWaypoint(location, name: name);
+        final pending = ref.read(mapInteractionProvider).pendingWaypointInsert;
+        ref.read(mapInteractionProvider.notifier).addWaypoint(
+              location,
+              name: name,
+              atStart: pending == WaypointInsertPosition.start,
+            );
         final dest = ref.read(mapInteractionProvider).destination;
         if (dest != null) {
           ref.read(mapInteractionProvider.notifier).setLoading(true);
@@ -1130,6 +1136,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             }
           }
         }
+        ref.read(mapInteractionProvider.notifier).setPendingWaypointInsert(null);
+        // 경유지 관리 카드의 `+` 버튼으로 진입한 경우에만 카드를 다시 연다
+        // (일반 검색결과/지도탭 경유지 추가는 이 자동 재오픈 대상이 아님).
+        if (pending != null && mounted) _showWaypointSheet(context);
       case _RouteAddAction.destination:
         await _applyDestination(location, preResolved: name);
     }
@@ -1866,7 +1876,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             right: 12,
             child: Column(
               children: [
-                _MapCtrlBtn(
+                MapCtrlBtn(
                   icon: Icons.history_rounded,
                   size: 68,
                   onTap: () => Navigator.of(context).push(
@@ -1874,7 +1884,7 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
                   ),
                 ),
                 const SizedBox(height: 8),
-                _MapCtrlBtn(
+                MapCtrlBtn(
                   icon: Icons.bookmark_border_rounded,
                   size: 68,
                   onTap: _showPlacesSheet,
@@ -2062,7 +2072,7 @@ class _MapHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          _MapCtrlBtn(icon: Icons.settings_outlined, onTap: onSettings, size: 68),
+          MapCtrlBtn(icon: Icons.settings_outlined, onTap: onSettings, size: 68),
         ],
       ),
     );
@@ -2119,60 +2129,18 @@ class _RightPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // ── 내 위치 복귀 ────────────────────────────────────
-        _MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter, size: 68),
+        MapCtrlBtn(icon: Icons.my_location, onTap: onRecenter, size: 68),
 
         const SizedBox(height: 34),
 
         // ── 줌 인 ─────────────────────────────────────────
-        _MapCtrlBtn(icon: Icons.add, onTap: onZoomIn, bold: true, size: 68),
+        MapCtrlBtn(icon: Icons.add, onTap: onZoomIn, bold: true, size: 68),
 
         const SizedBox(height: 4),
 
         // ── 줌 아웃 ───────────────────────────────────────
-        _MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true, size: 68),
+        MapCtrlBtn(icon: Icons.remove, onTap: onZoomOut, bold: true, size: 68),
       ],
-    );
-  }
-}
-
-class _MapCtrlBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool bold;
-  final double size;
-
-  const _MapCtrlBtn({
-    required this.icon,
-    required this.onTap,
-    this.bold = false,
-    this.size = 42,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.secondary.withValues(alpha: 0.13),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Icon(
-          icon,
-          size: size * (bold ? 0.52 : 0.48),
-          color: AppColors.secondary,
-          weight: bold ? 700 : 400,
-        ),
-      ),
     );
   }
 }
