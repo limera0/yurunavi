@@ -247,14 +247,30 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   // 뷰포트 사각형+타입 조합 단위로 최근 조회 결과를 재사용해 패닝 왕복 시
   // 불필요한 네트워크 재조회를 막는다. 이 State 인스턴스 전용(전역 아님).
   final _poiRegionCache = PoiRegionCache();
+  // ambient POI 재조회 디바운스(15초/200m, nav_screen과 동일 정책) — 반드시
+  // shouldFetch가 true인 그 자리에서(await 전에) markStarted를 호출해야 한다.
+  // 응답 후에만 커밋하면 응답이 느릴 때 디바운스가 영원히 무장되지 않아 1Hz
+  // 재시도가 무한 반복되는 결함이 생긴다(2026-08-05 S2에서 발견한 429 폭주 원인).
+  final _ambientThrottle = PoiFetchThrottle(
+    minInterval: const Duration(seconds: 15),
+    minMoveMeters: 200,
+  );
+  // 진행 중인 ambient fetch가 있으면 새 호출은 즉시 return — HTTP 요청이 겹쳐
+  // 쌓이는 걸 막는다.
+  bool _ambientFetchInFlight = false;
 
   // 6번: 검색 시트("장소 검색") 전용 백그라운드 프리페치 — ambient 레이어(위)와는
   // 완전히 별개. GPS 위치 갱신 시마다 5종 전체를 미리 받아 캐시해 둬서, 시트를
   // 열었을 때 네트워크 대기 없이 바로 칩 필터링이 가능하게 한다.
   List<Poi> _searchPrefetchPois = const [];
   LatLng? _searchPrefetchCenter;
-  DateTime? _searchPrefetchAt;
   int _searchPrefetchGen = 0;
+  // search prefetch 디바운스(60초/500m) — ambient와 동일한 이유로 선커밋 필수.
+  final _searchPrefetchThrottle = PoiFetchThrottle(
+    minInterval: const Duration(seconds: 60),
+    minMoveMeters: 500,
+  );
+  bool _searchPrefetchInFlight = false;
 
   // Course sheet
   bool _showCourseSheet = false;
@@ -724,9 +740,15 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   /// 멈출 때 1회) 뷰포트 중심 기준으로 POI를 재조회해 ambient 레이어를 갱신한다.
   /// 화면에 실제 보이는 것만, 카테고리 우선순위(주유소>편의점>카페>대형마트>식당)와
   /// 화면 분포를 함께 고려해 최대 20개로 제한한다.
+  ///
+  /// 디바운스(15초/200m, `_ambientThrottle`)와 in-flight 가드(`_ambientFetchInFlight`)
+  /// 둘 다 네트워크 await 전에 판단·커밋한다 — 응답이 느릴 때 디바운스가
+  /// 영원히 무장되지 않아 1Hz 재시도가 무한 반복되던 결함(2026-08-05 S2)의
+  /// 재발 방지가 핵심이다.
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
+    if (_ambientFetchInFlight) return; // 진행 중인 fetch가 있으면 즉시 포기
 
     final targetTypes =
         PoiType.values.where((t) => _currentZoom >= t.minZoomLevel).toSet();
@@ -736,78 +758,120 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         _ambientPois = const [];
         _updateAmbientPoiLayer(const []);
       }
+      _ambientThrottle.clearTypes();
       return;
     }
 
-    // 로컬 SQLite 기반 POI라 서드파티 API 쿼터 부담이 없다 — onCameraIdle마다
-    // (제스처가 멈출 때 1회만 발생하므로 자체적으로 충분히 rate-limit된다)
-    // 무조건 재조회한다. 동일 뷰포트+타입 재조회는 아래 _poiRegionCache가 걸러낸다.
+    // trackCameraPosition: true라 플랫폼 채널 호출 없이 즉시 읽을 수 있는
+    // 저비용 근사 중심점 — 디바운스 판단(및 그 자리에서의 즉시 커밋)에만 쓰고,
+    // 실제 조회 bounds는 아래에서 getVisibleRegion()으로 정확히 다시 구한다.
+    final camTarget = ctrl.cameraPosition?.target;
+    if (camTarget == null) return;
+    final approxCenter = LatLng(camTarget.latitude, camTarget.longitude);
 
-    // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
-    // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
-    // 이 응답은 stale이니 버린다. getVisibleRegion 앞에서 찍어야
-    // 그 await 도중 끼어든 최신 호출까지 감지된다.
-    final myGen = ++_ambientFetchGen;
+    if (!_ambientThrottle.shouldFetch(center: approxCenter, types: targetTypes)) {
+      return;
+    }
+    // 선커밋 — 아래 두 await(getVisibleRegion, fetchPoisInBounds) 이전에 즉시
+    // 확정한다. await 이후(성공 경로)에서만 커밋하면 응답이 느릴 때 디바운스가
+    // 영원히 무장되지 않는다(2026-08-05 S2 조사에서 발견한 429 폭주의 진짜 원인).
+    _ambientThrottle.markStarted(center: approxCenter, types: targetTypes);
 
-    final ml.LatLngBounds bounds;
+    _ambientFetchInFlight = true;
     try {
-      bounds = await ctrl.getVisibleRegion();
-    } catch (_) {
-      return;
-    }
-    if (!mounted || myGen != _ambientFetchGen) return;
-    final center = LatLng(
-      (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
-      (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
-    );
-    final south = bounds.southwest.latitude;
-    final north = bounds.northeast.latitude;
-    final west = bounds.southwest.longitude;
-    final east = bounds.northeast.longitude;
+      // 이 호출 시작 시점의 세대를 기록 — 아래 두 await(getVisibleRegion,
+      // fetchPois) 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면)
+      // 이 응답은 stale이니 버린다.
+      final myGen = ++_ambientFetchGen;
 
-    final cached = _poiRegionCache.tryGet(
-      south: south,
-      west: west,
-      north: north,
-      east: east,
-      types: targetTypes,
-    );
-
-    final List<Poi> pois;
-    if (cached != null) {
-      pois = cached;
-    } else {
-      final fetched = await ref.read(poiServiceProvider).fetchPoisInBounds(
-            south: south,
-            west: west,
-            north: north,
-            east: east,
-            types: targetTypes.toList(),
-          );
+      final ml.LatLngBounds bounds;
+      try {
+        bounds = await ctrl.getVisibleRegion();
+      } catch (_) {
+        return;
+      }
       if (!mounted || myGen != _ambientFetchGen) return;
-      _poiRegionCache.put(
+      final center = LatLng(
+        (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+        (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+      );
+      final south = bounds.southwest.latitude;
+      final north = bounds.northeast.latitude;
+      final west = bounds.southwest.longitude;
+      final east = bounds.northeast.longitude;
+
+      // 캐시 적중률을 위해 네트워크 요청·캐시 put/get 모두 바깥쪽으로 스냅한
+      // bbox를 쓴다 — 표시(selectForAmbientDisplay)는 실제 뷰포트를 써야
+      // 하므로 후보를 먼저 실제 뷰포트로 필터링한다(아래).
+      final snapped = PoiService.snapBoundsOutward(
         south: south,
         west: west,
         north: north,
         east: east,
-        types: targetTypes,
-        pois: fetched,
       );
-      pois = fetched;
+
+      final cached = _poiRegionCache.tryGet(
+        south: snapped.south,
+        west: snapped.west,
+        north: snapped.north,
+        east: snapped.east,
+        types: targetTypes,
+      );
+
+      final List<Poi> pois;
+      if (cached != null) {
+        pois = cached;
+      } else {
+        try {
+          final fetched = await ref.read(poiServiceProvider).fetchPoisInBounds(
+                south: snapped.south,
+                west: snapped.west,
+                north: snapped.north,
+                east: snapped.east,
+                types: targetTypes.toList(),
+                tag: 'ambient-home',
+              );
+          if (!mounted || myGen != _ambientFetchGen) return;
+          _poiRegionCache.put(
+            south: snapped.south,
+            west: snapped.west,
+            north: snapped.north,
+            east: snapped.east,
+            types: targetTypes,
+            pois: fetched,
+          );
+          pois = fetched;
+        } on PoiFetchException {
+          // 실패(429/네트워크 오류/서킷 오픈) — 캐시에 넣지 않고 기존
+          // _ambientPois를 유지한 채 조용히 종료(화면에서 POI가 사라지지
+          // 않게 한다).
+          return;
+        }
+      }
+
+      final visible = pois
+          .where((p) =>
+              p.location.latitude >= south &&
+              p.location.latitude <= north &&
+              p.location.longitude >= west &&
+              p.location.longitude <= east)
+          .toList();
+
+      final limited = PoiService.selectForAmbientDisplay(
+        candidates: visible,
+        south: south,
+        north: north,
+        west: west,
+        east: east,
+        center: center,
+        maxCount: 20,
+      );
+
+      _ambientPois = limited;
+      _updateAmbientPoiLayer(limited);
+    } finally {
+      _ambientFetchInFlight = false;
     }
-
-    final limited = PoiService.selectForAmbientDisplay(
-      candidates: pois,
-      south: south,
-      north: north,
-      west: west,
-      east: east,
-      center: center,
-      maxCount: 20,
-    );
-
-    _ambientPois = limited;
-    _updateAmbientPoiLayer(limited);
   }
 
   /// GPS 위치가 갱신될 때마다(캐시된 마지막 위치 포함) 호출 — 검색 시트(_PoiExploreSheet)용
@@ -815,25 +879,35 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   /// 재조회하지 않는다 — ambient 레이어보다 완화된 디바운스(반경이 넓어 약간의 위치 오차가
   /// 결과에 큰 영향을 주지 않고, 검색은 ambient만큼 실시간성이 필요하지 않음).
   Future<void> _maybeFetchSearchPrefetch(LatLng center) async {
-    final lastCenter = _searchPrefetchCenter;
-    final lastAt = _searchPrefetchAt;
-    final movedEnough =
-        lastCenter == null || PoiService.haversineMeters(lastCenter, center) >= 500;
-    final staleEnough =
-        lastAt == null || DateTime.now().difference(lastAt) >= const Duration(seconds: 60);
-    if (!movedEnough && !staleEnough) return;
+    if (_searchPrefetchInFlight) return; // 진행 중인 fetch가 있으면 즉시 포기
 
-    final myGen = ++_searchPrefetchGen;
-    final pois = await ref.read(poiServiceProvider).fetchPois(
-          center: center,
-          radiusMeters: 1500,
-          types: PoiType.values,
-        );
-    if (!mounted || myGen != _searchPrefetchGen) return;
+    if (!_searchPrefetchThrottle.shouldFetch(center: center)) return;
+    // 선커밋 — fetchPois await 이전에 즉시 확정(§2-2와 동일한 이유).
+    _searchPrefetchThrottle.markStarted(center: center);
 
-    _searchPrefetchPois = pois;
-    _searchPrefetchCenter = center;
-    _searchPrefetchAt = DateTime.now();
+    _searchPrefetchInFlight = true;
+    try {
+      final myGen = ++_searchPrefetchGen;
+      final List<Poi> pois;
+      try {
+        pois = await ref.read(poiServiceProvider).fetchPois(
+              center: center,
+              radiusMeters: 1500,
+              types: PoiType.values,
+              tag: 'search-prefetch',
+            );
+      } on PoiFetchException {
+        // 실패 — 기존 프리페치 캐시(_searchPrefetchPois/Center)를 유지한 채
+        // 조용히 종료한다.
+        return;
+      }
+      if (!mounted || myGen != _searchPrefetchGen) return;
+
+      _searchPrefetchPois = pois;
+      _searchPrefetchCenter = center;
+    } finally {
+      _searchPrefetchInFlight = false;
+    }
   }
 
   Future<void> _ensureLocationMarker([double? heading]) async {
@@ -3196,11 +3270,24 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   Future<void> _fetchAll() async {
     final origin = widget.origin;
     if (origin == null) return;
-    final pois = await ref.read(poiServiceProvider).fetchPois(
-          center: origin,
-          radiusMeters: 1500,
-          types: PoiType.values,
-        );
+    final List<Poi> pois;
+    try {
+      pois = await ref.read(poiServiceProvider).fetchPois(
+            center: origin,
+            radiusMeters: 1500,
+            types: PoiType.values,
+            tag: 'search-sheet',
+          );
+    } on PoiFetchException {
+      // 실패(429/네트워크 오류/서킷 오픈) — 스피너를 반드시 해제한다(안 하면
+      // 무한 로딩). 이 화면엔 별도 오류 문구 경로가 없어 기존 "결과 없음" 빈
+      // 상태로 자연히 폴백한다.
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+      return;
+    }
     if (!mounted) return;
     pois.sort((a, b) => PoiService.haversineMeters(origin, a.location)
         .compareTo(PoiService.haversineMeters(origin, b.location)));
