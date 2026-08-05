@@ -48,9 +48,23 @@ class PoiService {
   static const int _maxBackoffSeconds = 60;
   static const int _maxRetryAfterSeconds = 300; // 5분 상한
 
+  /// 실패 연속 구간에서 상세 로그를 이미 한 번 남겼는지. 매 실패마다 찍으면
+  /// S1에서 겪은 로그 폭주(디스크 append + 발열·배터리)를 반복한다. 성공 시
+  /// [_onSuccess]에서 리셋되어 다음 장애의 첫 실패는 다시 기록된다.
+  /// 서킷브레이커를 거치지 않는 실패(401 등 비 429/5xx)도 함께 억제하려고
+  /// [_consecutiveFailures]와 별도 플래그로 둔다.
+  bool _failureLogged = false;
+
   bool _circuitOpen(DateTime now) {
     final openUntil = _circuitOpenUntil;
     return openUntil != null && now.isBefore(openUntil);
+  }
+
+  /// 실패 상세를 연속 구간당 1회만 남긴다.
+  void _logFailureOnce(String message) {
+    if (_failureLogged) return;
+    _failureLogged = true;
+    debugPrint(message);
   }
 
   void _onFailure(DateTime now, {int? retryAfterSeconds}) {
@@ -77,6 +91,7 @@ class PoiService {
     final wasOpen = _consecutiveFailures > 0;
     _consecutiveFailures = 0;
     _circuitOpenUntil = null;
+    _failureLogged = false;
     if (wasOpen) {
       debugPrint('YNAV_POI circuit closed');
     }
@@ -121,7 +136,7 @@ class PoiService {
           final retryAfter = _parseRetryAfterSeconds(resp.headers['retry-after']);
           _onFailure(_now(), retryAfterSeconds: retryAfter);
         }
-        debugPrint('YNAV_POI fetch failed status=${resp.statusCode}');
+        _logFailureOnce('YNAV_POI fetch failed status=${resp.statusCode}');
         throw PoiFetchException(
           statusCode: resp.statusCode,
           message: 'status=${resp.statusCode}',
@@ -138,7 +153,7 @@ class PoiService {
         throw const PoiFetchException(message: 'cancelled');
       }
       _onFailure(_now());
-      debugPrint('YNAV_POI fetch failed error=$e');
+      _logFailureOnce('YNAV_POI fetch failed error=$e');
       throw PoiFetchException(message: e.toString());
     } finally {
       // 태그 없는 호출의 client는 여기서 직접 닫아야 한다(아무도 재사용/취소하지

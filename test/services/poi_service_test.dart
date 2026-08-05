@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -596,6 +597,51 @@ void main() {
 
       final result = cache.tryGet(south: 0, west: 0, north: 1, east: 1, types: {PoiType.cafe});
       expect(result, isNull);
+    });
+
+    test(
+        '10) 연속 실패 구간에서 실패 상세 로그는 1회만 나가고, 성공 후 다음 장애에서 다시 1회 나간다',
+        () async {
+      // S1에서 초당 2~3회의 로그 append가 발열·배터리의 직접 원인이었다.
+      // 서킷 전이 로그뿐 아니라 실패 상세 로그도 연속 구간당 1회로 억제돼야 한다.
+      var now = DateTime(2026, 8, 5, 12);
+      var fail = true;
+      final service = PoiService(
+        now: () => now,
+        clientFactory: () => MockClient((request) async =>
+            fail ? http.Response('', 429) : http.Response('[]', 200)),
+      );
+
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) lines.add(message);
+      };
+      addTearDown(() => debugPrint = original);
+
+      Future<void> call() async {
+        try {
+          await service.fetchPois(
+              center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]);
+        } on PoiFetchException {
+          // 기대된 실패.
+        }
+      }
+
+      // 서킷 백오프를 매번 넘겨 실제 HTTP 시도가 반복되게 한다.
+      for (var i = 0; i < 5; i++) {
+        await call();
+        now = now.add(const Duration(seconds: 120));
+      }
+      expect(lines.where((l) => l.startsWith('YNAV_POI fetch failed')).length, 1);
+
+      // 성공하면 억제가 풀린다.
+      fail = false;
+      await call();
+      fail = true;
+      now = now.add(const Duration(seconds: 120));
+      await call();
+      expect(lines.where((l) => l.startsWith('YNAV_POI fetch failed')).length, 2);
     });
   });
 
