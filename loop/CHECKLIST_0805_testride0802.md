@@ -4,8 +4,8 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 1 / 36 완료** (S0 코드 완료 — 실기기 콜드스타트 10회 검증만 마스터 대기.
-다음은 S1 → S2 → S3 순서를 지킬 것)
+**진행 요약: 2 / 36 완료** (S0·S1 코드 완료 — 실기기 검증만 마스터 대기.
+다음은 S2 → S3 순서를 지킬 것)
 
 ---
 
@@ -52,30 +52,64 @@
 > Dart 소스만으로 확인 불가. 창이 극히 좁고 이번 변경이 만든 문제가 아니라
 > `maplibre_gl` 플러그인 배관에서 상속된 것이라 조치 없이 기록만 남긴다.
 
-### S1 · 백화·크래시 완전 정지  `상태: [ ]`
+### S1 · 백화·크래시 완전 정지  `상태: [x]` — 코드 완료, 실기기 검증만 남음
+
+> **완료 2026-08-05** · 커밋 `87c232e` · 지시서 [HANDOFF_0805_S1_crash_stop.md](HANDOFF_0805_S1_crash_stop.md)
+> code-auditor **1차 PASS**. `flutter analyze` 이슈 0 · `flutter test` **359건 전건 통과**(신규 45건).
 
 > 근본원인 A. `clamp` 상한 음수 → 초당 2~3회 예외 → ErrorWidget 흰 박스.
 > 로그 56,789건 · Firebase 362건/6명으로 **확정**.
 
-- [ ] `lib/core/widgets/daylight_bar.dart:109` — `handleY.clamp(0.0, totalH - 24)` 방어
-      (상한이 하한보다 작으면 클램프 자체를 건너뛰거나, 게이지 높이가 부족하면 렌더 생략)
-- [ ] 같은 파일 `:95` `handleY` 계산도 음수 `totalH` 대응 확인
-- [ ] **`clamp` 전수 감사 — 빈 리스트 시 상한 -1이 되는 12곳**
-  - [ ] `route_progress_provider.dart:320, 374, 378`
-  - [ ] `routing_service.dart:935, 941`
-  - [ ] `nav_screen.dart:563, 850, 1700, 1785, 1800`
-  - [ ] `main_map_screen.dart:1362, 1530, 1556`
-  - [ ] `waypoint_management_sheet.dart:49`
-  - [ ] `user_profile.dart:26`
-  - [ ] `nav_screen.dart:3031` — `nextCameraPostZoneM` 음수 가능성
-- [ ] 릴리스 빌드 `ErrorWidget.builder` 커스텀 — 흰 박스 대신 무해한 폴백
-- [ ] `DaylightBar`에 최소높이 보장 (부족하면 축약형 렌더)
-- [ ] `lib/widgets/daylight_bar.dart` re-export shim 정리 여부 판단
-- [ ] **검증(주)**: 위젯 테스트 — 높이 `[0,10,24,90,118,120,285,300,800]`px 전 케이스
-      `tester.takeException() == null` (285px = 플립7 커버화면 근사 → **기기 없이 커버**)
+- [x] `lib/core/widgets/daylight_bar.dart` — 핸들 `top`을 `clampSafe`로 교체 +
+      `totalH` 비유한·`<=0` 차단 + `totalH < 24`면 핸들 아이콘 생략(바만 렌더)
+- [x] 같은 파일 `handleY` 계산 경로도 위 가드 뒤로 들어가 음수 `totalH` 도달 불가
+- [x] **`clamp` 전수 감사 — 현재 HEAD 기준 재확인 결과 목록의 절반은 이미 안전했다**
+  - [x] `route_progress_provider.dart:320` `_clampIdx` — **수정**(빈 `_pts` 시 0 반환)
+  - [x] ~~`route_progress_provider.dart:374, 378`~~ — **이미 안전.** 함수 최상단 `:369`에
+        `if (_cumFromStartM.isEmpty || _zones.isEmpty) return null;` 존재(2026-07-27부터).
+        RECON이 낡았던 것 — 코더가 확인하고 수정 거부한 게 옳다
+  - [x] ~~`routing_service.dart:935, 941`~~ — **이미 안전** (진입부 `isEmpty` 가드)
+  - [x] `nav_screen.dart:563` — **수정**(빈 `_steps` 시 clamp 건너뛰기).
+        매 progress 틱마다 호출되는 폭주 경로였다
+  - [x] ~~`nav_screen.dart:850, 1700, 1785, 1800`~~ — **이미 안전** (`isNotEmpty` / `length < 2` 가드 안쪽)
+  - [x] `main_map_screen.dart` **2곳 수정** — `:1455`(빈 `routes`),
+        `:1623`(빈 `_fetchedRoutes`). **`:1623`은 원래 체크리스트에 없던 곳인데
+        실제로 위험했다** — 바로 다음 줄이 `selIdx < length`를 검사하고 있었으니
+        작성자도 빈 경우를 알았지만 clamp가 먼저 터졌다. (줄번호는 S0 커밋으로 밀린 값)
+  - [x] `waypoint_management_sheet.dart:49` — **수정**(빈 `routes` 조기 반환)
+  - [x] ~~`user_profile.dart:26`~~ — **이미 안전** (`bikes.isNotEmpty ? … : null`)
+  - [x] `nav_screen.dart:3031` `nextCameraPostZoneM` — **수정**(`clampSafe`, 순수 수치라 인덱싱 없음)
+- [x] `lib/core/utils/safe_clamp.dart` 신설 — `clampSafe`(상한<하한이면 하한 반환).
+      **단, 리스트 인덱싱이 뒤따르는 자리엔 쓰지 않았다** — 안 던지는 대신 `RangeError`로
+      증상만 바뀌므로 그런 자리는 전부 조기 반환으로 처리
+- [x] 릴리스 빌드 `ErrorWidget.builder` 커스텀 — 투명 `SizedBox.shrink()`.
+      **`kReleaseMode`일 때만** — 디버그는 기본 빨간 박스 유지
+- [x] `DaylightBar` 최소높이 보장 — 가용높이 `<72` shrink / `72~118` 축약형(시간 라벨 생략) /
+      `>=118` 전체. **72는 라벨 없는 고정 크롬 실측치**(10+18+8+8+18+10).
+      지시서는 60을 제시했으나 그 값이면 `RenderFlex overflow`가 남아 코더가 72로 올렸다 —
+      감사에서 산수 검증됨
+- [x] `lib/widgets/daylight_bar.dart` re-export shim — 참조 0건 확인 후 **삭제**
+- [x] **(추가) 크래시 로그 폭주 차단** — `crash_reporting.dart`에 동일 시그니처 억제
+      (최초 1회 + 60초 1회, `suppressed=N` 병기, 맵 상한 50 LRU).
+      초당 2~3회의 디스크 append + Crashlytics 업로드가 발열·배터리의 직접 원인이었다
+      (RECON §2-3). `FileLogger`가 `debugPrint`를 후킹하므로 이 억제로 디스크·네트워크가 함께 멎는다
+- [x] **검증(주)**: 위젯 테스트 — 높이 `[0,10,24,60,71,72,90,117,118,120,285,300,800]`px
+      × progress `[0.0,0.5,1.0]` 전 케이스 `tester.takeException() == null`.
+      285px = 플립7 커버화면 근사 → **기기 없이 커버**. 71/72·117/118은 분기 임계값 양옆 경계값
+- [x] **검증(회귀)**: `route_progress_empty_route_test.dart` — 빈 `_pts` + 비어있지 않은
+      `maneuvers`(재탐색 중 경로 일시 소멸) 케이스가 수정 전 코드에서 실제로 던졌음을 감사자가 역추적 확인
 - [ ] **검증(보조)**: A34에서 `adb shell wm size 720x748`로 커버화면 흉내 → 실렌더 확인
-      (끝나면 `wm size reset` 필수)
+      (끝나면 `wm size reset` 필수) — **마스터 실기기 수동 검증 대기**
 - [ ] **검증(조합)**: 세로/가로 × 코스시트 × 일반/PIP/분할화면 `Invalid argument(s): 0.0` **0건**
+      — **마스터 실기기 수동 검증 대기**
+
+> **잔여 (스코프 밖으로 판단, 조치 없음).** `tour_summary_detail_screen.dart:199`
+> `.clamp(squareMapHeight, screenWidth * 3.0)`은 `screenWidth < 33.3` 논리픽셀에서만
+> 역전된다 — 실기기 도달 불가로 보고 건드리지 않았다.
+
+> **크래시 억제 로직 자체엔 단위테스트가 없다** (감사자 지적, 비차단).
+> `crash_reporting.dart`는 Firebase 초기화와 얽혀 있어 테스트 하네스 비용이 크다.
+> 나중에 억제 정책만 순수 클래스로 떼면 붙일 수 있다.
 
 ### S2 · 네트워크 폭주 차단  `상태: [ ]`
 
