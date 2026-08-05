@@ -71,6 +71,59 @@ client = discord.Client(intents=intents)
 
 chat_busy = False
 
+# ── 대화 세션 크기 상한 / 자동 롤오버 ────────────────────────────────────────
+# handle_chat 은 세션 파일이 있으면 계속 --resume 하므로 대화가 한 세션에 무한
+# 누적된다. 2026-08-05 실제 사고: 7/21부터 쌓인 24MB(5,668메시지) 세션을 resume
+# 하다가 "처리 중..."에서 매달렸다.
+#
+# 상한을 넘으면 그냥 끊지 않고, 끊기 직전에 그 세션 자신에게 인수인계문을 쓰게 한
+# 뒤 새 세션 첫 프롬프트에 주입한다(도중 작업이 증발하지 않게).
+#
+# 상한값 주의 — 인수인계문을 쓰려면 그 세션을 **한 번 더 resume** 해야 한다.
+# 따라서 상한은 "resume 이 아직 멀쩡히 되는" 크기여야 한다. 24MB에서 실제로
+# 멈췄으므로 그보다 한참 낮게 잡는다. .env 의 DISCORD_CHAT_MAX_MB 로 조정 가능.
+CHAT_SESSION_MAX_BYTES = int(ENV.get("DISCORD_CHAT_MAX_MB", "6")) * 1024 * 1024
+# 이 이상이면 인수인계 생성 시도조차 매달릴 가능성이 높다 → 포기하고 그냥 롤오버.
+# (상한을 사람이 크게 올려놨거나, 한 턴에 폭발적으로 커진 경우의 안전판)
+CHAT_SESSION_HARD_MAX_BYTES = 20 * 1024 * 1024
+CHAT_HANDOFF_TIMEOUT_SECONDS = 600  # 10min — 인수인계문 1회 작성
+CHAT_HANDOFF_DIR = STATE_DIR / "chat_handoffs"
+
+
+def _transcript_path(session_id: str) -> Path:
+    """claude 가 세션 기록을 쌓는 jsonl 경로.
+
+    ~/.claude/projects/<cwd의 '/'를 '-'로 바꾼 슬러그>/<session_id>.jsonl
+    (예: /data/projects/yurunavi → -data-projects-yurunavi)
+    """
+    return (Path.home() / ".claude" / "projects"
+            / str(REPO).replace("/", "-") / f"{session_id}.jsonl")
+
+
+CHAT_HANDOFF_PROMPT = """\
+이 대화 세션은 기록이 너무 커져서 여기서 끊고 새 세션으로 넘어간다. 너의 유일한
+임무는, 후임 세션이 하던 일을 그대로 이어받을 수 있는 인수인계문을 쓰는 것이다.
+
+## 규칙
+- 코드를 고치지 마라. git 커밋/스테이징 하지 마라. 파일을 만들지 마라.
+  아래 인수인계문 본문만 출력해라(다른 인사말·설명 없이).
+- 2000자 이내. 새 세션 컨텍스트에 그대로 주입되므로 장황하면 그 자체가 손해다.
+- 추측하지 마라. 확실하지 않으면 "미확인"이라고 적어라.
+
+## 형식
+### 진행 중인 작업
+지금 무엇을 하던 중이었나. 없으면 "없음 — 유휴 상태".
+### 직전까지의 결론·결정
+후임이 다시 조사하면 낭비인 것. 왜 그렇게 정했는지 한 줄 근거를 붙여라.
+### 건드린 파일
+경로 목록. 커밋됐는지 워킹트리에만 있는지 명시해라.
+반드시 `git status --short` 와 `git log --oneline -5` 를 실제로 실행해 확인하고 써라.
+### 다음에 할 일
+후임이 바로 착수할 수 있을 만큼 구체적으로. 없으면 "마스터 지시 대기".
+### 주의
+빠지기 쉬운 함정, 시도했다 실패한 접근.
+"""
+
 
 def is_authorized(message: discord.Message) -> bool:
     if message.author.id != OWNER_ID:
@@ -254,6 +307,19 @@ async def cmd_status(message: discord.Message):
         lines.append(f"마지막 handoff: `{first_line}`")
     else:
         lines.append("handoff.md 없음")
+
+    # 대화 세션 누적량 — 상한에 가까워지면 다음 메시지에서 자동 롤오버된다.
+    cap_mb = CHAT_SESSION_MAX_BYTES // 1024 // 1024
+    if CHAT_SESSION_FILE.exists():
+        sid = CHAT_SESSION_FILE.read_text().strip()
+        tpath = _transcript_path(sid)
+        if tpath.exists():
+            mb = tpath.stat().st_size / 1024 / 1024
+            lines.append(f"대화 세션: `{sid}` — {mb:.1f}MB / 상한 {cap_mb}MB")
+        else:
+            lines.append(f"대화 세션: `{sid}` — 기록 파일 못 찾음(크기 확인 불가)")
+    else:
+        lines.append(f"대화 세션: 없음(다음 메시지가 새 세션) — 상한 {cap_mb}MB")
 
     proc = await asyncio.create_subprocess_shell(
         "git -C /data/projects/yurunavi log --oneline -3",
@@ -492,6 +558,106 @@ async def send_chunked(message: discord.Message, text: str):
         await message.reply(text[i:i + 1900])
 
 
+async def _write_handoff_file(old_id: str, body: str) -> Path:
+    CHAT_HANDOFF_DIR.mkdir(parents=True, exist_ok=True)
+    path = CHAT_HANDOFF_DIR / f"chat_handoff_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    path.write_text(
+        f"# 대화 세션 인수인계 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+        f"이전 세션: `{old_id}`\n\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+async def _rollover_if_needed(thinking: discord.Message) -> str:
+    """세션이 상한을 넘었으면 인수인계문을 뽑고 세션을 끊는다.
+
+    반환값은 새 세션 첫 프롬프트 앞에 붙일 인수인계 블록(롤오버 안 했으면 빈 문자열).
+    실패해도 예외를 던지지 않는다 — 롤오버가 안 되는 것보다 맥락 없이라도 새 세션으로
+    가는 게 낫다(안 그러면 매번 같은 거대 세션을 resume 하며 계속 매달린다).
+    """
+    if not CHAT_SESSION_FILE.exists():
+        return ""
+    old_id = CHAT_SESSION_FILE.read_text().strip()
+    if not old_id:
+        return ""
+
+    path = _transcript_path(old_id)
+    if not path.exists():
+        return ""  # 기록을 못 찾으면 크기를 알 수 없다 — 건드리지 않는다.
+    size = path.stat().st_size
+    if size < CHAT_SESSION_MAX_BYTES:
+        return ""
+
+    mb = size / 1024 / 1024
+
+    # 안전판: 이미 너무 커서 인수인계용 resume 조차 매달릴 크기면 포기하고 그냥 끊는다.
+    if size >= CHAT_SESSION_HARD_MAX_BYTES:
+        CHAT_SESSION_FILE.unlink()
+        await thinking.edit(content=(
+            f"⚠️ 대화 기록이 {mb:.1f}MB로 너무 커져서 인수인계문 작성도 매달릴 위험이 있습니다. "
+            f"인수인계 없이 새 세션으로 넘어갑니다.\n"
+            f"이전 세션: `{old_id}` (기록은 남아 있습니다)\n\n🤔 처리 중..."
+        ))
+        return ""
+
+    await thinking.edit(content=(
+        f"📦 대화 기록이 {mb:.1f}MB(상한 {CHAT_SESSION_MAX_BYTES // 1024 // 1024}MB)를 넘었습니다. "
+        f"하던 작업이 끊기지 않게 인수인계문을 쓴 뒤 새 세션으로 넘어갑니다... (최대 10분)"
+    ))
+
+    body = ""
+    proc = await asyncio.create_subprocess_exec(
+        "claude", "-p", CHAT_HANDOFF_PROMPT,
+        "--output-format", "json",
+        "--permission-mode", "bypassPermissions",
+        "--resume", old_id,
+        cwd=str(REPO),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        preexec_fn=os.setsid,
+    )
+    try:
+        out, _err = await asyncio.wait_for(
+            proc.communicate(), timeout=CHAT_HANDOFF_TIMEOUT_SECONDS
+        )
+        if proc.returncode == 0:
+            try:
+                body = (json.loads(out.decode()).get("result") or "").strip()
+            except json.JSONDecodeError:
+                body = ""
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    # 성공하든 실패하든 세션은 끊는다 — 남겨두면 다음 메시지도 같은 거대 세션을 resume 한다.
+    CHAT_SESSION_FILE.unlink()
+
+    if not body:
+        await thinking.edit(content=(
+            f"⚠️ 인수인계문 작성에 실패했습니다(시간 초과 또는 빈 응답). "
+            f"맥락 없이 새 세션으로 넘어갑니다.\n"
+            f"이전 세션: `{old_id}` — 필요하면 서버에서 "
+            f"`claude --resume {old_id}` 로 직접 이어볼 수 있습니다.\n\n🤔 처리 중..."
+        ))
+        return ""
+
+    saved = await _write_handoff_file(old_id, body)
+    await thinking.edit(content=(
+        f"📦 인수인계 완료 — 새 세션으로 넘어갑니다. (이전 세션 `{old_id}`, {mb:.1f}MB)\n"
+        f"인수인계문: `{saved}`\n\n🤔 처리 중..."
+    ))
+    return (
+        "[이전 세션 인수인계 — 대화 기록이 커져 세션을 새로 시작했다. "
+        "아래는 직전 세션이 남긴 인수인계문이며, 네가 하던 일의 맥락이다. "
+        "이걸 근거로 이어서 작업해라.]\n\n"
+        f"{body}\n\n"
+        "[여기까지 인수인계. 아래가 마스터의 새 메시지다]\n\n"
+    )
+
+
 async def handle_chat(message: discord.Message):
     global chat_busy
 
@@ -510,7 +676,10 @@ async def handle_chat(message: discord.Message):
     thinking = await message.reply("🤔 처리 중...")
     try:
         attach_paths = await save_attachments(message)
-        prompt = _augment_prompt(message.content, attach_paths)
+        # 크기 상한을 넘었으면 여기서 인수인계문을 뽑고 세션을 끊는다.
+        # (반드시 --resume 을 붙이기 전에 해야 한다)
+        carryover = await _rollover_if_needed(thinking)
+        prompt = carryover + _augment_prompt(message.content, attach_paths)
         cmd = [
             "claude", "-p", prompt,
             "--output-format", "json",
@@ -562,9 +731,11 @@ HELP_TEXT = (
     "`!status` — 실행 중인지, 최근 상태, 최근 커밋 확인\n"
     "`!stop` — 실행 중인 야간루프 정지\n"
     "`!wiki` — loop/ 문서를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션, 매일 04:10 자동)\n"
-    "`!new` — 대화 세션 끊기. 다음 메시지부터 새 세션으로 시작\n"
+    "`!new` — 대화 세션 즉시 끊기(인수인계 없이 깨끗하게). 다음 메시지부터 새 세션\n"
     "  (그냥 \"새 세션 시작\"이라고 말하면 안 됩니다 — 그건 기존 세션에 던지는 대화일 뿐입니다)\n"
     "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, 루프 실행 중엔 비활성)\n"
+    "🔄 대화 기록이 상한을 넘으면 자동으로 인수인계문을 쓰고 새 세션으로 넘어갑니다"
+    " — 하던 작업 맥락은 새 세션에 그대로 넘어갑니다. 현재 누적량은 `!status`.\n"
     "📎 이미지/파일을 첨부하면 자동 저장 후 클로드가 열어봅니다 — `!plan`에 스크린샷을 "
     "붙여 버그 수정을 맡기거나, 그냥 이미지만 올려 물어봐도 됩니다.\n"
 )
