@@ -4,10 +4,11 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 3 / 38 완료** (S0·S1·S2 코드 완료 — 실기기 검증만 마스터 대기.
+**진행 요약: 4 / 38 완료** (S0·S1·S2·S3 코드 완료 — 실기기 검증만 마스터 대기.
+S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 마스터 A/B 결정 대기로 남았다.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다.
 **S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정).
-다음은 S1b(조사) → S3)
+다음은 S1b(조사))
 
 ---
 
@@ -241,21 +242,31 @@
 > 없음**을 `git diff`로 확인했고, 히스토리 재작성은 위험 조작이라 하지 않았다.
 > `git log`로 S2 변경분을 추적할 땐 `49643df` + `bd57885` + `71380de` 세 개를 봐야 한다.
 
-### S3 · 라이프사이클 정상화  `상태: [ ]`
+### S3 · 라이프사이클 정상화  `상태: [x]` — 코드 완료, 알림 일원화·PIP 복구 UX 2건은 마스터 A/B 결정 대기
 
 > 근본원인 C. `inactive`가 알림창·캡쳐·엣지패널에서도 발화 → PIP 오진입 → 안내 중단.
+> **완료 2026-08-05** · 청크1 `a5beab1` · 청크2 `18da084` · 청크3 `386a2f3`
+> 각 청크 code-auditor **PASS**. `flutter analyze` 이슈 0 · `flutter test` **375건 전건 통과**(청크1 신규 1건, 청크3 신규 1건 포함).
 
-- [ ] `nav_screen.dart:460` — `AppLifecycleState.inactive` 분기 제거,
-      **`onUserLeaveHint`(`nav_pip_hint` 채널, 이미 구현됨) 전용**으로 전환
-- [ ] `hidden` 분기 유지 여부 판단 (화면 꺼짐 케이스 보완 목적이었음)
-- [ ] `NavForegroundService.kt:68` — `START_NOT_STICKY` → `START_REDELIVER_INTENT`
-- [ ] **wakelock 3중 정리**: geolocator `enableWakeLock` + `WakelockPlus` + FGS
-- [ ] 알림 2개(geolocator FGS + NavForegroundService) 일원화
-- [ ] PIP/백그라운드 중 지도 API 호출 가드
-      (`MissingPluginException` — `source#setGeoJson` 431건, `camera#move` 136건)
-- [ ] PIP 복구를 **우측 작은 아이콘 터치**로 (마스터 요구: 화면 터치 아님)
+- [x] `nav_screen.dart:460` — `AppLifecycleState.inactive` 분기 제거,
+      **`onUserLeaveHint`(`nav_pip_hint` 채널, 이미 구현됨) 전용**으로 전환 (청크1, `a5beab1`)
+- [x] `hidden` 분기 유지 여부 판단 — **함께 제거** (지시서 §2-2 판단: `onUserLeaveHint`+Auto-PIP 이중 안전망 충분) (청크1)
+- [x] `NavForegroundService.kt:68` — `START_NOT_STICKY` → `START_REDELIVER_INTENT` (청크1)
+- [x] **wakelock 정리**: 실측 결과 **2중이 옳음**(RECON의 "3중"은 오기 — `NavForegroundService`에
+      `PowerManager.WakeLock` 획득 코드 없음). geolocator `enableWakeLock: true` → `false`로
+      제거. `WakelockPlus`(화면) + FGS(프로세스)만 유지 (청크2, `18da084`)
+- [!] 알림 2개(geolocator FGS + NavForegroundService) 일원화 — **§2-5 마스터 A/B 결정 대기.**
+      방법 B(공유 채널)는 `geolocator_android-5.0.2`가 `CHANNEL_ID`/`ONGOING_NOTIFICATION_ID`
+      하드코딩이라 물리적 불가. 방법 A(geolocator FGS 제거)는 헤드리스 서버라 실기기 검증
+      불가 — 잘못 건들면 백그라운드 위치 fix 유실 → 안내 전면 실패 위험
+- [x] PIP/백그라운드 중 지도 API 호출 가드 — `_canCallMap()` 게이트(`mounted && _mlCtrl != null
+      && !_isInPip && !_isDisposing`) + `_isDisposing` 플래그(dispose 첫 문장) 도입.
+      `nav_screen.dart`의 지도 호출 19+개소 전수 게이트, 신규 test 포함 (청크3, `386a2f3`)
+- [!] PIP 복구를 **우측 작은 아이콘 터치**로 (마스터 요구) — **§2-7 마스터 A/B 결정 대기.**
+      해석 A(시스템 PIP + RemoteAction 아이콘) vs 해석 B(시스템 PIP 폐기 + 상단바 알림).
+      §2-1~2-3 완료로 오검출 자체는 사라져 60행 첫 문장은 이미 해소됨
 - [ ] **검증**: 알림창 내림·스크린샷·엣지패널 → PIP 진입 안 함 / 홈 버튼 → PIP 진입 /
-      홈 상태 30분 유지 후 안내·히스토리 정상
+      홈 상태 30분 유지 후 안내·히스토리 정상 — **마스터 실기기 수동 검증 대기**
 
 ---
 
