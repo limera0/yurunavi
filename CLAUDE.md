@@ -39,7 +39,11 @@ Motorcycle-tourer OSM navigation app. Flutter (UI) + Rust ("fun-road" curvature 
 - Never commit secrets. Keys in `.env` (gitignored).
 - No destructive commands: `rm -rf`, `git push --force`, data drops, mass deletion.
 - No remote push unless the task file says so.
-- Never `git add -A` / `git commit -a` — stage named files only (`git add <file> …`). Concurrent sessions share the branch.
+- Never `git add -A` / `git commit -a` / `git add .` — stage named files only (`git add <file> …`). Concurrent sessions share the branch and **the index is shared too**.
+  - Real incident 2026-08-05 (commit `bd57885`): a docs-only session used a blanket `add` and swallowed another session's already-staged `nav_screen.dart` + `poi_service.dart` + tests. No data was lost, but the S2 code now sits under a commit message about S1. Details: `loop/RECON_0805_git_index_collision.md`.
+  - Before every commit run `git status --short` and confirm the staged set is exactly your files. If files you did not touch are staged, `git restore --staged <them>` first — never commit them "since they're there".
+  - Stage and commit in one shot (`git add <files> && git commit …`); do not leave files staged across a long await.
+  - Never fix a tangle with `reset`/`rebase`/`--force` on a shared branch. Record it in the report and move on.
 - Commit before each subtask (checkpoint) and after each PASS.
 - One module per session. No scope creep.
 - If unsure, STOP and write it in the report — do not guess.

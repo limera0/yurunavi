@@ -403,10 +403,40 @@
       (⚠️ `TourRecoveryService`는 히스토리 복구만 함 — 안내 재개는 **미구현**)
 - [ ] 투어 히스토리 **병합(merge)** 기능
 - [ ] 경로 색상 네이버급 초록 + 진행방향 화살표
-- [ ] 오프라인 지도 다운로드 (도 단위, WiFi 전용 옵션)
 - [ ] 지도 정보밀도 OSMAND급 (건물 내부 정보 등)
 - [ ] 코스 공유 (QR, 2인 이상 투어 동기화)
-- [ ] OSMAND / Organic Maps 벤치마킹 조사
+- [x] **OSMAND / Organic Maps 벤치마킹 조사** — 완료 2026-08-05,
+      [RECON_0805_offline_first_architecture.md](RECON_0805_offline_first_architecture.md)
+
+### O · 오프라인 우선 전환 (마스터 제안 2026-08-05) — **승인 대기**
+
+> 기존 P3 "오프라인 지도 다운로드(도 단위, WiFi 전용)"를 마스터 제안(POI도 온디바이스,
+> Rust 검토)까지 포함해 확장한 트랙. 상세·근거·용량 실측:
+> [RECON_0805_offline_first_architecture.md](RECON_0805_offline_first_architecture.md)
+>
+> **실측 규모**: 타일 `korea.mbtiles` **382MB**(z0-14 남한 전역) · POI `poi.db`
+> **154MB / 696,255행**(R-tree 인덱스 이미 있음, 식당이 65%) → 전국 통짜 ≈ **536MB**
+>
+> **핵심 발견**: `maplibre_gl 0.26.1`(현 의존성)에 오프라인 API가 통째로 있다 —
+> `downloadOfflineRegion` · `installOfflineMapTiles`(mbtiles 사이드로드) ·
+> `setOfflineTileCountLimit` · `setOffline(true)` 등. 앱에서 **현재 0곳 사용**.
+> 타일 오프라인은 신규 개발이 아니라 통합 작업이다.
+>
+> **착수 시점 권고: S3 완료 후.** 오프라인은 출시 차단 항목이 아니다.
+
+- [ ] **O1 · 스타일 에셋 로컬화** — 글리프(한글 CJK)·스프라이트가 아직
+      `tiles.westinx.com`을 가리킨다. 타일만 받아두면 폰트를 계속 네트워크로 가져감
+- [ ] **O2 · 타일 오프라인** — mbtiles 사이드로드 + 도 단위 선택 UI +
+      WiFi 백그라운드 다운로드. ⚠️ `setOfflineTileCountLimit` 안 올리면 조용히 끊김
+- [ ] **O3 · POI 오프라인** — `poi.db` 배포 + 로컬 질의 전환 + 버전 매니페스트.
+      **1단계는 Dart+`sqflite` 권고**(기존 R-tree 그대로 사용)
+- [ ] **O4 · 측정 후 Rust 이관 판단** — 온디바이스 Rust는 `flutter_rust_bridge`
+      의존성만 있고 `lib.rs`가 9바이트, jniLibs 0개, 3-ABI 크로스컴파일 미검증.
+      POI 질의는 병목이 아니라 명분이 약하다 (RECON §5-3)
+- [ ] **O5 · (별도 트랙) 오프라인 라우팅** — Valhalla 온디바이스. 큰 과제.
+      ⚠️ **O1~O4를 다 해도 경로 탐색·재탐색·주소검색은 서버 필요** (RECON §6)
+- [ ] **마스터 결정 대기 5건** — 착수 시점 / POI 다운로드 기본 범위 / 분할 단위 /
+      전국 통짜 옵션 제공 여부 / Rust 2단계안 동의 여부 (RECON §8)
 
 ### `[-]` 스코프 밖 — 하지 말 것
 
