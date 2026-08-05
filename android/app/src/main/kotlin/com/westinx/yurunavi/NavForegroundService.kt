@@ -65,7 +65,7 @@ class NavForegroundService : Service() {
                 stopSelf(startId)
             }
         }
-        return START_NOT_STICKY
+        return START_REDELIVER_INTENT
     }
 
     private fun createNotificationChannel() {

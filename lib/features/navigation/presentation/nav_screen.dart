@@ -463,13 +463,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     debugPrint('YNAV_LIFECYCLE state=${state.name}');
-    // onUserLeaveHint가 발화하지 않는 화면 꺼짐·전원 버튼 케이스 보완.
-    // inactive: activity가 포커스를 잃기 시작(onPause 시작 전) — enterPipMode() 호출 가능한 마지막 시점.
-    // hidden: 일부 Flutter 버전에서 onPause 완료 시 발화.
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
-      _maybeEnterPip();
-    }
+    // inactive/hidden 분기는 오검출(알림창·스크린샷·엣지패널) 근원이라 제거.
+    // 홈/최근앱 시나리오는 nav_pip_hint 채널(onUserLeaveHint 포워딩)이,
+    // 전화 등 인터럽션은 Auto-PIP(:429)가 커버한다.
   }
 
   Future<void> _maybeEnterPip() async {
