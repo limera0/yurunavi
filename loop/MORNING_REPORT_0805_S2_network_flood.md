@@ -3,7 +3,8 @@
 - 브랜치 `verify/ride-0711` · 커밋 `49643df`(1차 체크포인트: `poi_service.dart` +
   `main_map_screen.dart`) + `bd57885`(2차: `nav_screen.dart` + `poi_service.dart`
   bbox 스냅 안정화 + 테스트 13종 — **주의: 이 커밋은 동시 세션이 자기 문서 커밋에
-  내 스테이징 변경분을 함께 쓸어간 것. §4 참고**)
+  내 스테이징 변경분을 함께 쓸어간 것. §4 참고**) + `71380de`(감사 지적 조치:
+  실패 상세 로그 억제 + 테스트 1건)
 - 지시서: [HANDOFF_0805_S2_network_flood.md](HANDOFF_0805_S2_network_flood.md)
 - 대장: [CHECKLIST_0805_testride0802.md](CHECKLIST_0805_testride0802.md) §S2
 
@@ -143,6 +144,41 @@ bbox를 쓰고, `selectForAmbientDisplay`에는 **항상 실제 뷰포트**(sout
   9. 실패 시 `PoiRegionCache.put` 미호출(서비스 레벨 — 지시서가 허용한 형태)
 - `package:http/testing.dart`의 `MockClient` 사용, `AppConfig.init(const
   ProdConfig())`을 `setUpAll`에서 호출해 isolate 초기화 문제 회피
+
+### 2-1. code-auditor 감사 결과 — **1차 PASS** (2026-08-05, 커밋 `71380de` 기준)
+
+감사자가 커밋 `49643df` + `bd57885`의 코드 변경분을 지시서 §2-1~2-7과 대조 검증했다.
+집중 검증 항목별 결과:
+
+| 항목 | 결과 |
+|---|---|
+| §0 결함이 세 경로 전부에서 고쳐졌는가 | **확인.** `markStarted` ~ `_xxxInFlight = true` 사이에 `await`가 **하나도 없음**까지 추적. Dart 단일 스레드라 이 구간에 레이스 불가 — 최악의 경우에도 `max(minInterval)` 당 1회 |
+| in-flight 플래그 해제 누락 | **없음.** 전 early-return/예외 경로가 `try…finally` 안. 영구 정지 위험 없음 |
+| 서킷 오픈 중 HTTP 미발사 | **확인.** client 생성 전에 차단, MockClient 카운터 불변으로 입증 |
+| 실패 응답 캐시 오염 | **없음.** 4개 호출부 전부 `put()`이 성공 분기 안에만 존재 |
+| 실패 시 기존 POI 유지 | **확인.** catch가 `_ambientPois`/`_searchPrefetchPois`를 건드리지 않음 |
+| `fetchPois*` 호출부 전수 | **확인.** `grep` 5건 = UI 4곳(전부 try/catch) + `snapDestination`(죽은 코드) |
+| bbox 스냅 표시 경로 | **확인.** 표시는 실제 뷰포트, 네트워크·캐시만 스냅 bbox |
+| 태그별 client 교차 취소 | **없음.** 태그 4종이 용도별로 분리됨 |
+| 시크릿·로그 폭주 | 시크릿 없음. **로그 1건 지적** → 아래 조치 |
+| 스코프 침범 | **없음.** `native/`·`docker/`·타 서비스 무변경. `bd57885`에 S1b 코드가 섞이지 않았음도 확인 |
+
+### 2-2. 감사 지적 1건 → 조치 완료 (커밋 `71380de`)
+
+서킷 전이 로그(`circuit open/closed`)는 상태 전이에만 찍히도록 이미 돼 있었으나,
+`_getJson`의 **실패 상세 로그**(`YNAV_POI fetch failed status=…` / `… error=…`)는
+**매 실패 시도마다** 나가고 있었다. 지시서 §2-4 "매 요청마다 로그 금지" 미준수다.
+(감사자는 서킷브레이커가 시도 자체를 최대 1/60초로 묶으므로 비차단이라 판정했으나,
+S1에서 로그 append가 발열·배터리의 **직접** 원인이었던 만큼 그대로 두지 않았다.)
+
+→ `_failureLogged` 플래그로 **연속 실패 구간당 1회**만 남기고 200 성공 시 해제.
+`_consecutiveFailures`와 별도 플래그로 둔 이유는 401 등 **서킷을 트립시키지 않는
+비 429/5xx 실패**까지 함께 억제하기 위함이다(그 경로는 `_onFailure`를 안 타므로
+연속 실패 카운터로는 판별할 수 없다).
+
+검증 테스트 1건 추가 — `debugPrint`를 가로채 연속 5회 실패에서 상세 로그가 **1줄만**
+나가고, 성공 후 다음 장애에서 다시 1줄 나가는지 단정. **최종: `flutter analyze`
+이슈 0 · `flutter test` 373건 전건 통과(신규 14건).**
 
 ---
 
