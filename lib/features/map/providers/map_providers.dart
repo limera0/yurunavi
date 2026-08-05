@@ -95,6 +95,19 @@ final locationStreamProvider = StreamProvider<Position>((ref) async* {
 final currentLocationProvider =
     Provider<LatLng?>((ref) => ref.watch(navStateProvider)?.pos);
 
+/// 콜드 스타트 시 스플래시 화면이 앱 진입 전에 선확보한 위치 (S0).
+/// `MainMapScreen`이 `initState`에서 1회만 읽어 `_lastKnown`을 시드하는 용도 —
+/// 이후 갱신을 구독(watch)하지 않는다. 실측/최근 위치일 때만 세팅되며,
+/// `kInitialMapView`(최후 폴백) 같은 하드코딩 좌표와는 절대 혼용하지 않는다.
+final bootLocationProvider =
+    NotifierProvider<BootLocationNotifier, LatLng?>(BootLocationNotifier.new);
+
+class BootLocationNotifier extends Notifier<LatLng?> {
+  @override
+  LatLng? build() => null;
+  void set(LatLng loc) => state = loc;
+}
+
 // ── Map Interaction (pageLayout.md: MapInteractionNotifier) ───────────────────
 
 /// 지도 인터랙션 모드

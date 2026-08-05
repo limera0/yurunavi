@@ -57,9 +57,73 @@ class _TappedPoi {
   const _TappedPoi({this.name, this.category});
 }
 
-/// Last-resort map framing: first install + no last-known position.
-/// Camera only — never treated as the rider's location.
+/// Last-resort map framing. Reached ONLY when every earlier location source
+/// fails to produce a fix: splash-screen boot acquisition
+/// (`bootLocationProvider`, see splash_screen.dart) AND
+/// `Geolocator.getLastKnownPosition()` here both come back empty — e.g.
+/// location permission denied, or granted but the device has never cached a
+/// fix. Camera only — never treated as the rider's location.
 const LatLng kInitialMapView = LatLng(36.5, 127.5); // 한국 지리 중심 (서울 아님)
+
+/// S0: 콜드 스타트 폴백 카메라 레이스 보정 상태기계.
+///
+/// `MapLibreMapController`(`_mlCtrl`)는 `onMapCreated`에서야 세팅되는데,
+/// 플랫폼뷰 생성 대기(수백 ms) 중에 위치 fix가 먼저 도착하면 과거에는
+/// null-safe 호출이 조용히 버려지고 다시는 재시도되지 않았다(2026-08-05
+/// code-auditor 지적: `_openedAtFallback` 하나로 "폴백 좌표로 열렸는가"와
+/// "카메라가 실측 fix로 보정됐는가"를 겹쳐 게이트를 걸면, boot-seed로 이미
+/// _lastKnown이 채워져 있어도(=_openedAtFallback == false) 그 이후 도착하는
+/// 진짜 첫 GPS fix가 이 레이스를 타는 순간 카메라가 세션 내내 부트 시점
+/// 좌표에 고정되는 회귀가 생긴다).
+///
+/// 이 두 사실을 분리한다: 컨트롤러가 준비되지 않았으면([ctrlReady] false)
+/// "폴백으로 열렸는지"와 무관하게 항상 목표를 보류한다. `onMapCreated`는
+/// 카메라가 아직 실측 fix로 보정된 적이 없을 때만(=`corrected == false`)
+/// 그 보류값을 적용한다.
+///
+/// 위젯 상태와 분리된 순수 로직이라 MapLibre 플랫폼뷰/위젯 pump 없이
+/// `test/splash_boot_location_test.dart`가 직접 검증한다.
+class FallbackRecenterState {
+  LatLng? _pending;
+  bool _corrected = false;
+
+  /// 현재 보류 중인 목표(테스트 관찰용).
+  LatLng? get pending => _pending;
+
+  /// 카메라가 이미 실측 fix로 보정됐는지(테스트 관찰용).
+  bool get corrected => _corrected;
+
+  /// 위치 fix 도착 시 호출한다.
+  /// - [ctrlReady]가 true면(컨트롤러 준비됨) 즉시 적용할 좌표를 반환한다 —
+  ///   호출부가 이 반환값으로 `animateCamera`를 실행하고, 이 상태기계는
+  ///   "보정됨"으로 전환된다.
+  /// - false면(컨트롤러 미준비) "폴백으로 열렸는지"와 무관하게 항상 목표를
+  ///   보류하고 null을 반환한다 — 호출부는 아무것도 하지 않는다.
+  LatLng? onFixArrived(LatLng loc, {required bool ctrlReady}) {
+    if (!ctrlReady) {
+      _pending = loc;
+      return null;
+    }
+    _corrected = true;
+    return loc;
+  }
+
+  /// `onMapCreated`에서 호출한다. 보류된 목표가 있고 아직 카메라가 실측
+  /// fix로 보정된 적이 없으면 그 목표를 반환하며(호출부가 적용) 내부
+  /// 상태를 "보정됨"으로 전환한다. 이미 보정됐거나 보류값이 없으면 null —
+  /// 이 경우 호출부는 아무것도 하지 않는다(사용자가 옮긴 카메라를 잡아채지
+  /// 않는다는 불변조건은, 이 클래스가 관리하는 보류값이 컨트롤러 준비 전
+  /// (=사용자가 지도를 만질 수조차 없는 시점)에만 생길 수 있다는 사실로
+  /// 자동 성립한다).
+  LatLng? consumePendingOnMapCreated() {
+    if (_corrected) return null;
+    final target = _pending;
+    if (target == null) return null;
+    _pending = null;
+    _corrected = true;
+    return target;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grid-based POI clustering
@@ -157,6 +221,10 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   LatLng? _lastKnown; // getLastKnownPosition() 결과 — GPS 스트림보다 먼저 도착
   ProviderSubscription<NavigationState?>? _locationSub;
 
+  // S0: 콜드 스타트 폴백 카메라 레이스 보정 — 상태기계 정의/불변조건은
+  // FallbackRecenterState 문서 참조.
+  final _fallbackRecenter = FallbackRecenterState();
+
   // 디버그 전용 E2E 자동화 하네스 — kDebugMode에서만 동작, 세션당 1회만 트리거.
   // 무인 가상 GPS 주행 테스트를 위해 adb intent extra로 목적지를 주입받아
   // "목적지 설정 → 경로 계산 → 내비 시작"까지 자동 실행한다. 릴리스 빌드에서는
@@ -206,6 +274,22 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   @override
   void initState() {
     super.initState();
+    // S0: 스플래시 화면이 앱 진입 전에 선확보해 둔 위치가 있으면 즉시
+    // _lastKnown을 시드한다 — initialCameraPosition(아래 build())이 첫
+    // 빌드부터 실제 위치를 잡게 되고, _origin ?? _lastKnown 패턴을 쓰는 기존
+    // 소비처 전부가 자동으로 혜택을 본다. 실측/최근 위치가 아니면 절대
+    // 세팅하지 않는다(bootLocationProvider 자체가 그 불변조건을 보장).
+    final boot = ref.read(bootLocationProvider);
+    if (boot != null) _lastKnown = boot;
+    // 이 시점에 _origin은 항상 null(GPS 스트림 시작 전)이므로, _lastKnown이
+    // 비어 있다면 build()의 initialCameraPosition은 kInitialMapView로 열린다.
+    // 진단 로그일 뿐 이후 로직을 게이트하지 않는다 — FallbackRecenterState는
+    // 이 사실과 무관하게 컨트롤러 준비 여부만으로 동작한다(2026-08-05 감사
+    // 지적, 위 클래스 문서 참조).
+    if (kDebugMode && _lastKnown == null) {
+      dev.log('S0: opened at kInitialMapView fallback (no boot-seeded location)',
+          name: 'S0');
+    }
     _sheetCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
@@ -255,9 +339,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       if (last != null && mounted && _origin == null) {
         final loc = LatLng(last.latitude, last.longitude);
         setState(() => _lastKnown = loc);
-        _mlCtrl?.animateCamera(
-          ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
-        );
+        _moveCameraToFix(loc);
         _ensureLocationMarker(); // unawaited — B1
         unawaited(_maybeFetchSearchPrefetch(loc));
         unawaited(_maybeRunE2EHarness());
@@ -272,9 +354,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         final isFirstFix = _origin == null;
         setState(() => _origin = loc);
         if (isFirstFix) {
-          _mlCtrl?.animateCamera(
-            ml.CameraUpdate.newLatLngZoom(_toMl(loc), _currentZoom.clamp(10.0, 14.0)),
-          );
+          _moveCameraToFix(loc);
         }
         final heading = _resolveHeading(next.speedKmh, next.headingDeg);
         _ensureLocationMarker(heading); // unawaited — B1
@@ -282,6 +362,19 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         unawaited(_maybeRunE2EHarness());
       },
       fireImmediately: true,
+    );
+  }
+
+  /// 첫 실측(또는 캐시된) fix 도착 시 카메라를 이동시킨다. 레이스 보정 로직
+  /// 자체는 `_fallbackRecenter`(`FallbackRecenterState`)에 위임 — 그 클래스의
+  /// 문서에 불변조건이 정리돼 있다.
+  void _moveCameraToFix(LatLng loc) {
+    final ctrl = _mlCtrl;
+    final target =
+        _fallbackRecenter.onFixArrived(loc, ctrlReady: ctrl != null);
+    if (target == null) return; // 보류됨 — onMapCreated가 나중에 적용
+    ctrl!.animateCamera(
+      ml.CameraUpdate.newLatLngZoom(_toMl(target), _currentZoom.clamp(10.0, 14.0)),
     );
   }
 
@@ -1676,6 +1769,17 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             compassEnabled: false,
             onMapCreated: (c) {
               _mlCtrl = c;
+              // S0: 컨트롤러가 준비되기 전에 fix가 먼저 도착해 보류돼 있던
+              // 목표가 있고, 아직 실측 fix로 카메라가 보정된 적이 없으면
+              // 지금 옮긴다("폴백으로 열렸는지"와는 무관 — FallbackRecenterState
+              // 문서 참조).
+              final pending = _fallbackRecenter.consumePendingOnMapCreated();
+              if (pending != null) {
+                c.animateCamera(
+                  ml.CameraUpdate.newLatLngZoom(
+                      _toMl(pending), _currentZoom.clamp(10.0, 14.0)),
+                );
+              }
               c.onFeatureTapped.add((point, coords, id, layerId, annotation) {
                 if (layerId != _ambientPoiLayerId &&
                     layerId != _poiLayerId &&
