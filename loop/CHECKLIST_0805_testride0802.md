@@ -176,23 +176,41 @@
 > **유턴 아이콘**을 띄우고 있어 실제 유턴 경로일 수 있다. 렌더링 문제인지 라우팅
 > 문제인지 **구분 전까지 어느 쪽으로도 단정하지 마라.**
 
-### S2 · 네트워크 폭주 차단  `상태: [ ]`
+### S2 · 네트워크 폭주 차단  `상태: [x]` — 코드 완료, 실기기 검증만 남음
 
 > 근본원인 B. 초당 ~10회 POI 요청, 69,875건 전부 429. 데이터·배터리 주범.
+>
+> **2026-08-05 작업 중 정정**: RECON이 지목한 `onCameraIdle` 디바운스 부재는
+> 부차적 원인이었다. 진짜 주범은 `main_map_screen._maybeFetchSearchPrefetch`·
+> `nav_screen._maybeFetchAmbientPois`가 디바운스 타임스탬프를 **await 이후
+> 성공 경로에서만** 커밋해, 응답이 1 디바운스 주기 안에 안 돌아오면 디바운스가
+> 영원히 무장되지 않고 1Hz로 무한 재시도되던 결함. `loop/HANDOFF_0805_S2_network_flood.md`
+> §0 참고.
 
-- [ ] `main_map_screen.dart:634` — **디바운스 부재** 해소 (nav_screen과 동일 정책으로 통일)
-- [ ] `nav_screen.dart:1412` — `sameTypes == false`일 때 디바운스 우회되는 경로 차단
-- [ ] **429 서킷브레이커 + 지수 백오프** 신설 (`poi_service.dart`) — 현재 코드베이스에
-      429 처리가 **한 줄도 없음**
-- [ ] **실패 응답을 캐시에 넣지 않기** — `poi_service.dart:70-72, 118-121`이 `[]` 반환 →
-      호출부가 정상 결과로 `put()` (`nav_screen.dart:1486`, `main_map_screen.dart:696`)
-- [ ] `fetchPois*`가 상태코드/예외를 호출부에 전달하도록 반환 타입 변경
-- [ ] **bbox 그리드 스냅** — 현재 `center ± 0.02°`라 1m만 움직여도 캐시 미스
-      (`PoiRegionCache.tryGet` 포함관계 조건, `poi_service.dart:433`)
-- [ ] **in-flight 요청 취소** — `_ambientFetchGen`은 응답만 버리고 HTTP는 안 끊음.
-      `http.Client` 재사용 + abort
-- [ ] 타일 캐시 정책 점검 (1.65GB 배분 실측)
-- [ ] **검증**: 가상GPS 1시간 주행 → POI 요청 < 60건, 429 = 0
+- [x] `main_map_screen.dart:634`(현 `:742`) — **디바운스 부재** 해소 (nav_screen과
+      동일 정책 15초/200m로 통일, 공용 `PoiFetchThrottle`)
+- [x] `nav_screen.dart:1412` — `sameTypes == false`일 때 디바운스 우회되는 경로 차단
+      (`typeChangeMinInterval` 3초 하한 적용, 홈 ambient도 동일 규칙)
+- [x] **429 서킷브레이커 + 지수 백오프** 신설 (`poi_service.dart`) — 1→2→4→8→16→32→60초
+      상한, `Retry-After` 헤더 우선 존중(최대 300초), 서킷 오픈 시 HTTP 요청 자체를
+      만들지 않음
+- [x] **실패 응답을 캐시에 넣지 않기** — `fetchPois`/`fetchPoisInBounds`가 실패 시
+      `PoiFetchException`을 던지므로 호출부가 `put()`을 아예 안 탄다(try 블록 안에서만
+      fetch+put, catch는 조용히 스킵 — 기존 POI 유지)
+- [x] `fetchPois*`가 상태코드/예외를 호출부에 전달하도록 반환 타입 변경 —
+      `PoiFetchException { statusCode, circuitOpen, message }` 신설, 모든 호출부
+      (`main_map_screen` ambient/search-prefetch/검색시트, `nav_screen` ambient) 수정
+- [x] **bbox 그리드 스냅** — `PoiService.snapBoundsOutward()` 신설(1-2-5 nice 스텝,
+      span/4). 네트워크·캐시 put/get은 스냅 bbox, 표시는 실제 뷰포트로 필터링한
+      candidates만 사용(화면 밖 POI 방지)
+- [x] **in-flight 요청 취소** — 태그별(`ambient-home`/`ambient-nav`/`search-prefetch`/
+      `search-sheet`) `http.Client`를 두고 새 요청 시작 전 이전 client `close()`.
+      화면 쪽엔 `_ambientFetchInFlight`/`_searchPrefetchInFlight` 플래그로 재진입 자체를 차단
+- [ ] 타일 캐시 정책 점검 (1.65GB 배분 실측) — **조사만 수행, 코드 변경 안 함.**
+      `map_cache_provider.dart`는 `maplibre_gl` 전환 후 `unused_import` 하나뿐인 죽은
+      코드로 확인됐으나, 삭제 여부는 판단이 애매해 이번 세션에선 보류(보고서 참고).
+      1.65GB 실측 배분은 실기기 계측 항목이라 범위 밖.
+- [ ] **검증**: 가상GPS 1시간 주행 → POI 요청 < 60건, 429 = 0 — **마스터 실기기 검증 대기**
 
 ### S3 · 라이프사이클 정상화  `상태: [ ]`
 
