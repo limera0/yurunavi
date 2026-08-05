@@ -61,4 +61,93 @@ void main() {
       );
     },
   );
+
+  // §3-1 항목 4: dispose 중 setGeoJsonSource 콜백 도착 → 게이트 동작 검증.
+  //
+  // _canCallMap() 게이트가 dispose() 진입 즉시 _isDisposing=true 로 막히는 구조적
+  // 사실을 소스 텍스트로 검증한다. "native view만 살아있고 controller reference만
+  // 죽은" 경우를 잡지 못하던 _mlCtrl? 널가드의 한계를 3겹 게이트로 보완했음.
+  test(
+    'dispose_sets_isDisposing_before_stream_close_to_gate_map_calls',
+    () {
+      // 1. _isDisposing 필드가 선언돼 있어야 한다.
+      expect(
+        source.contains('bool _isDisposing = false;'),
+        isTrue,
+        reason: '_isDisposing 플래그가 State 필드로 선언돼 있어야 한다',
+      );
+
+      // 2. dispose() 본문에서 _isDisposing = true가 스트림 close보다 앞에 있어야 한다.
+      // 소스에서 dispose() 메서드 전체를 추출해 순서를 확인한다.
+      final disposePattern = RegExp(
+        r'void dispose\(\)\s*\{(.*?)super\.dispose\(\);',
+        dotAll: true,
+      );
+      final disposeMatch = disposePattern.firstMatch(source);
+      expect(
+        disposeMatch,
+        isNotNull,
+        reason: 'dispose() 메서드가 nav_screen.dart에 존재해야 한다',
+      );
+      final disposeBody = disposeMatch!.group(1)!;
+      final disposingPos = disposeBody.indexOf('_isDisposing = true');
+      final streamClosePos = disposeBody.indexOf('_locationSub?.close()');
+      expect(
+        disposingPos,
+        isNot(equals(-1)),
+        reason: 'dispose()에서 _isDisposing = true 세팅이 있어야 한다',
+      );
+      expect(
+        streamClosePos,
+        isNot(equals(-1)),
+        reason: 'dispose()에서 _locationSub?.close() 호출이 있어야 한다',
+      );
+      expect(
+        disposingPos < streamClosePos,
+        isTrue,
+        reason:
+            '_isDisposing = true 는 _locationSub?.close() 보다 먼저 세팅돼야 한다 '
+            '— 비동기 콜백이 스트림 close 이후에 도달해도 게이트가 막도록',
+      );
+
+      // 3. _canCallMap() 게이트가 _isDisposing을 포함해야 한다.
+      final canCallMapPattern = RegExp(
+        r'bool _canCallMap\(\)\s*=>\s*([^;]+);',
+        dotAll: true,
+      );
+      final gateMatch = canCallMapPattern.firstMatch(source);
+      expect(
+        gateMatch,
+        isNotNull,
+        reason: '_canCallMap() 메서드가 nav_screen.dart에 존재해야 한다',
+      );
+      final gateExpr = gateMatch!.group(1)!;
+      expect(
+        gateExpr.contains('_isDisposing'),
+        isTrue,
+        reason: '_canCallMap() 게이트가 _isDisposing 플래그를 검사해야 한다',
+      );
+      expect(
+        gateExpr.contains('mounted'),
+        isTrue,
+        reason: '_canCallMap() 게이트가 mounted를 검사해야 한다',
+      );
+      expect(
+        gateExpr.contains('_isInPip'),
+        isTrue,
+        reason: '_canCallMap() 게이트가 _isInPip을 검사해야 한다',
+      );
+
+      // 4. 주요 호출부들이 게이트를 경유함을 확인한다.
+      // _canCallMap() 호출 수 — 게이트가 실제로 호출부에 적용됐는지 최소 개수 보장.
+      final gateCallCount = '_canCallMap()'.allMatches(source).length;
+      // _canCallMap 정의 1회 + 적용 최소 9곳(함수 진입부+인라인 합계)
+      expect(
+        gateCallCount,
+        greaterThanOrEqualTo(10),
+        reason: '_canCallMap()이 정의 포함 최소 10회 이상 등장해야 한다 '
+            '(정의 1 + 호출부 9+). 현재: $gateCallCount',
+      );
+    },
+  );
 }

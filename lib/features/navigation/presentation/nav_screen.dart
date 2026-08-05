@@ -132,6 +132,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   ml.MapLibreMapController? _mlCtrl;
   bool _styleLoaded = false;
+  // dispose() 진입 즉시 true로 세팅 — 비동기 콜백이 스트림 close 이후에
+  // 도달해도 지도 API 호출을 막는 게이트(_canCallMap)에서 사용한다.
+  bool _isDisposing = false;
 
   String? _rawStyle;
   String? _styleJson;
@@ -484,6 +487,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   @override
   void dispose() {
+    // 비동기 콜백이 스트림 close 이후에 도달해도 지도 API 호출을 막도록
+    // 가장 먼저 세팅한다. _canCallMap()이 이 플래그를 확인한다.
+    _isDisposing = true;
     if (!_tourFinalizeStarted) {
       unawaited(_finalizeAndPersistTour());
     }
@@ -512,6 +518,19 @@ class _NavScreenState extends ConsumerState<NavScreen>
     super.dispose();
   }
 
+  /// 지도 API 호출 허용 여부 3겹 게이트.
+  /// - mounted: 위젯 트리에서 분리되지 않았는지
+  /// - _mlCtrl != null: controller가 연결됐는지 (nullptr 가드는 이미 있지만
+  ///   controller reference가 살아있고 native view만 죽은 경우를 추가 방어)
+  /// - !_isInPip: PIP 미니창 중엔 플랫폼뷰가 축소돼 대부분 무용
+  /// - !_isDisposing: dispose() 진입 후 비동기 콜백이 늦게 도달하는 경우 차단
+  ///
+  /// 로그 근거: MissingPluginException(source#setGeoJson) 431건,
+  /// camera#move 136건 — _mlCtrl? 널가드는 controller reference가 살아있고
+  /// native view만 죽은 경우를 잡지 못한다.
+  bool _canCallMap() =>
+      mounted && _mlCtrl != null && !_isInPip && !_isDisposing;
+
   Future<void> _startLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) return;
     final perm = await Geolocator.checkPermission();
@@ -522,7 +541,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
     // 이미 알려진 위치가 있으면 카메라 이동
     final knownLoc = ref.read(currentLocationProvider);
-    if (knownLoc != null && mounted) {
+    if (knownLoc != null && _canCallMap()) {
       _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(_toMl(knownLoc), _navZoom));
     }
 
@@ -866,7 +885,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // 재탐색 맥락 구분: '안내를 시작합니다' 대신 재탐색 메시지 발화
         if (!silent) _vps?.speak('reroute');
         _lastAnnouncedIdx = 0; // 출발 step 중복 방지
-        if (_styleLoaded) {
+        if (_styleLoaded && _canCallMap()) {
           _mlCtrl?.setGeoJsonSource(
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
         }
@@ -1083,7 +1102,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // headingDeg는 호출부가 _resolveHeading()으로 이미 확정한 값이어야 한다.
   // forceBearingNorth=true 시 bearing을 0(북쪽)으로 고정하고 offset을 적용하지 않는다.
   Future<void> _recenter(LatLng loc, {bool animate = false, double speedKmh = 0, double? headingDeg, bool forceBearingNorth = false}) async {
-    if (!_styleLoaded) return;
+    if (!_styleLoaded || !_canCallMap()) return;
     // 3km/h 미만은 정차/저속으로 보고 줌을 갱신하지 않는다 — 정지 시 GPS
     // 속도 잡음(mpp가 0.238↔1.18처럼 튐)으로 줌이 진동하는 것을 방지.
     if (speedKmh >= 3) {
@@ -1170,7 +1189,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 회색 배경 레이어로 갱신한다. 시트가 닫히면 빈 리스트로 초기화해 평소
   /// 내비 화면(지나온 경로 회색 레이어와는 별개)에는 보이지 않게 한다.
   void _updateRouteBgLayer(List<List<LatLng>> allRoutes, int selIdx) {
-    if (!_styleLoaded) return;
+    if (!_styleLoaded || !_canCallMap()) return;
     final bgRoutes = [
       for (int i = 0; i < allRoutes.length; i++)
         if (i != selIdx) allRoutes[i],
@@ -1277,7 +1296,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final c = _mlCtrl;
     // _locLayerReady 이전엔 no-op — _initLocationLayer가 route 레이어
     // 추가 이후에만 puck 레이어를 만들도록 해 z-order 레이스를 막는다.
-    if (c == null || !_styleLoaded || !_locLayerReady) return;
+    if (c == null || !_styleLoaded || !_locLayerReady || !_canCallMap()) return;
     final p = ref.read(navStateProvider)?.pos;
     if (p == null) return;
     await c.setGeoJsonSource(_navLocSourceId, _buildLocGeoJson(p, heading));
@@ -1333,7 +1352,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   void _updatePoiLayer(List<Poi> pois) {
-    if (!_styleLoaded) return;
+    if (!_styleLoaded || !_canCallMap()) return;
     _mlCtrl?.setGeoJsonSource(_navPoiSourceId, _buildPoiGeoJson(pois));
   }
 
@@ -1388,7 +1407,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   Future<void> _maybeFetchAmbientPois() async {
     final ctrl = _mlCtrl;
     final gpsPos = ref.read(navStateProvider)?.pos;
-    if (ctrl == null || !_styleLoaded || gpsPos == null) return;
+    if (ctrl == null || !_styleLoaded || gpsPos == null || !_canCallMap()) return;
     if (_ambientFetchInFlight) return; // 진행 중인 fetch가 있으면 즉시 포기
 
     final targetTypes = _resolveEligibleTypes(_navZoom);
@@ -1570,7 +1589,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     setState(() => _styleLoaded = true);
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
     _initRouteLayer().whenComplete(() async {
-      if (_routePoints.length >= 2 && mounted) {
+      if (_routePoints.length >= 2 && _canCallMap()) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_routePoints));
       }
@@ -1623,7 +1642,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     ref.read(navHeadingUpProvider.notifier).set(false); // 노스업 전환
     // 수동 모드(팬/줌)에서는 GPS 틱이 _recenter를 스킵하므로
     // 현재 카메라 위치·줌을 유지한 채 bearing만 북쪽(0°)으로 직접 회전.
-    if (_isManualMode) {
+    if (_isManualMode && _canCallMap()) {
       _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(0));
     }
     _compassNorthTimer = Timer(const Duration(seconds: 10), () {
@@ -1650,19 +1669,29 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final maxLat = _routePoints.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
     final minLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
     final maxLng = _routePoints.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
-    await _mlCtrl?.animateCamera(
-      ml.CameraUpdate.newLatLngBounds(
-        ml.LatLngBounds(
-          southwest: ml.LatLng(minLat, minLng),
-          northeast: ml.LatLng(maxLat, maxLng),
-        ),
-        left: 50,
-        top: 110,
-        right: 80,
-        bottom: 360,
-      ),
-    );
-    await _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(0));
+    // await 호출 — 게이트 통과 후 PIP 진입 경쟁이 발생할 수 있으므로
+    // MissingPluginException만 잡는 최후 방어선을 추가한다.
+    if (_canCallMap()) {
+      try {
+        await _mlCtrl?.animateCamera(
+          ml.CameraUpdate.newLatLngBounds(
+            ml.LatLngBounds(
+              southwest: ml.LatLng(minLat, minLng),
+              northeast: ml.LatLng(maxLat, maxLng),
+            ),
+            left: 50,
+            top: 110,
+            right: 80,
+            bottom: 360,
+          ),
+        );
+        if (_canCallMap()) {
+          await _mlCtrl?.animateCamera(ml.CameraUpdate.bearingTo(0));
+        }
+      } on MissingPluginException catch (e) {
+        debugPrint('YNAV_MAP_GATE MissingPluginException suppressed in _openCourseSheet: $e');
+      }
+    }
 
     final currentMapState = ref.read(mapInteractionProvider);
     _originalSelectedIdx = currentMapState.selectedRouteIdx;
@@ -1713,7 +1742,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   void _onCourseCardTap(int idx) {
     ref.read(mapInteractionProvider.notifier).setSelectedRouteIdx(idx);
     if (idx < _fetchedRoutes.length) {
-      if (_styleLoaded) {
+      if (_styleLoaded && _canCallMap()) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(_fetchedRoutes[idx].points));
       }
@@ -1738,7 +1767,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _applyRouteGuidance(route.maneuvers);
       });
       _lastAnnouncedIdx = 0;
-      if (_styleLoaded) {
+      if (_styleLoaded && _canCallMap()) {
         _mlCtrl?.setGeoJsonSource(
             _navRouteSourceId, _buildRouteGeoJson(route.points));
       }
@@ -1770,7 +1799,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
       notifier.setAllRouteMeta(_originalAllRouteMeta!);
     }
     notifier.setSelectedRouteIdx(restoreIdx);
-    if (_styleLoaded) {
+    if (_styleLoaded && _canCallMap()) {
       _mlCtrl?.setGeoJsonSource(
           _navRouteSourceId, _buildRouteGeoJson(_routePoints));
     }
@@ -1792,7 +1821,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   Future<void> _recolorNavRouteLayer(int idx) async {
     final ctrl = _mlCtrl;
-    if (ctrl == null || !_styleLoaded) return;
+    if (ctrl == null || !_styleLoaded || !_canCallMap()) return;
     final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
     await ctrl.removeLayer(_navRouteLayerId);
     await ctrl.addLineLayer(
@@ -1827,7 +1856,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 기존 패턴과 동일한 이유).
   void _updateRouteSplit(int snapIdx) {
     final ctrl = _mlCtrl;
-    if (ctrl == null || !_styleLoaded || _showCourseSheet) return;
+    if (ctrl == null || !_styleLoaded || _showCourseSheet || !_canCallMap()) return;
     if (_routePoints.length < 2) return;
     final idx = snapIdx.clamp(0, _routePoints.length - 1);
     final pos = ref.read(navStateProvider)?.pos;
@@ -2294,9 +2323,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
                         lon: pos.longitude,
                         onSelected: (s) {
                           setState(() => _selectedGasStation = s);
-                          _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(
-                            ml.LatLng(s.lat, s.lon), 14,
-                          ));
+                          if (_canCallMap()) {
+                            _mlCtrl?.animateCamera(ml.CameraUpdate.newLatLngZoom(
+                              ml.LatLng(s.lat, s.lon), 14,
+                            ));
+                          }
                         },
                       ),
                     );
@@ -2336,13 +2367,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 _NavIconBtn(
                   icon: Icons.add,
                   color: brandColor,
-                  onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()),
+                  onTap: () { if (_canCallMap()) _mlCtrl?.animateCamera(ml.CameraUpdate.zoomIn()); },
                 ),
                 const SizedBox(height: 4),
                 _NavIconBtn(
                   icon: Icons.remove,
                   color: brandColor,
-                  onTap: () => _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()),
+                  onTap: () { if (_canCallMap()) _mlCtrl?.animateCamera(ml.CameraUpdate.zoomOut()); },
                 ),
               ],
             ),
