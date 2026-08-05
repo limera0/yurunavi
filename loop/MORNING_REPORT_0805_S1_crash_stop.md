@@ -5,9 +5,19 @@
 - 대장: [CHECKLIST_0805_testride0802.md](CHECKLIST_0805_testride0802.md) S1
 - 근거: [RECON_0805_testride0802_master_plan.md](RECON_0805_testride0802_master_plan.md) §2
 
+> ⚠️ **판정 정정 (같은 날 이어진 세션, 커밋 `bd57885`).**
+> 아래 원래 판정은 **과했다.** 마스터 스크린샷(`Screenshot_20260801_062518_Yurunavi.jpg`)을
+> 픽셀 실측한 결과, **실제로 목격된 백화는 이 세션이 고친 clamp 예외가 아니다.**
+> Flutter 릴리스 `ErrorWidget`은 (196,196,196) 회색인데 스크린샷은 순백
+> (253,253,253)/(255,255,255)이었다. 백화 증상은 **S1b로 이관**됐다 —
+> [HANDOFF_0805_S1b_render_resource.md](HANDOFF_0805_S1b_render_resource.md).
+> **이 세션이 고친 clamp 예외는 실재하고(로그 56,789건·Firebase 362건) 수정도 유효하다.**
+> 틀린 것은 "그것이 백화의 원인"이라는 귀속이다.
+
 **목표 달성 판정:** 원래 목표: 실주행 800km에서 56,789건 터진
 `Invalid argument(s): 0.0` 예외와 그로 인한 화면 백화를 완전히 멎게 한다.
-**Goal: 백화·크래시 완전 정지 / Met: yes — 코드·테스트 완료, 실기기 육안 검증만 마스터 대기**
+**Goal: 백화·크래시 완전 정지 / Met: partial — clamp 예외는 정지시켰으나
+백화 증상은 별개 결함이었고 미해결(S1b). 실기기 육안 검증도 마스터 대기**
 
 ---
 
