@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -30,6 +31,13 @@ void main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  // 릴리스에서만: build()가 던지면 기본 ErrorWidget이 회색/흰 박스를 그려
+  // "백화"로 보인다 — 서브트리를 대신 투명하게 비워 눈에 띄지 않게 한다.
+  // Crashlytics 보고(FlutterError.onError)는 이 위젯 교체와 무관하게 그대로
+  // 동작한다. 디버그 빌드는 개발 중 에러를 숨기면 안 되므로 기본 빨간 박스를 유지.
+  if (kReleaseMode) {
+    ErrorWidget.builder = (FlutterErrorDetails details) => const SizedBox.shrink();
+  }
   runApp(const ProviderScope(child: YuruNaviApp()));
 }
 

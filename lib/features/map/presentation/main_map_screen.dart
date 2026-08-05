@@ -1441,6 +1441,10 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
         waypoints: state.waypoints,
       );
       if (!mounted) return;
+      if (routes.isEmpty) {
+        // 예외 없이 빈 응답만 온 경우 — 인덱싱할 대상이 없으니 조기 반환.
+        return;
+      }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
       final scores = await Future.wait(
@@ -1619,11 +1623,15 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             destName: dn,
           ));
     }
-    final selIdx = ref.read(mapInteractionProvider).selectedRouteIdx
-        .clamp(0, _fetchedRoutes.length - 1);
-    final durationMin = selIdx < _fetchedRoutes.length
-        ? _fetchedRoutes[selIdx].durationMin
-        : 0;
+    // _fetchedRoutes가 빈 경우(재탐색 중 등) clamp의 상한이 -1이 되어 던진다 —
+    // 빈 경우엔 인덱싱 자체를 건너뛰고 0으로 둔다.
+    final durationMin = _fetchedRoutes.isEmpty
+        ? 0
+        : _fetchedRoutes[ref
+                .read(mapInteractionProvider)
+                .selectedRouteIdx
+                .clamp(0, _fetchedRoutes.length - 1)]
+            .durationMin;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavScreen(

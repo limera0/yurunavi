@@ -43,6 +43,10 @@ class _WaypointManagementSheetState
         waypoints: st.waypoints,
       );
       if (!mounted) return;
+      if (routes.isEmpty) {
+        // 예외 없이 빈 응답만 온 경우 — 인덱싱할 대상이 없으니 조기 반환.
+        return;
+      }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;

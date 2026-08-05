@@ -20,6 +20,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/safe_clamp.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
 import '../../../services/exit_landmark_service.dart';
@@ -560,7 +561,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (prog == null || !mounted) return;
         setState(() {
           _cardRemainingM = prog.distToNextTurnM;
-          _stepIdx = prog.activeStepIdx.clamp(0, _steps.length - 1);
+          _stepIdx = _steps.isEmpty
+              ? 0
+              : prog.activeStepIdx.clamp(0, _steps.length - 1);
         });
         _updateRouteSplit(prog.snapIdx);
         _handleVoice(prog);
@@ -3028,7 +3031,8 @@ class _RearCameraGaugeSwitcherState extends State<RearCameraGaugeSwitcher> {
       case _CamGaugeMode.post:
         final p = widget.progress!;
         final remaining = (p.nextCameraPostZoneM - p.distToNextCameraM)
-            .clamp(0.0, p.nextCameraPostZoneM.toDouble());
+            .clampSafe(0.0, p.nextCameraPostZoneM.toDouble())
+            .toDouble();
         content = CameraPostZoneGauge(
           key: const ValueKey('camera_post_zone_gauge'),
           remainingM: remaining,

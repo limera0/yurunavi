@@ -317,7 +317,11 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
   // ── 헬퍼 ──
 
-  int _clampIdx(int i) => i.clamp(0, _pts.length - 1);
+  // _pts가 비어 있으면(재탐색 중 경로 일시 소멸) 상한이 -1이 되어 clamp가
+  // ArgumentError를 던진다 — 0을 반환한다. 이 반환값으로 `_pts[idx]`를 직접
+  // 인덱싱하는 호출부는 없다(전부 `_cumFromStartM.isEmpty` 등으로 먼저
+  // 가드된 뒤에만 이 값을 쓴다).
+  int _clampIdx(int i) => _pts.isEmpty ? 0 : i.clamp(0, _pts.length - 1);
 
   /// snap 세그먼트 기준, 아직 지나지 않은 첫 maneuver 인덱스.
   int _activeStepFor(int seg) {
