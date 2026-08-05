@@ -289,6 +289,31 @@ async def cmd_stop(message: discord.Message):
         PID_FILE.unlink()
 
 
+async def cmd_new(message: discord.Message):
+    """대화 세션을 끊어 다음 메시지부터 새 세션으로 시작한다.
+
+    handle_chat 은 세션 파일이 있으면 무조건 --resume 하므로, 이 파일을 지우지
+    않으면 대화가 영원히 한 세션에 쌓인다. 누적분이 커지면 resume 자체가
+    수십 분 걸려 "처리 중..."에서 멈춘 것처럼 보인다.
+    """
+    if chat_busy:
+        await message.reply(
+            "지금 대화 요청을 처리 중입니다. 끝난 뒤 다시 `!new` 하세요. "
+            "(응답 없이 오래 매달려 있으면 서버에서 해당 `claude -p` 프로세스를 종료해야 합니다.)"
+        )
+        return
+    if not CHAT_SESSION_FILE.exists():
+        await message.reply("이미 새 세션 상태입니다. 그냥 말 걸면 새로 시작합니다.")
+        return
+
+    old_id = CHAT_SESSION_FILE.read_text().strip()
+    CHAT_SESSION_FILE.unlink()
+    await message.reply(
+        f"🆕 대화 세션을 끊었습니다. 다음 메시지부터 새 세션으로 시작합니다.\n"
+        f"이전 세션: `{old_id}` (기록은 남아 있고, 필요하면 서버에서 이어볼 수 있습니다.)"
+    )
+
+
 async def cmd_wiki(message: discord.Message):
     if running_pid() is not None:
         await message.reply(
@@ -537,6 +562,8 @@ HELP_TEXT = (
     "`!status` — 실행 중인지, 최근 상태, 최근 커밋 확인\n"
     "`!stop` — 실행 중인 야간루프 정지\n"
     "`!wiki` — loop/ 문서를 loop/WIKI_INDEX.md로 재정리(위키 큐레이션, 매일 04:10 자동)\n"
+    "`!new` — 대화 세션 끊기. 다음 메시지부터 새 세션으로 시작\n"
+    "  (그냥 \"새 세션 시작\"이라고 말하면 안 됩니다 — 그건 기존 세션에 던지는 대화일 뿐입니다)\n"
     "그 외 그냥 말 걸면 클로드 코드와 실제 대화(대화 이어짐, 루프 실행 중엔 비활성)\n"
     "📎 이미지/파일을 첨부하면 자동 저장 후 클로드가 열어봅니다 — `!plan`에 스크린샷을 "
     "붙여 버그 수정을 맡기거나, 그냥 이미지만 올려 물어봐도 됩니다.\n"
@@ -572,6 +599,8 @@ async def on_message(message: discord.Message):
         await cmd_stop(message)
     elif content == "!wiki":
         await cmd_wiki(message)
+    elif content == "!new":
+        await cmd_new(message)
     elif content.startswith("!"):
         await message.reply("모르는 명령입니다. `!help` 참고.")
     elif content or message.attachments:
