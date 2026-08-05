@@ -84,6 +84,36 @@ void main() {
     expect(result, const LatLng(36.0, 127.0));
   });
 
+  test('최초 설치 시나리오 — 캐시된 위치가 없고 getCurrentPosition이 늘어지면 '
+      'kFirstRunBootLocationBudget 안에 포기한다', () async {
+    // 신규 설치는 getLastKnownPosition()이 거의 항상 null이라 확보가
+    // getCurrentPosition() 대기로 직행한다. 이 경로의 대기는 애니메이션이
+    // 끝난 뒤라 그대로 체감 지연이 되므로 짧은 예산이 강제돼야 한다
+    // (마스터 결정 2026-08-05: 첫 실행만 1초). 이 예산이 3초짜리
+    // kBootLocationBudget으로 회귀하면 이 테스트가 잡는다.
+    messenger.setMockMethodCallHandler(_geolocatorChannel, (call) async {
+      switch (call.method) {
+        case 'getLastKnownPosition':
+          return null; // 신규 설치 — 캐시된 fix 없음
+        case 'getCurrentPosition':
+          return Completer<dynamic>().future; // 영영 안 옴
+        default:
+          return null;
+      }
+    });
+
+    final sw = Stopwatch()..start();
+    final result = await acquireBootLocation(
+      budget: kFirstRunBootLocationBudget,
+    );
+    sw.stop();
+
+    expect(result, isNull);
+    expect(kFirstRunBootLocationBudget, lessThan(kBootLocationBudget));
+    // 여유를 두되 3초(kBootLocationBudget)보다는 확실히 작아야 한다.
+    expect(sw.elapsed, lessThan(const Duration(milliseconds: 2500)));
+  });
+
   test('두 호출 모두 실패해도 예외 없이 null을 반환한다', () async {
     messenger.setMockMethodCallHandler(_geolocatorChannel, (call) async {
       throw PlatformException(code: 'ERROR', message: 'boom');

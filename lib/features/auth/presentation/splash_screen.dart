@@ -13,7 +13,25 @@ import '../../map/presentation/main_map_screen.dart';
 /// 스플래시 위치 선확보 예산 (S0) — `getCurrentPosition()` 자체 타임아웃이자,
 /// `_goToMain()` 직전 대기 상한이기도 하다. 이 시간을 넘기면 조용히 포기하고
 /// 앱은 정상 진입한다(블로킹 금지).
+///
+/// 이 값은 **권한을 이미 보유한 실행**(2회차 이후 전부)에만 적용된다. 그 경로는
+/// 확보가 로고 애니메이션(약 1.7초)과 완전히 병렬로 돌기 때문에 예산을 넉넉히
+/// 잡아도 체감 지연이 0이다.
 const Duration kBootLocationBudget = Duration(seconds: 3);
+
+/// 최초 설치 실행 전용 예산 (S0) — 권한 팝업에서 방금 허용된 경로.
+///
+/// 이 경로는 애니메이션이 이미 끝난 뒤라 대기가 **그대로 체감 지연**이 된다.
+/// 게다가 신규 설치라 `getLastKnownPosition()`이 거의 항상 null이어서
+/// `getCurrentPosition()`을 끝까지 기다리게 된다 — [kBootLocationBudget]을
+/// 그대로 쓰면 첫인상이 3초 느려진다(2026-08-05 code-auditor 지적).
+///
+/// 그렇다고 0으로 두지 않는 이유: 실외에서는 대개 1초 안에 fix가 들어와
+/// 폴백 좌표가 아예 노출되지 않는다. 이 안에 못 받아도 손실은 없다 —
+/// `FallbackRecenterState`(main_map_screen.dart)가 첫 fix 도착 시 카메라를
+/// 자동으로 교정하므로 결과는 동일하고, 잠깐 폴백 프레임이 보일 뿐이다.
+/// (마스터 결정 2026-08-05: "첫 실행만 1초로 단축".)
+const Duration kFirstRunBootLocationBudget = Duration(seconds: 1);
 
 /// 위치 선확보 순수 로직 — 위젯/Riverpod에 의존하지 않아 플랫폼 채널만
 /// 목킹하면 단위 테스트가 가능하다(`test/splash_boot_location_test.dart`).
@@ -133,6 +151,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     // "예산 소진"으로 계산돼, 막 시작한 확보를 단 한 번도 기다리지 않고
     // 바로 진입해버리는 죽은 코드가 된다 — awaitWithinBudget() 문서 참조.
     DateTime? locationStartedAt;
+    // 어느 경로로 확보를 시작했느냐에 따라 예산이 다르다 — 상수 문서 참조.
+    var locationBudget = kBootLocationBudget;
 
     // 이미 위치 권한이 있으면(2회차 이후 모든 실행이 여기 해당) 로고 애니메이션과
     // 완전히 병렬로 위치 확보를 시작한다 — 팝업을 앞당기는 게 아니라 확보
@@ -140,7 +160,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     Future<LatLng?>? locationFuture;
     if ((await Permission.location.status).isGranted) {
       locationStartedAt = DateTime.now();
-      locationFuture = _acquireBootLocation();
+      locationFuture = _acquireBootLocation(kBootLocationBudget);
     }
 
     await Future.delayed(const Duration(milliseconds: 200));
@@ -151,9 +171,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted) return;
     // 최초 실행 경로: 팝업에서 방금 허용됐으면 여기서 확보를 시작한다(이미
     // 위에서 시작한 경우는 건너뛴다) — 시작 시각도 지금 이 지점에서 찍는다.
+    // 애니메이션이 이미 끝난 뒤라 대기가 그대로 체감 지연이 되므로 짧은
+    // 예산을 쓴다(kFirstRunBootLocationBudget 문서 참조).
     if (locationFuture == null && (await Permission.location.status).isGranted) {
       locationStartedAt = DateTime.now();
-      locationFuture = _acquireBootLocation();
+      locationBudget = kFirstRunBootLocationBudget;
+      locationFuture = _acquireBootLocation(kFirstRunBootLocationBudget);
     }
     if (!mounted) return;
     await RoutingConfig.loadRemote(AppConfig.instance.naviBaseUrl);
@@ -161,19 +184,21 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     // 확보가 진행 중이면 그 시작 시각 기준 남은 예산만큼만 기다린다 —
     // 애니메이션이 이미 대부분의 예산을 소모한 경로(권한 기보유)라면 통상
-    // 추가 지연은 0, 최악의 경우에도 확보 시작으로부터 kBootLocationBudget을
+    // 추가 지연은 0, 최악의 경우에도 확보 시작으로부터 locationBudget을
     // 넘기지 않는다. 실패/타임아웃은 조용히 통과.
     if (locationFuture != null && locationStartedAt != null) {
-      await awaitWithinBudget(locationFuture, startedAt: locationStartedAt);
+      await awaitWithinBudget(locationFuture,
+          startedAt: locationStartedAt, budget: locationBudget);
     }
     if (!mounted) return;
     _goToMain();
   }
 
-  /// [acquireBootLocation]을 호출해 결과를 `bootLocationProvider`에 채운다.
-  /// 중간값(getLastKnownPosition)이 나오는 즉시 반영하고, 이후 더 정확한
-  /// getCurrentPosition 결과가 나오면 교체한다.
-  Future<LatLng?> _acquireBootLocation() => acquireBootLocation(
+  /// [acquireBootLocation]을 [budget] 예산으로 호출해 결과를
+  /// `bootLocationProvider`에 채운다. 중간값(getLastKnownPosition)이 나오는
+  /// 즉시 반영하고, 이후 더 정확한 getCurrentPosition 결과가 나오면 교체한다.
+  Future<LatLng?> _acquireBootLocation(Duration budget) => acquireBootLocation(
+        budget: budget,
         onIntermediate: (loc) {
           if (mounted) ref.read(bootLocationProvider.notifier).set(loc);
         },
