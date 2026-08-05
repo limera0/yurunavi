@@ -1,5 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:yurunavi/core/config/app_config.dart';
 import 'package:yurunavi/models/poi.dart';
 import 'package:yurunavi/services/poi_service.dart';
 
@@ -7,7 +12,30 @@ Poi _poi(String id, PoiType type, double lat, double lon) {
   return Poi(id: id, name: id, type: type, location: LatLng(lat, lon));
 }
 
+Map<String, dynamic> _poiJson(String id, PoiType category, double lat, double lon) {
+  const catStr = {
+    PoiType.cafe: 'cafe',
+    PoiType.convenienceStore: 'convenience_store',
+    PoiType.gasStation: 'gas_station',
+    PoiType.supermarket: 'supermarket',
+    PoiType.restaurant: 'restaurant',
+  };
+  return {
+    'id': id,
+    'name': id,
+    'category': catStr[category],
+    'lat': lat,
+    'lon': lon,
+  };
+}
+
 void main() {
+  // PoiService._poiBaseUrl은 AppConfig.instance를 읽으므로, 이 테스트 파일이
+  // 독립된 isolate로 실행되더라도 late 필드가 초기화돼 있어야 한다.
+  setUpAll(() {
+    AppConfig.init(const ProdConfig());
+  });
+
   group('PoiService.selectForAmbientDisplay', () {
     test('(a) 빈 후보 목록이면 빈 리스트를 반환한다', () {
       final result = PoiService.selectForAmbientDisplay(
@@ -344,6 +372,353 @@ void main() {
       );
       expect(result, isNotNull);
       expect(result!.length, 499);
+    });
+  });
+
+  // S2(2026-08-05) — 429 서킷브레이커/백오프/예외 전달 회귀 가드.
+  group('PoiService — 서킷브레이커·예외 전달', () {
+    test('1) 200 정상 응답 → POI가 파싱되고 서킷은 닫힌 채(정상) 유지된다', () async {
+      var callCount = 0;
+      final service = PoiService(
+        clientFactory: () => MockClient((request) async {
+          callCount++;
+          return http.Response(
+            jsonEncode([_poiJson('a', PoiType.gasStation, 37.5, 127.0)]),
+            200,
+          );
+        }),
+      );
+
+      final pois = await service.fetchPois(
+        center: const LatLng(37.5, 127.0),
+        radiusMeters: 500,
+        types: [PoiType.gasStation],
+      );
+      expect(pois.length, 1);
+      expect(pois.first.id, 'a');
+      expect(callCount, 1);
+
+      // 서킷이 닫혀 있으므로 바로 다음 호출도 정상적으로 네트워크에 닿는다.
+      await service.fetchPois(
+        center: const LatLng(37.5, 127.0),
+        radiusMeters: 500,
+        types: [PoiType.gasStation],
+      );
+      expect(callCount, 2);
+    });
+
+    test('2) 429 응답 → PoiFetchException(statusCode: 429)을 던진다(빈 리스트 아님)', () async {
+      final service = PoiService(
+        clientFactory: () => MockClient((request) async => http.Response('', 429)),
+      );
+
+      await expectLater(
+        () => service.fetchPois(
+          center: const LatLng(0, 0),
+          radiusMeters: 500,
+          types: [PoiType.cafe],
+        ),
+        throwsA(isA<PoiFetchException>()
+            .having((e) => e.statusCode, 'statusCode', 429)
+            .having((e) => e.circuitOpen, 'circuitOpen', false)),
+      );
+    });
+
+    test(
+        '3) 429 직후 재호출은 서킷이 열려 있어 MockClient에 닿지 않고(호출 카운터 불변) '
+        'circuitOpen: true로 즉시 던진다', () async {
+      var callCount = 0;
+      final service = PoiService(
+        clientFactory: () => MockClient((request) async {
+          callCount++;
+          return http.Response('', 429);
+        }),
+      );
+
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>()),
+      );
+      expect(callCount, 1);
+
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>().having((e) => e.circuitOpen, 'circuitOpen', true)),
+      );
+      // 서킷이 막았으므로 두 번째 호출은 네트워크(MockClient handler)에 닿지 않는다.
+      expect(callCount, 1);
+    });
+
+    test(
+        '4) 백오프 경과 후 재호출은 요청이 나가고, 연속 실패마다 대기시간이 '
+        '1→2→4→8→16→32→60(상한)초로 늘어난다', () async {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      var callCount = 0;
+      final service = PoiService(
+        now: () => now,
+        clientFactory: () => MockClient((request) async {
+          callCount++;
+          return http.Response('', 429);
+        }),
+      );
+
+      Future<void> attemptAndExpectFailure() => expectLater(
+            () => service.fetchPois(
+                center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+            throwsA(isA<PoiFetchException>()),
+          );
+
+      const expectedBackoffsSeconds = [1, 2, 4, 8, 16, 32, 60, 60];
+      var expectedCallCount = 0;
+      for (final backoff in expectedBackoffsSeconds) {
+        // 경과 시간이 부족하면 서킷이 여전히 열려 있어(circuitOpen) 호출 카운터가
+        // 늘지 않아야 한다.
+        if (expectedCallCount > 0) {
+          await expectLater(
+            () => service.fetchPois(
+                center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+            throwsA(isA<PoiFetchException>().having((e) => e.circuitOpen, 'circuitOpen', true)),
+          );
+          expect(callCount, expectedCallCount);
+        }
+        now = now.add(Duration(seconds: backoff));
+        await attemptAndExpectFailure();
+        expectedCallCount++;
+        expect(callCount, expectedCallCount);
+      }
+    });
+
+    test('5) 성공 응답은 서킷과 실패 카운터를 즉시 리셋한다', () async {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      var callCount = 0;
+      var respondWithFailure = true;
+      final service = PoiService(
+        now: () => now,
+        clientFactory: () => MockClient((request) async {
+          callCount++;
+          if (respondWithFailure) return http.Response('', 429);
+          return http.Response(jsonEncode(const []), 200);
+        }),
+      );
+
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>()),
+      );
+      expect(callCount, 1);
+
+      now = now.add(const Duration(seconds: 1)); // 1초 백오프 경과 → half-open
+      respondWithFailure = false;
+      final pois = await service.fetchPois(
+          center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]);
+      expect(pois, isEmpty);
+      expect(callCount, 2);
+
+      // 리셋됐다면 대기 없이 바로 다음 호출도 네트워크에 닿아야 한다(circuitOpen이
+      // 아니라 진짜 429가 다시 온 것이어야 한다) — 리셋 안 됐다면 오래된 백오프가
+      // 아직 안 지나 circuitOpen:true로 막혔을 것이다.
+      respondWithFailure = true;
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>().having((e) => e.circuitOpen, 'circuitOpen', false)),
+      );
+      expect(callCount, 3);
+    });
+
+    test('6) Retry-After 헤더 값을 지수 백오프보다 우선해서 존중한다', () async {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      var callCount = 0;
+      final service = PoiService(
+        now: () => now,
+        clientFactory: () => MockClient((request) async {
+          callCount++;
+          return http.Response('', 429, headers: {'retry-after': '30'});
+        }),
+      );
+
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>()),
+      );
+      expect(callCount, 1);
+
+      // 29초 후에도 여전히 막혀 있어야 한다 — 지수 백오프(1초)였다면 이미 열렸을 것.
+      now = now.add(const Duration(seconds: 29));
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>().having((e) => e.circuitOpen, 'circuitOpen', true)),
+      );
+      expect(callCount, 1);
+
+      // 30초(Retry-After) 경과 후엔 다시 네트워크에 닿는다.
+      now = now.add(const Duration(seconds: 1));
+      await expectLater(
+        () => service.fetchPois(
+            center: const LatLng(0, 0), radiusMeters: 1, types: [PoiType.cafe]),
+        throwsA(isA<PoiFetchException>()),
+      );
+      expect(callCount, 2);
+    });
+
+    test('9) 실패 시 PoiRegionCache.put이 호출되지 않는다(캐시 미오염)', () async {
+      final cache = PoiRegionCache();
+      final service = PoiService(
+        clientFactory: () => MockClient((request) async => http.Response('', 500)),
+      );
+
+      // 화면 코드(main_map_screen/nav_screen)와 동일한 패턴 — fetch 성공 시에만
+      // put()을 호출하고, 실패(PoiFetchException)면 캐시를 건드리지 않는다.
+      try {
+        final fetched = await service.fetchPoisInBounds(
+          south: 0,
+          west: 0,
+          north: 1,
+          east: 1,
+          types: [PoiType.cafe],
+        );
+        cache.put(
+          south: 0,
+          west: 0,
+          north: 1,
+          east: 1,
+          types: {PoiType.cafe},
+          pois: fetched,
+        );
+      } on PoiFetchException {
+        // 조용히 무시 — 캐시는 건드리지 않는다.
+      }
+
+      final result = cache.tryGet(south: 0, west: 0, north: 1, east: 1, types: {PoiType.cafe});
+      expect(result, isNull);
+    });
+  });
+
+  group('PoiService.snapBoundsOutward', () {
+    test('7a) 인접한 두 중심점이 만드는 bbox가 동일한 스냅 bbox로 떨어진다', () {
+      ({double south, double west, double north, double east}) bboxFor(LatLng c) {
+        const delta = 0.02; // nav_screen 자동추종 모드 근사 정사각형과 동일 패턴.
+        return (
+          south: c.latitude - delta,
+          west: c.longitude - delta,
+          north: c.latitude + delta,
+          east: c.longitude + delta,
+        );
+      }
+
+      // "nice" 격자선에 정확히 걸치지 않는 중심점을 쓴다 — 격자선 바로 위/
+      // 아래로 걸치는 두 점을 고르면 진짜로 서로 다른 셀에 속해(둘 다 outward
+      // 스냅 계약을 올바르게 지킨 것) 셀이 달라지는 게 정상이므로, 그런
+      // 경계 케이스는 "안정성" 검증에 적합하지 않다.
+      final b1 = bboxFor(const LatLng(37.5050, 127.0050));
+      // 약 11m 이동 — 스냅 전이었다면 PoiRegionCache가 매번 미스했을 정도의 미세한 이동.
+      final b2 = bboxFor(const LatLng(37.5051, 127.0051));
+
+      final snap1 = PoiService.snapBoundsOutward(
+          south: b1.south, west: b1.west, north: b1.north, east: b1.east);
+      final snap2 = PoiService.snapBoundsOutward(
+          south: b2.south, west: b2.west, north: b2.north, east: b2.east);
+
+      expect(snap1, snap2);
+    });
+
+    test('7b) 스냅 결과는 항상 원본 bbox를 포함한다', () {
+      const cases = [
+        (south: 37.501, west: 127.002, north: 37.541, east: 127.042),
+        (south: -1.0, west: -1.0, north: 2.0, east: 2.0),
+        (south: 0.1, west: 0.1, north: 0.1, east: 0.1), // 퇴화(점) 케이스
+      ];
+      for (final c in cases) {
+        final snap = PoiService.snapBoundsOutward(
+            south: c.south, west: c.west, north: c.north, east: c.east);
+        expect(snap.south, lessThanOrEqualTo(c.south));
+        expect(snap.west, lessThanOrEqualTo(c.west));
+        expect(snap.north, greaterThanOrEqualTo(c.north));
+        expect(snap.east, greaterThanOrEqualTo(c.east));
+      }
+    });
+  });
+
+  group('PoiFetchThrottle', () {
+    test('8a) 15초 시간 경계 양옆에서 정확히 갈린다', () {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      final throttle = PoiFetchThrottle(
+        minInterval: const Duration(seconds: 15),
+        minMoveMeters: 200,
+        now: () => now,
+      );
+      const center = LatLng(37.5, 127.0);
+
+      expect(throttle.shouldFetch(center: center), isTrue); // 최초 호출은 항상 허용
+      throttle.markStarted(center: center);
+
+      now = now.add(const Duration(seconds: 14, milliseconds: 999));
+      expect(throttle.shouldFetch(center: center), isFalse); // 경계 직전 — 여전히 차단
+
+      now = now.add(const Duration(milliseconds: 1));
+      expect(throttle.shouldFetch(center: center), isTrue); // 정확히 15초 경과 — 허용
+    });
+
+    test('8b) 200m 이동 경계 양옆에서 정확히 갈린다', () {
+      final now = DateTime(2026, 1, 1, 12, 0, 0);
+      final throttle = PoiFetchThrottle(
+        minInterval: const Duration(seconds: 15),
+        minMoveMeters: 200,
+        now: () => now,
+      );
+      const center = LatLng(37.5, 127.0);
+      throttle.markStarted(center: center);
+
+      // 시간은 전혀 안 지났으므로(0초) 순수하게 거리만으로 판단된다.
+      final near = LatLng(37.5 + 0.0005, 127.0); // 약 55m
+      expect(throttle.shouldFetch(center: near), isFalse);
+
+      final far = LatLng(37.5 + 0.002, 127.0); // 약 222m
+      expect(throttle.shouldFetch(center: far), isTrue);
+    });
+
+    test('8c) markStarted 직후 같은 자리로의 즉시 재호출은 차단된다', () {
+      final now = DateTime(2026, 1, 1, 12, 0, 0);
+      final throttle = PoiFetchThrottle(
+        minInterval: const Duration(seconds: 15),
+        minMoveMeters: 200,
+        now: () => now,
+      );
+      const center = LatLng(37.5, 127.0);
+
+      expect(throttle.shouldFetch(center: center), isTrue);
+      throttle.markStarted(center: center);
+      expect(throttle.shouldFetch(center: center), isFalse);
+    });
+
+    test(
+        '8d) 타입 집합이 바뀌면 시간/거리 조건을 우회하되 typeChangeMinInterval 하한은 '
+        '유지한다(§2-3 — 완전 무제한 우회 금지)', () {
+      var now = DateTime(2026, 1, 1, 12, 0, 0);
+      final throttle = PoiFetchThrottle(
+        minInterval: const Duration(seconds: 15),
+        minMoveMeters: 200,
+        typeChangeMinInterval: const Duration(seconds: 3),
+        now: () => now,
+      );
+      const center = LatLng(37.5, 127.0);
+      throttle.markStarted(center: center, types: {PoiType.gasStation});
+
+      // 같은 자리·같은 타입 → 15초/200m 게이트에 걸려 차단.
+      expect(throttle.shouldFetch(center: center, types: {PoiType.gasStation}), isFalse);
+
+      // 타입이 바뀌었지만 3초가 안 지났으면 여전히 차단(무제한 우회 금지).
+      expect(throttle.shouldFetch(center: center, types: {PoiType.cafe}), isFalse);
+
+      now = now.add(const Duration(seconds: 3));
+      // 3초(typeChangeMinInterval) 경과 후엔 타입 변경이 허용된다 — 15초
+      // 전체를 기다리지 않아도 된다.
+      expect(throttle.shouldFetch(center: center, types: {PoiType.cafe}), isTrue);
     });
   });
 }

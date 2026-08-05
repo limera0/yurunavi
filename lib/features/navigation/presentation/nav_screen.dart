@@ -272,9 +272,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 13-1b: 상시 표시 POI (ambient) — GPS 위치 기준으로 자동 표시/갱신되는
   // 별개 레이어의 로컬 상태.
   List<Poi> _ambientPois = const [];
-  DateTime? _lastAmbientFetchAt;
-  LatLng? _lastAmbientFetchCenter;
-  Set<PoiType> _lastAmbientFetchTypes = const {};
+  // ambient POI 재조회 디바운스(15초/200m 시간·거리 하한, 타입 변경 시 3초
+  // 하한 — §2-3) + 반드시 shouldFetch가 true인 그 자리에서(await 전에)
+  // markStarted를 호출해야 한다. 응답 후에만 커밋하면 응답이 느릴 때
+  // 디바운스가 영원히 무장되지 않는다(2026-08-05 S2에서 발견한 429 폭주 원인).
+  final _ambientThrottle = PoiFetchThrottle(
+    minInterval: const Duration(seconds: 15),
+    minMoveMeters: 200,
+    typeChangeMinInterval: const Duration(seconds: 3),
+  );
+  // 진행 중인 ambient fetch가 있으면 새 호출은 즉시 return.
+  bool _ambientFetchInFlight = false;
   // 진행 중인 fetch보다 나중에 시작된 호출이 있으면 이전 응답은 버린다(stale-response 가드).
   int _ambientFetchGen = 0;
   // 뷰포트 사각형+타입 조합 단위로 최근 조회 결과를 재사용해 패닝 왕복 시
@@ -1385,6 +1393,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     final gpsPos = ref.read(navStateProvider)?.pos;
     if (ctrl == null || !_styleLoaded || gpsPos == null) return;
+    if (_ambientFetchInFlight) return; // 진행 중인 fetch가 있으면 즉시 포기
 
     final targetTypes = _resolveEligibleTypes(_navZoom);
     _stickyEligibleTypes = targetTypes; // 매 틱 갱신 — fetch 성사 여부와 무관
@@ -1394,7 +1403,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _ambientPois = const [];
         _updatePoiLayer(const []);
       }
-      _lastAmbientFetchTypes = const {};
+      _ambientThrottle.clearTypes();
       return;
     }
 
@@ -1411,102 +1420,126 @@ class _NavScreenState extends ConsumerState<NavScreen>
       approxCenter = gpsPos;
     }
 
-    final sameTypes = targetTypes.length == _lastAmbientFetchTypes.length &&
-        targetTypes.every(_lastAmbientFetchTypes.contains);
-    if (sameTypes) {
-      final lastAt = _lastAmbientFetchAt;
-      final lastCenter = _lastAmbientFetchCenter;
-      final movedEnough = lastCenter == null ||
-          PoiService.haversineMeters(lastCenter, approxCenter) >= 200;
-      final staleEnough = lastAt == null ||
-          DateTime.now().difference(lastAt) >= const Duration(seconds: 15);
-      if (!movedEnough && !staleEnough) return;
+    if (!_ambientThrottle.shouldFetch(center: approxCenter, types: targetTypes)) {
+      return;
     }
+    // 선커밋 — 아래 await(getVisibleRegion/fetchPoisInBounds) 이전에 즉시
+    // 확정한다. 응답 후(성공 경로)에서만 커밋하면 응답이 느릴 때 디바운스가
+    // 영원히 무장되지 않는다(2026-08-05 S2에서 발견한 429 폭주의 진짜 원인).
+    _ambientThrottle.markStarted(center: approxCenter, types: targetTypes);
 
-    // 이 호출 시작 시점의 세대를 기록 — 아래 await(getVisibleRegion/fetchPois)
-    // 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면) 이 응답은
-    // stale이니 버린다.
-    final myGen = ++_ambientFetchGen;
+    _ambientFetchInFlight = true;
+    try {
+      // 이 호출 시작 시점의 세대를 기록 — 아래 await(getVisibleRegion/fetchPois)
+      // 도중 더 최신 호출이 시작되면(_ambientFetchGen이 바뀌면) 이 응답은
+      // stale이니 버린다.
+      final myGen = ++_ambientFetchGen;
 
-    final LatLng center;
-    final double south, north, west, east;
-    if (_isManualMode) {
-      // 수동 팬 모드 — main_map_screen._maybeFetchAmbientPois와 동일하게 실제
-      // 뷰포트 bounds를 중심/필터링 기준으로 쓴다.
-      final ml.LatLngBounds bounds;
-      try {
-        bounds = await ctrl.getVisibleRegion();
-      } catch (_) {
-        return;
+      final LatLng center;
+      final double south, north, west, east;
+      if (_isManualMode) {
+        // 수동 팬 모드 — main_map_screen._maybeFetchAmbientPois와 동일하게 실제
+        // 뷰포트 bounds를 중심/필터링 기준으로 쓴다.
+        final ml.LatLngBounds bounds;
+        try {
+          bounds = await ctrl.getVisibleRegion();
+        } catch (_) {
+          return;
+        }
+        if (!mounted || myGen != _ambientFetchGen) return;
+        center = LatLng(
+          (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+          (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+        );
+        south = bounds.southwest.latitude;
+        north = bounds.northeast.latitude;
+        west = bounds.southwest.longitude;
+        east = bounds.northeast.longitude;
+      } else {
+        // 자동추종 모드 — 카메라가 항상 헤딩에 맞춰 회전해 축 정렬된 실제
+        // 뷰포트 bounds 개념이 no map-pan case와 맞지 않으므로, GPS 위치를
+        // 중심으로 한 정사각형 근사 bounds를 쓴다(main_map_screen._mapPinPois와
+        // 동일 패턴).
+        center = gpsPos;
+        const delta = 0.02; // ~2.2km, 그리드 분산용 근사치일 뿐 실제 필터링엔 영향 없음.
+        south = center.latitude - delta;
+        north = center.latitude + delta;
+        west = center.longitude - delta;
+        east = center.longitude + delta;
       }
-      if (!mounted || myGen != _ambientFetchGen) return;
-      center = LatLng(
-        (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
-        (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
-      );
-      south = bounds.southwest.latitude;
-      north = bounds.northeast.latitude;
-      west = bounds.southwest.longitude;
-      east = bounds.northeast.longitude;
-    } else {
-      // 자동추종 모드 — 카메라가 항상 헤딩에 맞춰 회전해 축 정렬된 실제
-      // 뷰포트 bounds 개념이 no map-pan case와 맞지 않으므로, GPS 위치를
-      // 중심으로 한 정사각형 근사 bounds를 쓴다(main_map_screen._mapPinPois와
-      // 동일 패턴).
-      center = gpsPos;
-      const delta = 0.02; // ~2.2km, 그리드 분산용 근사치일 뿐 실제 필터링엔 영향 없음.
-      south = center.latitude - delta;
-      north = center.latitude + delta;
-      west = center.longitude - delta;
-      east = center.longitude + delta;
-    }
 
-    final cached = _poiRegionCache.tryGet(
-      south: south,
-      west: west,
-      north: north,
-      east: east,
-      types: targetTypes,
-    );
-
-    final List<Poi> pois;
-    if (cached != null) {
-      pois = cached;
-    } else {
-      final fetched = await ref.read(poiServiceProvider).fetchPoisInBounds(
-            south: south,
-            west: west,
-            north: north,
-            east: east,
-            types: targetTypes.toList(),
-          );
-      if (!mounted || myGen != _ambientFetchGen) return;
-      _poiRegionCache.put(
+      // 캐시 적중률을 위해 네트워크 요청·캐시 put/get 모두 바깥쪽으로 스냅한
+      // bbox를 쓴다(자동추종 모드는 GPS ± delta라 1m만 움직여도 원래는
+      // 매번 미스했다) — 표시(selectForAmbientDisplay)는 실제 뷰포트를 써야
+      // 하므로 후보를 먼저 실제 뷰포트로 필터링한다(아래).
+      final snapped = PoiService.snapBoundsOutward(
         south: south,
         west: west,
         north: north,
         east: east,
-        types: targetTypes,
-        pois: fetched,
       );
-      pois = fetched;
+
+      final cached = _poiRegionCache.tryGet(
+        south: snapped.south,
+        west: snapped.west,
+        north: snapped.north,
+        east: snapped.east,
+        types: targetTypes,
+      );
+
+      final List<Poi> pois;
+      if (cached != null) {
+        pois = cached;
+      } else {
+        try {
+          final fetched = await ref.read(poiServiceProvider).fetchPoisInBounds(
+                south: snapped.south,
+                west: snapped.west,
+                north: snapped.north,
+                east: snapped.east,
+                types: targetTypes.toList(),
+                tag: 'ambient-nav',
+              );
+          if (!mounted || myGen != _ambientFetchGen) return;
+          _poiRegionCache.put(
+            south: snapped.south,
+            west: snapped.west,
+            north: snapped.north,
+            east: snapped.east,
+            types: targetTypes,
+            pois: fetched,
+          );
+          pois = fetched;
+        } on PoiFetchException {
+          // 실패(429/네트워크 오류/서킷 오픈) — 캐시에 넣지 않고 기존
+          // _ambientPois를 유지한 채 조용히 종료한다.
+          return;
+        }
+      }
+
+      final visible = pois
+          .where((p) =>
+              p.location.latitude >= south &&
+              p.location.latitude <= north &&
+              p.location.longitude >= west &&
+              p.location.longitude <= east)
+          .toList();
+
+      final limited = PoiService.selectForAmbientDisplay(
+        candidates: visible,
+        south: south,
+        north: north,
+        west: west,
+        east: east,
+        center: center,
+        maxCount: 20,
+      );
+
+      _ambientPois = limited;
+      _updatePoiLayer(limited);
+    } finally {
+      _ambientFetchInFlight = false;
     }
-
-    final limited = PoiService.selectForAmbientDisplay(
-      candidates: pois,
-      south: south,
-      north: north,
-      west: west,
-      east: east,
-      center: center,
-      maxCount: 20,
-    );
-
-    _ambientPois = limited;
-    _updatePoiLayer(limited);
-    _lastAmbientFetchAt = DateTime.now();
-    _lastAmbientFetchCenter = center;
-    _lastAmbientFetchTypes = targetTypes;
   }
 
   /// 목적지/경유지는 widget 생명주기 동안 불변(ctor의 final 필드, 재할당 없음)

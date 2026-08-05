@@ -335,6 +335,28 @@ class PoiService {
     return _kCellSizeStepsDeg.last;
   }
 
+  // `value / step`이 정수에 아주 가까우면(부동소수점 표현 오차, 보통 1e-13
+  // 스케일) 그 정수로 취급한다 — 그렇지 않으면 "수학적으로는 정확히 격자선
+  // 위"인 값이 이진 부동소수점 표현 탓에 격자선 바로 아래/위로 미끄러져,
+  // 거의 같은 두 중심점이 서로 다른 셀로 스냅되는 문제가 생긴다(예: 37.48을
+  // 37.5-0.02로 계산하면 37.48/0.02가 1873.9999999999998로 나와 floor가
+  // 한 칸 아래로 미끄러짐 — snapBoundsOutward 단위 테스트에서 실측됨).
+  static const double _gridSnapTolerance = 1e-6;
+
+  static int _floorGridIndex(double value, double step) {
+    final q = value / step;
+    final nearest = q.roundToDouble();
+    if ((q - nearest).abs() < _gridSnapTolerance) return nearest.toInt();
+    return q.floor();
+  }
+
+  static int _ceilGridIndex(double value, double step) {
+    final q = value / step;
+    final nearest = q.roundToDouble();
+    if ((q - nearest).abs() < _gridSnapTolerance) return nearest.toInt();
+    return q.ceil();
+  }
+
   /// 요청 bbox를 바깥쪽으로(south/west는 floor, north/east는 ceil) "nice" 격자에
   /// 스냅해 반환한다 — [PoiRegionCache.tryGet]이 "저장 영역 ⊇ 요청 영역"일 때만
   /// 적중하는데, 내비 자동추종처럼 bbox가 GPS 위치를 중심으로 매 틱 미세하게
@@ -360,14 +382,17 @@ class PoiService {
     final latStep = _snapCellSizeDeg(latSpan > 0 ? latSpan / 4 : _kCellSizeStepsDeg.first);
     final lonStep = _snapCellSizeDeg(lonSpan > 0 ? lonSpan / 4 : _kCellSizeStepsDeg.first);
 
-    // 부동소수점 오차로 floor/ceil 결과가 원본 쪽으로 안쪽으로 미끄러지는 걸
-    // 막기 위해 아주 작은 여유(epsilon)를 바깥쪽으로 준다 — "스냅 결과가 항상
-    // 원본을 포함한다"는 계약을 부동소수점 환경에서도 지키기 위함.
-    const eps = 1e-9;
-    final snappedSouth = ((south / latStep) - eps).floor() * latStep;
-    final snappedNorth = ((north / latStep) + eps).ceil() * latStep;
-    final snappedWest = ((west / lonStep) - eps).floor() * lonStep;
-    final snappedEast = ((east / lonStep) + eps).ceil() * lonStep;
+    // ⚠️ 부동소수점 특성상 "항상 원본을 포함한다"는 절대(0 오차) 보장은 하지
+    // 않는다 — 위 `_gridSnapTolerance` 라운딩이 반대 방향(정수 그대로 곱했을 때
+    // 원본보다 극미하게, ~1e-13도 수준으로 작아지는 쪽)으로 미끄러지는 극단
+    // 케이스가 이론상 존재한다. 이 값 자체가 network/cache 조회에만 쓰이고
+    // 실제 화면 표시 필터링은 항상 원본(unsnapped) bounds로 다시 하므로(§2-5
+    // 경고 참고) 이 정도 오차는 기능적으로 무해하다 — 캐시가 그 순간 딱 한 번
+    // 미스하고 네트워크로 폴백할 뿐이다.
+    final snappedSouth = _floorGridIndex(south, latStep) * latStep;
+    final snappedNorth = _ceilGridIndex(north, latStep) * latStep;
+    final snappedWest = _floorGridIndex(west, lonStep) * lonStep;
+    final snappedEast = _ceilGridIndex(east, lonStep) * lonStep;
 
     return (
       south: snappedSouth,
