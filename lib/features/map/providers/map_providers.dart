@@ -83,10 +83,19 @@ final locationStreamProvider = StreamProvider<Position>((ref) async* {
       // 오프루트/오도착을 유발). 릴리스 빌드는 절대 영향 없음(kDebugMode는
       // release에서 컴파일타임 false로 tree-shake됨).
       forceLocationManager: kDebugMode,
+      // NavForegroundService(foregroundServiceType="location")가 이미 프로세스를
+      // 살려두고 CPU wakelock 대체 효과를 낸다. WakelockPlus가 주행 중 화면
+      // 켜짐(=CPU 스핀업)을 별도로 보장하므로 geolocator 자체 PARTIAL_WAKE_LOCK은
+      // 중복이라 false. 알림은 NavForegroundService 알림(ID 1001)과 겹쳐 2중으로
+      // 뜨지만, geolocator_android가 channelId/notificationId를 하드코딩
+      // (geolocator_channel_01 / 75415)해 시스템 병합이 불가능하고,
+      // foregroundNotificationConfig 자체를 제거하면 백그라운드 위치 스트림 유지
+      // 계약이 실기기 검증 없이 확정되지 않는다 — 알림 일원화는 별도 세션의 마스터
+      // 결정으로 미룬다.
       foregroundNotificationConfig: const ForegroundNotificationConfig(
         notificationTitle: "유루나비 주행 중",
         notificationText: "경로 안내를 위해 위치를 수신하고 있습니다",
-        enableWakeLock: true,
+        enableWakeLock: false,
       ),
     ),
   );
