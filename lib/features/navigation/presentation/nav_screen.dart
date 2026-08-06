@@ -1327,7 +1327,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// "카테고리 변경"으로 잡히지 않도록 진입/이탈에 0.3 히스테리시스를 둔다.
   Set<PoiType> _resolveEligibleTypes(double zoom) {
     final result = <PoiType>{};
-    for (final t in PoiType.values) {
+    for (final t in PoiService.serverSupportedTypes) {
       final threshold = t.minZoomLevel.toDouble();
       if (_stickyEligibleTypes.contains(t)) {
         if (zoom >= threshold - 0.3) result.add(t);

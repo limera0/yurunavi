@@ -163,22 +163,42 @@ class PoiService {
     }
   }
 
-  /// PoiType ↔ 서버 카테고리 문자열(snake_case) 매핑.
+  /// PoiType ↔ 서버 카테고리 문자열(snake_case) 매핑. touristSpot/viewpoint는
+  /// O0 청크(2026-08-06)에서 클라이언트 상수만 미리 정의한 것 — 서버는 아직 이
+  /// 두 카테고리를 모른다(§[serverSupportedTypes] 참고, 실제 fetch에서 격리됨).
   static const Map<PoiType, String> _typeToCategory = {
     PoiType.cafe: 'cafe',
     PoiType.convenienceStore: 'convenience_store',
     PoiType.gasStation: 'gas_station',
     PoiType.supermarket: 'supermarket',
     PoiType.restaurant: 'restaurant',
+    PoiType.touristSpot: 'tourist_spot',
+    PoiType.viewpoint: 'viewpoint',
   };
 
   static final Map<String, PoiType> _categoryToType = {
     for (final entry in _typeToCategory.entries) entry.value: entry.key,
   };
 
-  /// 카테고리 표시 우선순위: 주유소>편의점>카페>대형마트>식당 (요청 원문의 "전통시장"은
-  /// 이 API에 대응 카테고리가 없어 스코프 밖 — 식당을 최하위로 대체).
+  /// 서버(`/poi/nearby`)가 현재 실제로 서빙하는 카테고리. `PoiType.values`를
+  /// fetch 파라미터로 그대로 쓰면 서버가 아직 모르는 touristSpot/viewpoint까지
+  /// 요청하게 되어 불필요한 429/빈 응답을 유발할 수 있다 — 서버 통합 청크(O0
+  /// §2-4) 전까지는 fetch 시 `PoiType.values` 대신 이 상수를 쓴다.
+  static const List<PoiType> serverSupportedTypes = [
+    PoiType.cafe,
+    PoiType.convenienceStore,
+    PoiType.gasStation,
+    PoiType.supermarket,
+    PoiType.restaurant,
+  ];
+
+  /// 카테고리 표시 우선순위: 전망대>관광지>주유소>편의점>카페>대형마트>식당
+  /// (요청 원문의 "전통시장"은 이 API에 대응 카테고리가 없어 스코프 밖 — 식당을
+  /// 최하위로 대체). 전망대/관광지는 라이더에게 목적지형 가치가 높아(RECON
+  /// §9-1) 우선순위 최상단에 배치.
   static const List<PoiType> displayPriority = [
+    PoiType.viewpoint,
+    PoiType.touristSpot,
     PoiType.gasStation,
     PoiType.convenienceStore,
     PoiType.cafe,
@@ -503,11 +523,12 @@ class PoiService {
   }) async {
     final radiusM = radiusKm * 1000;
 
-    // 1. 반경 내 모든 POI 수집
+    // 1. 반경 내 모든 POI 수집 (서버가 아직 모르는 touristSpot/viewpoint는
+    // 제외 — serverSupportedTypes 참고)
     final allPois = await fetchPois(
       center: tapped,
       radiusMeters: radiusM,
-      types: PoiType.values,
+      types: serverSupportedTypes,
     );
 
     // Step A: 반경 내 카페 중 가장 평점 높은 것

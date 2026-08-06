@@ -96,6 +96,8 @@ const Map<PoiType, Color> poiIconBgColors = {
   PoiType.gasStation: Color(0xFFE53935),
   PoiType.supermarket: Color(0xFF8E24AA),
   PoiType.restaurant: Color(0xFFFFB300),
+  PoiType.touristSpot: Color(0xFF43A047),
+  PoiType.viewpoint: Color(0xFF00ACC1),
 };
 const Map<PoiType, IconData> poiIcons = {
   PoiType.gasStation: Icons.local_gas_station,
@@ -103,4 +105,6 @@ const Map<PoiType, IconData> poiIcons = {
   PoiType.convenienceStore: Icons.local_convenience_store,
   PoiType.supermarket: Icons.shopping_cart,
   PoiType.restaurant: Icons.restaurant,
+  PoiType.touristSpot: Icons.landscape,
+  PoiType.viewpoint: Icons.visibility,
 };

@@ -713,8 +713,9 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     if (ctrl == null || !_styleLoaded) return;
     if (_ambientFetchInFlight) return; // 진행 중인 fetch가 있으면 즉시 포기
 
-    final targetTypes =
-        PoiType.values.where((t) => _currentZoom >= t.minZoomLevel).toSet();
+    final targetTypes = PoiService.serverSupportedTypes
+        .where((t) => _currentZoom >= t.minZoomLevel)
+        .toSet();
     if (targetTypes.isEmpty) {
       _ambientFetchGen++; // 진행 중이던 fetch가 있으면 응답을 무효화
       if (_ambientPois.isNotEmpty) {
@@ -856,7 +857,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
         pois = await ref.read(poiServiceProvider).fetchPois(
               center: center,
               radiusMeters: 1500,
-              types: PoiType.values,
+              types: PoiService.serverSupportedTypes,
               tag: 'search-prefetch',
             );
       } on PoiFetchException {
@@ -3105,10 +3106,13 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     }
   }
 
-  /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 5종 전체, 둘 다 없으면 빈 집합.
+  /// 필터칩이 선택돼 있으면 그것들, 없으면(검색어가 있을 때만) 서버 지원 카테고리
+  /// 전체, 둘 다 없으면 빈 집합.
   Set<PoiType> get _effectiveTypes {
     if (_selectedTypes.isNotEmpty) return Set<PoiType>.from(_selectedTypes);
-    if (_searchCtrl.text.trim().isNotEmpty) return PoiType.values.toSet();
+    if (_searchCtrl.text.trim().isNotEmpty) {
+      return PoiService.serverSupportedTypes.toSet();
+    }
     return const {};
   }
 
@@ -3172,7 +3176,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       pois = await ref.read(poiServiceProvider).fetchPois(
             center: origin,
             radiusMeters: 1500,
-            types: PoiType.values,
+            types: PoiService.serverSupportedTypes,
             tag: 'search-sheet',
           );
     } on PoiFetchException {
@@ -3371,7 +3375,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     children: [
-                      for (final type in PoiType.values)
+                      for (final type in PoiService.serverSupportedTypes)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: FilterChip(

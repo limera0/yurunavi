@@ -6,6 +6,8 @@ enum PoiType {
   gasStation,
   supermarket,
   restaurant,
+  touristSpot,
+  viewpoint,
 }
 
 extension PoiTypeX on PoiType {
@@ -21,10 +23,15 @@ extension PoiTypeX on PoiType {
         return '마트';
       case PoiType.restaurant:
         return '식당';
+      case PoiType.touristSpot:
+        return '관광지';
+      case PoiType.viewpoint:
+        return '전망대';
     }
   }
 
-  /// 슬라이드 7 가이드: 카페=주황, 편의점=파랑, 주유소=빨강, 마트=보라, 식당=노랑
+  /// 슬라이드 7 가이드: 카페=주황, 편의점=파랑, 주유소=빨강, 마트=보라, 식당=노랑.
+  /// 관광지/전망대는 O0 청크(2026-08-06) 신규 추가 — 기존 5색과 겹치지 않는 초록/청록.
   int get colorValue {
     switch (this) {
       case PoiType.cafe:
@@ -37,13 +44,21 @@ extension PoiTypeX on PoiType {
         return 0xFF8E24AA;
       case PoiType.restaurant:
         return 0xFFFFB300;
+      case PoiType.touristSpot:
+        return 0xFF43A047;
+      case PoiType.viewpoint:
+        return 0xFF00ACC1;
     }
   }
 
   /// 상시 표시(ambient) POI 레이어가 이 카테고리를 노출하는 최소 줌 레벨.
-  /// 실측 기반 스펙: 주유소=11, 카페/편의점=13, 마트/식당=14.
+  /// 실측 기반 스펙: 주유소=11, 카페/편의점=13, 마트/식당=14, 관광지=10, 전망대=9.
   int get minZoomLevel {
     switch (this) {
+      case PoiType.viewpoint:
+        return 9;
+      case PoiType.touristSpot:
+        return 10;
       case PoiType.gasStation:
         return 11;
       case PoiType.cafe:
