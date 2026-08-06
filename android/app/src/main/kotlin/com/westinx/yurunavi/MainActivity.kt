@@ -102,6 +102,10 @@ class MainActivity : FlutterActivity() {
         // 네이티브(엔진) 로그 계측 — 백화 렌더링 버그 조사용, debug 전용 아님(release 실주행에서도 동작).
         // logcat --pid=self를 데몬 스레드로 읽어 allowlist 매치 줄만 EventChannel로 흘려보낸다.
         NativeLogBridge(flutterEngine.dartExecutor.binaryMessenger)
+
+        // GPU/전체 메모리 주기 스냅샷 — 메모리·GPU 압박 대응 청크6 B-2. dumpsys 없이
+        // Debug API만으로 얻은 근사치를 Dart가 60초 간격으로 요청해 진단로그에 남긴다.
+        GpuMemBridge(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     private fun sendOverlayIntent(action: String, iconType: String, distText: String) {

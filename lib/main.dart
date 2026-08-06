@@ -10,6 +10,7 @@ import 'core/config/app_config.dart';
 import 'core/crash_reporting.dart';
 import 'core/logging/file_logger.dart';
 import 'core/logging/native_log_bridge.dart';
+import 'core/memory/gpu_mem_sampler.dart';
 import 'core/memory/memory_pressure_observer.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
@@ -39,6 +40,9 @@ void main() async {
   await FileLogger.init();
   // _sink가 준비된 뒤에만 구독 시작 — writeRaw()가 _sink에 직접 쓰기 때문.
   NativeLogBridge.start();
+  // FileLogger.init() 이후에만 시작 — debugPrint 가로채기가 준비돼 있어야
+  // YNAV_GPUMEM 줄이 파일에 기록된다.
+  GpuMemSampler.start();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
