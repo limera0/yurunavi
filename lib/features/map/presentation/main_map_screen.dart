@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show MethodChannel, SystemNavigator, rootBundle;
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:geolocator/geolocator.dart';
@@ -27,7 +26,6 @@ import '../../../services/address_search_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
-import '../../../services/map_cache_provider.dart'; // ignore: unused_import
 import '../../../services/native_engine.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
@@ -126,39 +124,6 @@ class FallbackRecenterState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Grid-based POI clustering
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ClusterCell {
-  final List<Poi> pois;
-  _ClusterCell(this.pois);
-  Poi get representative => pois.first;
-  int get count => pois.length;
-  LatLng get center {
-    final lat =
-        pois.map((p) => p.location.latitude).reduce((a, b) => a + b) /
-            pois.length;
-    final lng =
-        pois.map((p) => p.location.longitude).reduce((a, b) => a + b) /
-            pois.length;
-    return LatLng(lat, lng);
-  }
-}
-
-List<_ClusterCell> _clusterPois(List<Poi> pois, double zoom) {
-  final cellSize =
-      zoom >= 14 ? 0.005 : zoom >= 12 ? 0.015 : 0.04;
-  final Map<String, List<Poi>> grid = {};
-  for (final p in pois) {
-    final row = (p.location.latitude / cellSize).floor();
-    final col = (p.location.longitude / cellSize).floor();
-    final key = '$row:$col:${p.type.name}';
-    grid.putIfAbsent(key, () => []).add(p);
-  }
-  return grid.values.map((ps) => _ClusterCell(ps)).toList();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -171,7 +136,6 @@ class MainMapScreen extends ConsumerStatefulWidget {
 
 class _MainMapScreenState extends ConsumerState<MainMapScreen>
     with SingleTickerProviderStateMixin {
-  final MapController _mapCtrl = MapController();
   ml.MapLibreMapController? _mlCtrl; // M1~M4 동안 점진 연결
   bool _styleLoaded = false;
 
@@ -331,7 +295,6 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   @override
   void dispose() {
     _locationSub?.close();
-    _mapCtrl.dispose();
     _sheetCtrl.dispose();
     super.dispose();
   }
@@ -1164,7 +1127,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   // ── Map tap ───────────────────────────────────────────────────────────────
 
-Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
+Future<void> _onMapTap(LatLng tapped) async {
     final origin = _origin ?? _lastKnown;
     if (origin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1745,23 +1708,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
     await _fetchAndStoreAllRoutes(origin, dest);
   }
 
-  // ── POI markers ───────────────────────────────────────────────────────────
-
-  // ignore: unused_element
-  List<Marker> _buildPoiMarkers(List<Poi> pois) {
-    return _clusterPois(pois, _currentZoom).map((cell) {
-      final color = Color(cell.representative.type.colorValue);
-      return Marker(
-        point: cell.center,
-        width: cell.count > 1 ? 36 : 18,
-        height: cell.count > 1 ? 36 : 18,
-        child: cell.count > 1
-            ? _ClusterDot(color: color, count: cell.count)
-            : _PoiDot(color: color),
-      );
-    }).toList();
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -1990,7 +1936,6 @@ Future<void> _onMapTap(TapPosition _, LatLng tapped) async {
             },
             onMapClick: (point, latLng) {
               _onMapTap(
-                const TapPosition(Offset.zero, null),
                 LatLng(latLng.latitude, latLng.longitude),
               );
             },
@@ -2468,25 +2413,6 @@ class _OriginMarker extends StatelessWidget {
   }
 }
 
-class _PoiDot extends StatelessWidget {
-  final Color color;
-  const _PoiDot({required this.color});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 14,
-        height: 14,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: [
-            BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 4),
-          ],
-        ),
-      );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Offline Banner
 // Displayed when connectivity is lost; communicates cached-map fallback.
@@ -2530,35 +2456,6 @@ class _OfflineBanner extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ClusterDot extends StatelessWidget {
-  final Color color;
-  final int count;
-  const _ClusterDot({required this.color, required this.count});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 36,
-        height: 36,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.88),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: [
-            BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 6),
-          ],
-        ),
-        child: Text(
-          '$count',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
