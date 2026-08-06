@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config/app_config.dart';
 import 'core/crash_reporting.dart';
 import 'core/logging/file_logger.dart';
+import 'core/logging/native_log_bridge.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'firebase_options.dart';
@@ -24,6 +25,8 @@ void main() async {
   unawaited(TourRecoveryService().recoverOrphans());
   await initCrashReporting(DefaultFirebaseOptions.currentPlatform);
   await FileLogger.init();
+  // _sink가 준비된 뒤에만 구독 시작 — writeRaw()가 _sink에 직접 쓰기 때문.
+  NativeLogBridge.start();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

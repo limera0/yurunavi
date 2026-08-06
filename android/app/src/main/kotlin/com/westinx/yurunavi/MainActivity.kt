@@ -98,6 +98,10 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // 네이티브(엔진) 로그 계측 — 백화 렌더링 버그 조사용, debug 전용 아님(release 실주행에서도 동작).
+        // logcat --pid=self를 데몬 스레드로 읽어 allowlist 매치 줄만 EventChannel로 흘려보낸다.
+        NativeLogBridge(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     private fun sendOverlayIntent(action: String, iconType: String, distText: String) {

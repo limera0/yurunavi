@@ -44,6 +44,15 @@ class FileLogger {
     }
   }
 
+  /// 네이티브(Kotlin/엔진) 로그 브리지 전용 진입점. `YNAV_NATIVE ` 접두어를 붙여
+  /// `_sink`에 직접 쓴다 — `debugPrint`를 절대 거치지 마라. `debugPrint`는 이미
+  /// stdout→logcat으로 나가므로, 여기서 받은 줄(logcat에서 읽은 줄)을 다시
+  /// `debugPrint`로 흘리면 debugPrint → logcat → 네이티브 펌프 → debugPrint로
+  /// 무한 증폭되는 루프가 된다.
+  static void writeRaw(String line) {
+    _sink?.writeln('${DateTime.now().toIso8601String()} YNAV_NATIVE $line');
+  }
+
   static void _rotate(Directory dir) {
     try {
       final logs = dir
