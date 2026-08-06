@@ -2,7 +2,8 @@ GOAL: S3 + S3b + 메모리/GPU 압박 대응(0806) 코드 완료분에 대해 �
 
 # VERIFY — S3/S3b + 메모리/GPU 압박 대응 실기기 수동 검증 목록 (마스터 몫)
 
-- 작성 2026-08-06 · 브랜치 `verify/ride-0711` · HEAD `d8f2b0b` (§7 추가 시점 HEAD `bdd29de`)
+- 작성 2026-08-06 · 브랜치 `verify/ride-0711` · HEAD `d8f2b0b` (§7 추가 시점 HEAD `bdd29de`,
+  §8 추가 시점 HEAD `2001f2f`)
 - 근거:
   - `loop/CHECKLIST_0805_testride0802.md:275-276` — §S3 잔여 `[ ]` 1건
   - `loop/HANDOFF_0806_S3b_floating_and_notif.md` §3-2 (실기기 검증 시나리오)
@@ -10,6 +11,9 @@ GOAL: S3 + S3b + 메모리/GPU 압박 대응(0806) 코드 완료분에 대해 �
   - `loop/MORNING_REPORT_0806_S3b_floating_and_notif.md` — S3b 청크1~3 코드 완료 근거
   - `loop/HANDOFF_0806_memory_hardening.md` — 메모리/GPU 압박 대응 지시서 (§7 근거)
   - `loop/MORNING_REPORT_0806_memory_hardening.md` — 메모리/GPU 압박 대응 청크1~6 완료 근거 (§7 근거)
+  - `loop/HANDOFF_0806_O1_local_ideograph_font.md`, `loop/RECON_0806_O1_asset_localization_design.md`
+    — O1(스타일 에셋 로컬화) 설계 근거 (§8 근거)
+  - `loop/CHECKLIST_0805_testride0802.md` §O1 — 청크1~3 코드 완료 근거(커밋 `6281b41`·`cb63868`·`ea9631f`)
 
 > 이 파일에 담긴 항목은 **코더/하네스가 검증할 수 없는** 시나리오만 모은 것이다.
 > 가상GPS 하네스로 검증 가능한 항목은 이미 코드 감사에서 처리 완료.
@@ -87,6 +91,26 @@ GOAL: S3 + S3b + 메모리/GPU 압박 대응(0806) 코드 완료분에 대해 �
       Impeller(렌더링 엔진)로 확정된다. **이 APK는 판별용이며 채택된 해결책이 아니다** —
       확인 후 원래 앱으로 돌아올 것.
 
+## 8. O1 · 스타일 에셋 로컬화 검증 (한글/한자 글리프 로컬 렌더링, §S3/§7과 별개 주제)
+
+`localIdeographFontFamily`로 지도 한글·한자 글리프를 서버 대신 기기 내장 폰트로
+그 자리에서 렌더링하도록 전환한 작업. **코더/하네스로는 폰트가 실제로 화면에 그 폰트로
+그려지는지 육안 확인이 불가능**해서 이 목록에 넣는다.
+
+- [ ] **iOS** — 지도 화면의 한글 지명 라벨이 정상 렌더되는지, 육안으로
+      `Apple SD Gothic Neo`로 보이는지 확인(다른 폰트로 깨지거나 글리프가 네모(tofu)로
+      나오면 X)
+- [ ] **Android(갤럭시 우선)** — `sans-serif` 별칭 사용 시 One UI 기본 폰트로 한글이
+      정상 렌더되는지 확인. 갤럭시가 아닌 기기가 있다면 그 제조사 기본 폰트로 자연
+      대체되는지도 함께 확인
+- [ ] **Android 설정 화면** — "설정 → 앱 설정" 하단 지도 한글 폰트 선택 항목이 보이는지
+      (iOS에선 이 항목 자체가 안 보여야 정상 — 나타나면 버그)
+- [ ] **Android 폰트 변경 반영** — 설정에서 다른 폰트로 변경 → **지도 화면을 한 번
+      닫았다 다시 열었을 때** 변경이 반영되는지(즉시 반영은 설계상 안 됨 — 재진입 안
+      해도 바뀌면 오히려 이상, 재진입해도 안 바뀌면 X)
+- [ ] **Android 폰트 목록 폴백** — 목록에 최소 "시스템 기본" 1개는 항상 뜨는지
+      (기기에 따라 `fonts.xml` 파싱이 실패해도 빈 화면이 아니라 이 항목으로 폴백해야 함)
+
 ---
 
 ## 알려진 리스크 · 사전 공지
@@ -130,9 +154,15 @@ GOAL: S3 + S3b + 메모리/GPU 압박 대응(0806) 코드 완료분에 대해 �
 | 7 | 재발 시 YNAV_NATIVE에 atlas/Impeller/Vulkan 관련 줄 존재 | | |
 | 7 | 내비 화면 위치퍽·목적지핀 정상 표시 | | |
 | 7 | Impeller off APK 별도 주행 (선택) | | |
+| 8 | iOS 한글 라벨 정상 렌더 | | |
+| 8 | Android sans-serif → One UI 기본 폰트 렌더 | | |
+| 8 | Android 설정 화면 폰트 선택 항목 노출(iOS는 비노출) | | |
+| 8 | Android 폰트 변경 → 지도 재진입 시 반영 | | |
+| 8 | Android 폰트 목록 폴백("시스템 기본" 최소 1개) | | |
 
 X 항목이 있으면 해당 항목 상세를 `loop/RECON_*` 또는 다음 handoff에 옮기고,
 `loop/CHECKLIST_0805_testride0802.md:275`의 `[ ]`는 그대로 두어 다음 세션이 이어받는다.
-전부 O면 `[ ]` → `[x]`로 갱신하고 §S3 완전 마감. §7(메모리/GPU 압박 대응)은 §S3와
-별개 항목이라 §7만 X가 있어도 §S3 마감과는 무관 — §7 결과는
-`loop/MORNING_REPORT_0806_memory_hardening.md`를 참조해 다음 세션에서 이어받는다.
+전부 O면 `[ ]` → `[x]`로 갱신하고 §S3 완전 마감. §7(메모리/GPU 압박 대응)·§8(O1
+스타일 에셋 로컬화)은 §S3와 별개 항목이라 그쪽만 X가 있어도 §S3 마감과는 무관 —
+§7 결과는 `loop/MORNING_REPORT_0806_memory_hardening.md`, §8 결과는
+`loop/CHECKLIST_0805_testride0802.md` §O1을 참조해 다음 세션에서 이어받는다.
