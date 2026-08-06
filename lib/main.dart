@@ -10,6 +10,7 @@ import 'core/config/app_config.dart';
 import 'core/crash_reporting.dart';
 import 'core/logging/file_logger.dart';
 import 'core/logging/native_log_bridge.dart';
+import 'core/memory/memory_pressure_observer.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'firebase_options.dart';
@@ -26,6 +27,9 @@ void main() async {
   // 축소), 20MB(기본 대비 5배 축소)로 낮춘다.
   PaintingBinding.instance.imageCache.maximumSize = 40;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 20 << 20; // 20MB
+  // OS 메모리 압박(didHaveMemoryPressure)과 백그라운드 진입 시 imageCache를
+  // 비운다 — Organic Maps의 MemoryWarning()/EnterBackground() 대응.
+  MemoryPressureObserver.init();
   AppConfig.init(const ProdConfig());
   // 프로세스 강제종료(태스크 스와이프/OEM 배터리 매니저/OOM)로 인해 요약이
   // 저장되지 못한 고아 투어 트랙을 백그라운드에서 복구한다 — 앱 시작을
