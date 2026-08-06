@@ -1549,6 +1549,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   void _onStyleLoaded() {
     setState(() => _styleLoaded = true);
+    // 스타일 재주입 시 네이티브 소스/레이어/심볼이 파괴·재생성되므로 Dart의
+    // "1회만 실행" 가드를 초기화해 재생성 경로를 다시 태운다
+    // (main_map_screen.dart와 동일한 패턴, A-5).
+    _locLayerReady = false;
+    _destLayerReady = false;
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
     _initRouteLayer().whenComplete(() async {
       if (_routePoints.length >= 2 && _canCallMap()) {

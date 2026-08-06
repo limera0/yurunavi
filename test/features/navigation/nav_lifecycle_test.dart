@@ -246,6 +246,94 @@ void main() {
     );
   });
 
+  // ── A-5: 레이어 재설치 가드 리셋 회귀 가드 ────────────────────────────────
+  //
+  // 배경(2026-08-06): _locLayerReady/_destLayerReady는 한 번 true가 되면
+  // 절대 false로 리셋되지 않아, 스타일 재주입(플랫폼뷰 재생성 포함)마다
+  // 네이티브 소스/레이어/심볼은 새로 비어서 재생성되는데 Dart의 "1회만
+  // 실행" 가드는 여전히 true로 남아 _initLocationLayer()/_initDestLayer()가
+  // 조용히 no-op해 위치 퍽과 목적지/경유지 핀이 재설치되지 않는 결함이 있었다.
+  // main_map_screen.dart의 onStyleLoadedCallback이 이미 겪고 고친 동일 패턴을
+  // nav_screen.dart의 _onStyleLoaded()에도 이식했다 — 리셋 두 줄이
+  // _initLocationLayer()/_initDestLayer() 호출보다 앞서 존재하는지 검증한다.
+  //
+  // 구현 선택: 정적 소스 검사 방식(기존 테스트와 동일한 판단 — 파일 상단
+  // 주석 참조).
+  group('A-5 — 스타일 재로드 시 레이어 재설치 가드 리셋', () {
+    late String source;
+    setUpAll(() {
+      source = File(navScreenPath).readAsStringSync();
+    });
+
+    test(
+      'onStyleLoaded_resets_locLayerReady_and_destLayerReady_before_reinit',
+      () {
+        // _onStyleLoaded() 함수 본문 추출.
+        final onStyleLoadedPattern = RegExp(
+          r'void _onStyleLoaded\(\)\s*\{(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = onStyleLoadedPattern.firstMatch(source);
+        expect(
+          match,
+          isNotNull,
+          reason: '_onStyleLoaded()가 nav_screen.dart에 있어야 한다',
+        );
+        final body = match!.group(1)!;
+
+        // 두 리셋 라인이 모두 존재해야 한다.
+        expect(
+          body.contains('_locLayerReady = false'),
+          isTrue,
+          reason:
+              '_onStyleLoaded()가 _locLayerReady를 false로 리셋해야 한다 '
+              '— 스타일 재주입마다 네이티브 레이어가 새로 생성되므로 '
+              '재설치 가드도 함께 리셋되어야 한다',
+        );
+        expect(
+          body.contains('_destLayerReady = false'),
+          isTrue,
+          reason:
+              '_onStyleLoaded()가 _destLayerReady를 false로 리셋해야 한다 '
+              '— 스타일 재주입마다 네이티브 심볼이 새로 생성되므로 '
+              '재설치 가드도 함께 리셋되어야 한다',
+        );
+
+        // 리셋이 _initLocationLayer()/_initDestLayer() 호출보다 앞서야
+        // 한다 — 그래야 리셋 이후 재설치 경로가 실제로 실행된다.
+        final locResetPos = body.indexOf('_locLayerReady = false');
+        final destResetPos = body.indexOf('_destLayerReady = false');
+        final initLocCallPos = body.indexOf('_initLocationLayer()');
+        final initDestCallPos = body.indexOf('_initDestLayer()');
+        expect(
+          initLocCallPos,
+          isNot(equals(-1)),
+          reason: '_onStyleLoaded()가 _initLocationLayer()를 호출해야 한다',
+        );
+        expect(
+          initDestCallPos,
+          isNot(equals(-1)),
+          reason: '_onStyleLoaded()가 _initDestLayer()를 호출해야 한다',
+        );
+        expect(
+          locResetPos < initLocCallPos,
+          isTrue,
+          reason:
+              '_locLayerReady = false 리셋이 _initLocationLayer() 호출보다 '
+              '앞서야 한다 — 그렇지 않으면 가드가 여전히 true라 no-op한다',
+        );
+        expect(
+          destResetPos < initDestCallPos,
+          isTrue,
+          reason:
+              '_destLayerReady = false 리셋이 _initDestLayer() 호출보다 '
+              '앞서야 한다 — 그렇지 않으면 가드가 여전히 true라 no-op한다',
+        );
+      },
+    );
+  });
+
   // ── _currentGuidance() km/m 단위 계약 고정 ───────────────────────────────
   //
   // _currentGuidance()와 _TurnStep._formatDist()는 둘 다 private이므로
