@@ -31,7 +31,11 @@ dependencies:
   wakelock_plus: ^1.2.10
   permission_handler: ^11.4.0
   flutter_tts: ^4.2.0
-  maplibre_gl: ^0.26.1
+  maplibre_gl:
+    git:
+      url: https://github.com/limera0/flutter-maplibre-gl-yurunavi-fork.git
+      ref: yurunavi-fork
+      path: maplibre_gl
   firebase_core: ^4.11.0
   firebase_crashlytics: ^5.2.4
   google_sign_in: ^7.2.0
