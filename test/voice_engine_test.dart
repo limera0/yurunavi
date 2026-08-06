@@ -5,6 +5,7 @@ import 'package:yurunavi/services/routing_service.dart';
 
 void main() {
   // Standard fallback-equivalent profile (tiers sorted descending).
+  // roundabout_enter replaces the old 'roundabout' key following S4b split.
   final profile = GuidanceProfile(
     imminentM: 5,
     tiers: const [
@@ -15,7 +16,7 @@ void main() {
     ],
     enabledEvents: {
       'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-      'keep', 'merge', 'roundabout', 'destination',
+      'keep', 'merge', 'roundabout_enter', 'destination',
     },
   );
 
@@ -156,7 +157,7 @@ void main() {
       ],
       enabledEvents: {
         'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-        'keep', 'merge', 'roundabout', 'destination',
+        'keep', 'merge', 'roundabout_enter', 'destination',
       },
       eventTiers: {
         'turn_left': const [
@@ -212,7 +213,7 @@ void main() {
       ],
       enabledEvents: {
         'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-        'keep', 'merge', 'roundabout', 'destination',
+        'keep', 'merge', 'roundabout_enter', 'destination',
       },
       eventTiers: {
         'turn_left': const [
@@ -314,6 +315,56 @@ void main() {
         expect(it.key.startsWith('destination_'), isTrue);
         expect(it.vars['dest_word'], '경유지');
       }
+    });
+  });
+
+  group('M — 거리 반전 감지 (동일 step, d가 30m+ 증가 시 pending 비움)', () {
+    test('300에서 approach 발화 후 d가 갑자기 400으로 오르면 pending 비워져 50 approach 미발화', () {
+      final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      // 정상 접근: 450 → 300 approach 발화
+      final phase1 = drive(engine, 0, [450, 300], steps);
+      expect(phase1.map((i) => i.key).toList(), ['turn_left_approach']);
+      // 반전: 300에서 d가 400으로 뜀 (30m 이상) → pending 비워짐
+      final phase2 = drive(engine, 0, [400], steps);
+      expect(phase2, isEmpty, reason: '반전 후 pending이 비워졌으면 이미 통과한 300이 재발화되지 않아야 한다');
+      // 50 approach가 다시 안 나와야 한다 — pending이 비워졌으므로
+      final phase3 = drive(engine, 0, [50], steps);
+      expect(phase3, isEmpty,
+          reason: 'pending이 비워졌으면 50 approach도 나오지 않아야 한다');
+    });
+
+    test('30m 미만 증가는 반전으로 간주하지 않는다', () {
+      final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      // 300 approach 발화
+      drive(engine, 0, [450, 300], steps);
+      // 29m 증가 — 반전 미해당
+      drive(engine, 0, [329], steps);
+      // 50 approach는 여전히 나와야 한다
+      final result = drive(engine, 0, [50], steps);
+      expect(result.map((i) => i.key).toList(), ['turn_left_approach'],
+          reason: '29m 증가는 반전이 아니므로 50 approach가 정상 발화돼야 한다');
+    });
+
+    test('step 전환 직후 첫 틱에서 오탐 없음 (_prevD가 step 전환 시 리셋됨)', () {
+      final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 15), step0(type: 4)];
+      // step=0, d=100으로 시작 (150-30 구간)
+      final phase1 = drive(engine, 0, [100, 50, 5], steps);
+      expect(phase1.length, greaterThanOrEqualTo(1));
+      // step=1 전환 (새 step), d=600 — 이때 _prevD가 600으로 리셋되므로
+      // 다음 틱 d=500이 600보다 작아도 반전 오탐이 없어야 한다
+      final steps2 = [step0(), step0(), step0(type: 15), step0(type: 4)];
+      final engine2 = VoiceEngine(profile);
+      // step=0 먼저 소진
+      drive(engine2, 0, [100, 50, 5], steps2);
+      // step=1으로 전환, d=600 (_prevD를 600으로 리셋하는 효과만 확인)
+      engine2.onProgress(1, 600, steps2);
+      // step=1, d=500 (정상 감소) — 반전 아님
+      final phase3 = engine2.onProgress(1, 500, steps2);
+      expect(phase3, isNotEmpty,
+          reason: 'step 전환 후 d 감소는 정상 주행이므로 반전으로 오인하면 안 된다');
     });
   });
 }

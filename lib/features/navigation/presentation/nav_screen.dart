@@ -44,6 +44,7 @@ import '../providers/route_progress_provider.dart';
 import '../guidance_profile.dart';
 import '../models/rear_camera.dart';
 import '../tour_recorder.dart';
+import '../guidance_arbiter.dart';
 import '../voice_engine.dart';
 import '../../route/offset_origin.dart';
 import 'rear_camera_gauge.dart';
@@ -266,6 +267,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   StructureVoiceEngine? _structureVoiceEngine;
   CurveVoiceEngine? _curveVoiceEngine;
   RearCameraVoiceEngine? _rearCameraVoiceEngine;
+  final _guidanceArbiter = GuidanceArbiter();
   ExitLandmarkService? _landmarkService;
 
   // progress 구독
@@ -645,31 +647,24 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 갱신해 전달한다.
     _voiceEngine!.exitStructureByManeuverIdx =
         ref.read(routeProgressProvider.notifier).exitStructureByManeuverIdx;
-    final intents = _voiceEngine!.onProgress(
+    final voiceIntents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
         shapePoints: _routePoints,
         isFinalDestination: isFinalDestination);
-    for (final it in intents) {
-      _vps?.speak(it.key, vars: it.vars);
-      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} step=${prog.activeStepIdx}');
-    }
     final structureIntents = _structureVoiceEngine!.onProgress(
         prog.structureZoneIdx, prog.distToNextStructureM, prog.nextStructureType);
-    for (final it in structureIntents) {
-      _vps?.speak(it.key, vars: it.vars);
-      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} zone=${prog.structureZoneIdx}');
-    }
     final curveIntents = _curveVoiceEngine!.onProgress(
         prog.curveZoneIdx, prog.distToNextCurveM, prog.nextCurveDirection);
-    for (final it in curveIntents) {
-      _vps?.speak(it.key, vars: it.vars);
-      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist']} curve=${prog.curveZoneIdx}');
-    }
     final rearCameraIntents = _rearCameraVoiceEngine!
         .onProgress(prog.distToNextCameraM, prog.inPostZone);
-    for (final it in rearCameraIntents) {
+    final spoken = _guidanceArbiter.arbitrate(
+        rearCamera: rearCameraIntents,
+        voice: voiceIntents,
+        structure: structureIntents,
+        curve: curveIntents);
+    for (final it in spoken) {
       _vps?.speak(it.key, vars: it.vars);
-      debugPrint('YNAV_TTS key=${it.key} camDist=${prog.distToNextCameraM.toStringAsFixed(0)}');
+      debugPrint('YNAV_TTS key=${it.key} dist=${it.vars['dist'] ?? ''} step=${prog.activeStepIdx}');
     }
   }
 
@@ -710,6 +705,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _voiceEngine?.reset();
     _structureVoiceEngine?.reset();
     _curveVoiceEngine?.reset();
+    _guidanceArbiter.reset();
     if (widget.destination != null) {
       // setRoute는 provider를 수정하므로 build/initState 단계에서 직접 호출 금지.
       // post-frame으로 미뤄 Riverpod build-phase 수정 에러 방지.

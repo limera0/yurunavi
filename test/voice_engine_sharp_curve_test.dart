@@ -17,7 +17,7 @@ void main() {
     ],
     enabledEvents: {
       'turn_left', 'turn_right', 'sharp_turn_left', 'sharp_turn_right',
-      'uturn', 'ramp', 'exit', 'keep', 'merge', 'roundabout', 'destination',
+      'uturn', 'ramp', 'exit', 'keep', 'merge', 'roundabout_enter', 'destination',
     },
   );
 

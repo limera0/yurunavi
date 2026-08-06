@@ -18,7 +18,7 @@ void main() {
     enabledEvents: {
       'turn_left', 'turn_right', 'uturn', 'ramp', 'exit', 'keep',
       'keep_left', 'keep_right', 'merge',
-      'roundabout', 'destination', 'continue',
+      'roundabout_enter', 'destination', 'continue',
     },
   );
 
@@ -61,7 +61,7 @@ void main() {
         enabledEvents: {
           'turn_left', 'turn_right', 'uturn', 'ramp', 'exit', 'keep',
           'keep_left', 'keep_right',
-          'merge', 'roundabout', 'destination',
+          'merge', 'roundabout_enter', 'destination',
         },
       );
       final engine = VoiceEngine(disabledProfile);

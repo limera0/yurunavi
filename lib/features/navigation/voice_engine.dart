@@ -38,6 +38,8 @@ String? eventForType(int type) {
 /// ramp/exit 하나로 공유한다 — 세분화된 이벤트 키(ramp_right 등)는 TTS 문구
 /// 선택에만 쓰이고, 접근 타이밍 설정은 기존 'ramp'/'exit' 항목을 그대로 참조.
 String _profileEventKey(String event) {
+  if (event == 'roundabout_enter') return 'roundabout_enter';
+  if (event == 'roundabout_exit') return 'roundabout_exit';
   if (event.startsWith('roundabout_')) return 'roundabout';
   if (event.startsWith('ramp_')) return 'ramp';
   if (event.startsWith('exit_')) return 'exit';
@@ -60,6 +62,7 @@ class VoiceEngine {
   List<double> _pendingPoints = [];
   String? _landmarkForStep;
   double? _immediatePoint;
+  double _prevD = double.infinity;
 
   List<SpeakIntent> onProgress(
     int step,
@@ -76,6 +79,7 @@ class VoiceEngine {
     final imminentM = profile.imminentForEvent(_profileEventKey(event));
     if (step != _voiceStepIdx) {
       _voiceStepIdx = step;
+      _prevD = d;
       final entryD = d;
       final eventTierList = profile.tiersForEvent(_profileEventKey(event));
       final tier = eventTierList.firstWhere(
@@ -110,6 +114,13 @@ class VoiceEngine {
         _landmarkForStep = landmarkService!.nearestLandmark(shapePoints[begin]);
       }
     }
+
+    // 동일 step에서 거리가 30m 이상 커지면(= 지점 통과 후 step이 아직 미전환)
+    // 오래된 pending 포인트를 버린다.
+    if (step == _voiceStepIdx && d > _prevD + 30) {
+      _pendingPoints = [];
+    }
+    _prevD = d;
 
     final out = <SpeakIntent>[];
     while (_pendingPoints.isNotEmpty && d <= _pendingPoints.first) {
@@ -172,6 +183,7 @@ class VoiceEngine {
     _pendingPoints = [];
     _landmarkForStep = null;
     _immediatePoint = null;
+    _prevD = double.infinity;
   }
 }
 

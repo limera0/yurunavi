@@ -16,7 +16,7 @@ void main() {
     ],
     enabledEvents: {
       'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-      'keep', 'merge', 'roundabout', 'destination',
+      'keep', 'merge', 'roundabout_enter', 'destination',
     },
   );
 

@@ -4,7 +4,8 @@ import 'package:yurunavi/features/navigation/voice_engine.dart';
 import 'package:yurunavi/services/routing_service.dart';
 
 void main() {
-  // Standard fallback-equivalent profile (tiers sorted descending).
+  // roundabout_enter: enabled, roundabout_exit: NOT in set (disabled).
+  // This mirrors the production guidance_profile.json after the S4b split.
   final profile = GuidanceProfile(
     imminentM: 5,
     tiers: const [
@@ -15,7 +16,7 @@ void main() {
     ],
     enabledEvents: {
       'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
-      'keep', 'merge', 'roundabout', 'destination',
+      'keep', 'merge', 'roundabout_enter', 'destination',
     },
   );
 
@@ -77,9 +78,50 @@ void main() {
     });
   });
 
-  group('D — 회전교차로 진출', () {
-    test('emits roundabout_exit_* (직전 enter step에 출구번호 없으면 plain imminent)', () {
+  group('D — 회전교차로 진출 (roundabout_exit disabled → 0건)', () {
+    test('roundabout_exit는 enabled가 아니므로 intents를 내지 않는다', () {
       final engine = VoiceEngine(profile);
+      final steps = [step0(), step0(type: 27), step0(type: 4)];
+      final intents = drive(engine, 0, [200, 50, 5], steps);
+      expect(intents, isEmpty,
+          reason: 'roundabout_exit는 프로필에서 비활성화되어 있어야 한다');
+    });
+  });
+
+  group('E — 회전교차로 진출 (출구번호 있어도 disabled → 0건)', () {
+    test('roundabout_exit_imminent_named도 내지 않는다', () {
+      final engine = VoiceEngine(profile);
+      final steps = [
+        step0(),
+        ManeuverStep(type: 26, instruction: '', distanceKm: 0, roundaboutExitCount: 3),
+        step0(type: 27),
+        step0(type: 4),
+      ];
+      // stepIdx=1: turnIdx=2 (exit maneuver)
+      final intents = drive(engine, 1, [200, 50, 5], steps);
+      expect(intents, isEmpty,
+          reason: 'roundabout_exit는 disabled이므로 출구번호 있어도 silent');
+    });
+  });
+
+  group('F — roundabout_exit enabled 프로필에서는 intents가 나온다 (회귀 가드)', () {
+    // roundabout_exit가 활성화된 별도 프로필로 검증
+    final profileWithExit = GuidanceProfile(
+      imminentM: 5,
+      tiers: const [
+        GuidanceTier(minEntryM: 500, pointsM: [500, 300, 50]),
+        GuidanceTier(minEntryM: 150, pointsM: [300, 50]),
+        GuidanceTier(minEntryM: 30,  pointsM: [100, 50]),
+        GuidanceTier(minEntryM: 0,   pointsM: []),
+      ],
+      enabledEvents: {
+        'turn_left', 'turn_right', 'uturn', 'ramp', 'exit',
+        'keep', 'merge', 'roundabout_enter', 'roundabout_exit', 'destination',
+      },
+    );
+
+    test('roundabout_exit approach+imminent 나온다 (출구번호 없는 경우)', () {
+      final engine = VoiceEngine(profileWithExit);
       final steps = [step0(), step0(type: 27), step0(type: 4)];
       final intents = drive(engine, 0, [200, 50, 5], steps);
       expect(intents.map((i) => i.key).toList(), [
@@ -88,13 +130,9 @@ void main() {
       ]);
       expect(intents[1].vars.containsKey('exit'), isFalse);
     });
-  });
 
-  group('E — 회전교차로 진출 시 직전 enter maneuver의 출구번호를 이어받는다', () {
-    test('approach는 exit var 없이, imminent만 roundabout_exit_imminent_named + exit var', () {
-      final engine = VoiceEngine(profile);
-      // steps[1]=enter(출구번호 3) → steps[2]=exit. stepIdx=1로 주행하면
-      // turnIdx=2(exit maneuver), turnIdx-1=1(enter maneuver)에서 출구번호를 읽는다.
+    test('직전 enter step에 출구번호 있으면 imminent에 roundabout_exit_imminent_named + exit var', () {
+      final engine = VoiceEngine(profileWithExit);
       final steps = [
         step0(),
         ManeuverStep(type: 26, instruction: '', distanceKm: 0, roundaboutExitCount: 3),

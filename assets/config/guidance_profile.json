@@ -55,13 +55,14 @@
     "keep_left":   { "enabled": true },
     "keep_right":  { "enabled": true },
     "merge":       { "enabled": true },
-    "roundabout": {
+    "roundabout_enter": {
       "enabled": true,
       "tiers": [
         { "min_entry_m": 300, "points_m": [350, 150] },
         { "min_entry_m": 0,   "points_m": [] }
       ]
     },
+    "roundabout_exit": { "enabled": false },
     "continue":    { "enabled": true },
     "destination": { "enabled": true, "imminent_m": 50 },
     "bridge": { "enabled": true },
