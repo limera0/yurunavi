@@ -165,5 +165,13 @@ Future<ui.Image> _compositeVertically(ui.Image top, ui.Image bottom) async {
   );
 
   final picture = recorder.endRecording();
-  return picture.toImage(targetWidth, height);
+  // picture는 네이티브 디스플레이리스트를 붙들고 있어 dispose하지 않으면
+  // Dart GC 파이널라이저가 돌 때까지 네이티브 메모리가 회수되지 않는다
+  // (lib/services/poi_icon_renderer.dart와 같은 관례). toImage() 이후
+  // 예외가 나도 새지 않도록 try/finally로 감싼다.
+  try {
+    return await picture.toImage(targetWidth, height);
+  } finally {
+    picture.dispose();
+  }
 }

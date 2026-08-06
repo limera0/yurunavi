@@ -18,6 +18,14 @@ import 'services/tour_recovery_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Flutter 기본 imageCache 상한(1000장/100MB)은 저사양 기기(RAM 3.7GB급)엔
+  // 과도하다 — 유루나비는 Image.asset/SvgPicture.asset/NetworkImage를 7곳
+  // (profile_screen ×3, splash_screen ×1, slider_start_button ×1, nav_screen
+  // ×2)에서만 쓰고, 지도 타일/POI 아이콘은 MapLibre 네이티브 텍스처 풀을
+  // 거쳐 이 캐시와 무관하다. 실사용 7곳보다 여유를 둔 40장(기본 대비 25배
+  // 축소), 20MB(기본 대비 5배 축소)로 낮춘다.
+  PaintingBinding.instance.imageCache.maximumSize = 40;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 20 << 20; // 20MB
   AppConfig.init(const ProdConfig());
   // 프로세스 강제종료(태스크 스와이프/OEM 배터리 매니저/OOM)로 인해 요약이
   // 저장되지 못한 고아 투어 트랙을 백그라운드에서 복구한다 — 앱 시작을

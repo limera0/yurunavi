@@ -54,10 +54,18 @@ Future<Uint8List> renderPoiIconPng(
     Offset((size - textPainter.width) / 2, (size - textPainter.height) / 2),
   );
   final picture = recorder.endRecording();
-  final image = await picture.toImage(size.toInt(), size.toInt());
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-  image.dispose();
-  return byteData!.buffer.asUint8List();
+  // picture는 네이티브 디스플레이리스트를 붙들고 있어 dispose하지 않으면
+  // Dart GC 파이널라이저가 돌 때까지 네이티브 메모리가 회수되지 않는다.
+  // toImage() 이후 어떤 예외가 나도 새지 않도록 try/finally로 감싼다.
+  ui.Image? image;
+  try {
+    image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  } finally {
+    picture.dispose();
+    image?.dispose();
+  }
 }
 
 /// 아이콘 글리프 없이 색이 채워진 원(점)만 그린 PNG — 검색 결과 탭 시 보여주는
@@ -68,10 +76,16 @@ Future<Uint8List> renderPlainDotPng(Color color, {double size = 96}) async {
   final canvas = Canvas(recorder);
   _drawDotBase(canvas, size, color);
   final picture = recorder.endRecording();
-  final image = await picture.toImage(size.toInt(), size.toInt());
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-  image.dispose();
-  return byteData!.buffer.asUint8List();
+  // renderPoiIconPng와 동일한 이유로 picture/image를 try/finally에서 해제한다.
+  ui.Image? image;
+  try {
+    image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  } finally {
+    picture.dispose();
+    image?.dispose();
+  }
 }
 
 // POI 카테고리 → 아이콘/배경색 (기존 CircleLayer match 표현식과 동일 색상 유지).
