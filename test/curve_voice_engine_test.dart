@@ -69,7 +69,7 @@ void main() {
         'sharp_turn_right_approach',
         'sharp_turn_right_imminent',
       ]);
-      expect(secondZoneOut.map((i) => i.vars['dist']).toList(), ['50', '10']);
+      expect(secondZoneOut.map((i) => i.vars['dist']).toList(), ['오십', '오십']);
     });
   });
 

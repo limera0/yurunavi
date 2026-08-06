@@ -34,6 +34,21 @@ String? eventForType(int type) {
   }
 }
 
+/// 거리(미터)를 50m 단위로 스냅한 뒤 한글 수사로 변환한다.
+///
+/// - 50m 미만은 50으로 올림(clamp), 1000m 초과도 1000으로 내림.
+/// - 1000m → '일 킬로' (템플릿에서 "일 킬로미터 앞"이 됨)
+/// - 그 외 → 백 단위 + 오십 접미사 조합
+///   예: 50→'오십', 100→'백', 150→'백오십', 300→'삼백', 550→'오백오십'
+String _distToKorean(double distM) {
+  final m = ((distM / 50).round() * 50).clamp(50, 1000);
+  if (m >= 1000) return '일 킬로';
+  const h = ['', '백', '이백', '삼백', '사백', '오백', '육백', '칠백', '팔백', '구백'];
+  final hundreds = m ~/ 100;
+  final hasFifty = (m % 100) >= 50;
+  return h[hundreds] + (hasFifty ? '오십' : '');
+}
+
 /// 가이던스 프로필(거리 티어/imminent 거리/on-off)은 방향별로 나뉘지 않고
 /// ramp/exit 하나로 공유한다 — 세분화된 이벤트 키(ramp_right 등)는 TTS 문구
 /// 선택에만 쓰이고, 접근 타이밍 설정은 기존 'ramp'/'exit' 항목을 그대로 참조.
@@ -128,7 +143,7 @@ class VoiceEngine {
       final isImminent = point == imminentM || point == _immediatePoint;
       if (profile.isEnabled(_profileEventKey(event))) {
         final phase = isImminent ? 'imminent' : 'approach';
-        final vars = {'dist': point.toStringAsFixed(0)};
+        final vars = {'dist': _distToKorean(point)};
         if (event == 'destination') {
           vars['dest_word'] = isFinalDestination ? '목적지' : '경유지';
         }
@@ -247,7 +262,7 @@ class StructureVoiceEngine {
       if (!profile.isEnabled(event)) continue;
       final isImminent = point == imminentM || point == _immediatePoint;
       final phase = isImminent ? 'imminent' : 'approach';
-      out.add(SpeakIntent('${event}_$phase', {'dist': point.toStringAsFixed(0)}));
+      out.add(SpeakIntent('${event}_$phase', {'dist': _distToKorean(point)}));
     }
     return out;
   }
@@ -316,7 +331,7 @@ class CurveVoiceEngine {
       if (!profile.isEnabled(event)) continue;
       final isImminent = point == imminentM || point == _immediatePoint;
       final phase = isImminent ? 'imminent' : 'approach';
-      out.add(SpeakIntent('${event}_$phase', {'dist': point.toStringAsFixed(0)}));
+      out.add(SpeakIntent('${event}_$phase', {'dist': _distToKorean(point)}));
     }
     return out;
   }

@@ -95,7 +95,7 @@ void main() {
         'tunnel_approach',
         'tunnel_imminent',
       ]);
-      expect(secondZoneOut.map((i) => i.vars['dist']).toList(), ['50', '10']);
+      expect(secondZoneOut.map((i) => i.vars['dist']).toList(), ['오십', '오십']);
     });
   });
 

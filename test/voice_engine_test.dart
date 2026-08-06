@@ -43,7 +43,7 @@ void main() {
         'turn_right_approach',
         'turn_right_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50', '5']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['오백', '삼백', '오십', '오십']);
     });
   });
 
@@ -57,7 +57,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['300', '50', '5']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['삼백', '오십', '오십']);
     });
   });
 
@@ -70,7 +70,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['오십', '오십']);
     });
   });
 
@@ -84,7 +84,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['100', '50', '5']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['백', '오십', '오십']);
     });
   });
 
@@ -97,7 +97,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['50', '5']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['오십', '오십']);
     });
   });
 
@@ -108,7 +108,7 @@ void main() {
       final intents = drive(engine, 0, [25, 5], steps);
       expect(intents.length, 1);
       expect(intents[0].key, 'turn_right_imminent');
-      expect(intents[0].vars['dist'], '5');
+      expect(intents[0].vars['dist'], '오십');
     });
   });
 
@@ -185,7 +185,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['오백', '삼백', '오십']);
     });
 
     test('turn_left continuing past 50 down to 10m emits nothing further (old 10m imminent point is gone)', () {
@@ -238,7 +238,7 @@ void main() {
       final intents = engine.onProgress(0, 40, steps);
       expect(intents.length, 1);
       expect(intents[0].key, 'turn_left_imminent');
-      expect(intents[0].vars['dist'], '40');
+      expect(intents[0].vars['dist'], '오십');
     });
 
     test('turn_left first detected at entryD=0 (maneuver already reached) fires immediately', () {
@@ -247,7 +247,7 @@ void main() {
       final intents = engine.onProgress(0, 0, steps);
       expect(intents.length, 1);
       expect(intents[0].key, 'turn_left_imminent');
-      expect(intents[0].vars['dist'], '0');
+      expect(intents[0].vars['dist'], '오십');
     });
 
     test('turn_right first detected at 45m fires immediately once; no double-fire on later calls at 30 then 5', () {
@@ -256,7 +256,7 @@ void main() {
       final intents = drive(engine, 0, [45, 30, 5], steps);
       expect(intents.length, 1);
       expect(intents[0].key, 'turn_right_imminent');
-      expect(intents[0].vars['dist'], '45');
+      expect(intents[0].vars['dist'], '오십');
     });
 
     test('normal (non-dead-zone) turn_left case at entryD=600 is unchanged', () {
@@ -268,7 +268,7 @@ void main() {
         'turn_left_approach',
         'turn_left_imminent',
       ]);
-      expect(intents.map((i) => i.vars['dist']).toList(), ['500', '300', '50']);
+      expect(intents.map((i) => i.vars['dist']).toList(), ['오백', '삼백', '오십']);
     });
 
     test('dedupe: tier point coinciding with imminentM fires only ONE intent, not two', () {
@@ -284,7 +284,7 @@ void main() {
       final intents = drive(engine, 0, [60, 50], steps);
       expect(intents.length, 1);
       expect(intents[0].key, 'turn_left_imminent');
-      expect(intents[0].vars['dist'], '50');
+      expect(intents[0].vars['dist'], '오십');
     });
   });
 
@@ -315,6 +315,93 @@ void main() {
         expect(it.key.startsWith('destination_'), isTrue);
         expect(it.vars['dest_word'], '경유지');
       }
+    });
+  });
+
+  group('N — _distToKorean 한글 수사 스냅 (onProgress vars["dist"] 검증)', () {
+    // 공통 헬퍼: 단일 포인트 프로필 — minEntryM 이상 진입 시 해당 포인트에서 발화
+    GuidanceProfile singlePointProfile(double entryMin, double point, String event) =>
+        GuidanceProfile(
+          imminentM: 5,
+          tiers: const [GuidanceTier(minEntryM: 0, pointsM: [])],
+          enabledEvents: {event, 'bridge', 'sharp_turn_right', 'sharp_turn_left'},
+          eventTiers: {
+            event: [
+              GuidanceTier(minEntryM: entryMin, pointsM: [point]),
+              const GuidanceTier(minEntryM: 0, pointsM: []),
+            ],
+          },
+        );
+
+    test('N1 — 300m 정규 접근: dist == 삼백', () {
+      // entryD=350 >= 300(minEntryM) → tier pointsM=[300] 선택, d=300에서 발화
+      final engine = VoiceEngine(singlePointProfile(300, 300, 'turn_right'));
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = drive(engine, 0, [350, 300], steps);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '삼백');
+    });
+
+    test('N2 — immediatePoint(43m): dist == 오십', () {
+      // 43m에서 처음 관측, 모든 tier 포인트가 이미 통과 → immediatePoint 경로
+      // imminentM=50이라 filtered={50}.where(p<43)=[] → immediate fire
+      final p = GuidanceProfile(
+        imminentM: 50,
+        tiers: const [GuidanceTier(minEntryM: 0, pointsM: [])],
+        enabledEvents: {'turn_right'},
+      );
+      final engine = VoiceEngine(p);
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = engine.onProgress(0, 43, steps);
+      expect(intents.length, 1);
+      expect(intents[0].vars['dist'], '오십');
+    });
+
+    test('N3 — 1000m: dist == 일 킬로', () {
+      // entryD=1100 → tier pointsM=[1000] 선택, d=1000에서 발화
+      final engine = VoiceEngine(singlePointProfile(1000, 1000, 'turn_right'));
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = drive(engine, 0, [1100, 1000], steps);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '일 킬로');
+    });
+
+    test('N4 — 550m: dist == 오백오십', () {
+      final engine = VoiceEngine(singlePointProfile(550, 550, 'turn_right'));
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = drive(engine, 0, [600, 550], steps);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '오백오십');
+    });
+
+    test('N5 — 100m: dist == 백', () {
+      final engine = VoiceEngine(singlePointProfile(100, 100, 'turn_right'));
+      final steps = [step0(), step0(type: 10), step0(type: 4)];
+      final intents = drive(engine, 0, [150, 100], steps);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '백');
+    });
+
+    test('N6 — StructureVoiceEngine 300m bridge: dist == 삼백', () {
+      // bridge 이벤트용 단일 포인트 프로필
+      final engine = StructureVoiceEngine(
+        singlePointProfile(300, 300, 'bridge'),
+      );
+      // zoneIdx=0, entryD=350 → tier pointsM=[300], d=300에서 발화
+      engine.onProgress(0, 350, StructureType.bridge);
+      final intents = engine.onProgress(0, 300, StructureType.bridge);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '삼백');
+    });
+
+    test('N7 — CurveVoiceEngine 300m 우커브: dist == 삼백', () {
+      final engine = CurveVoiceEngine(
+        singlePointProfile(300, 300, 'sharp_turn_right'),
+      );
+      engine.onProgress(0, 350, CurveDirection.right);
+      final intents = engine.onProgress(0, 300, CurveDirection.right);
+      expect(intents, isNotEmpty);
+      expect(intents.first.vars['dist'], '삼백');
     });
   });
 
