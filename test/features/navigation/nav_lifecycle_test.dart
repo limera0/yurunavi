@@ -19,6 +19,289 @@ void main() {
   const navScreenPath =
       'lib/features/navigation/presentation/nav_screen.dart';
 
+  // ── S3b 청크3: 플로팅 오버레이 라이프사이클 회귀 가드 ────────────────────────
+  //
+  // 구현 선택: 정적 소스 검사 방식.
+  //
+  // _NavScreenState가 private이고 NavScreen 풀 마운트는 geolocator·TTS·
+  // wakelock·MapLibre 채널을 모두 모킹해야 하므로 인프라 테스트가 된다.
+  // 불변식("inactive/detached에 반응 없음", "paused/hidden에 show 호출")은
+  // 구조적 사실이므로 소스 직독이 가장 직접적이고 결정론적이다.
+  // (기존 테스트와 동일한 판단 — 파일 상단 주석 참조)
+  //
+  // 사례 (f) — dispose-race 스킵 이유:
+  //   NavFloatingOverlay.detach() → hide() 는 dispose() 에서
+  //   _isDisposing=true 세팅 전에 호출된다(순서 고정: 소스 L418 vs L421).
+  //   Dart 래퍼에 별도 "이미 disposing" 게이트는 없으나, hide() 자체가
+  //   Platform.isAndroid 가드로 시작하고 MethodChannel 예외를 모두 catch하므로
+  //   스트레이 콜백이 throw할 경로가 없다. 테스트 없이 코드 주석으로 대체한다.
+
+  group('S3b 청크3 — 플로팅 오버레이 라이프사이클 불변식', () {
+    late String source;
+    setUpAll(() {
+      source = File(navScreenPath).readAsStringSync();
+    });
+
+    // ─── 사례 (a) paused → show ───────────────────────────────────────────────
+    test(
+      'paused_state_calls_floating_overlay_show',
+      () {
+        // didChangeAppLifecycleState 블록 추출
+        final lifecycleBlockPattern = RegExp(
+          r'void didChangeAppLifecycleState\(AppLifecycleState state\)(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = lifecycleBlockPattern.firstMatch(source);
+        expect(
+          match,
+          isNotNull,
+          reason: 'didChangeAppLifecycleState가 nav_screen.dart에 있어야 한다',
+        );
+        final body = match!.group(1)!;
+
+        // paused 케이스 직후에 NavFloatingOverlay.show 호출이 있어야 한다.
+        expect(
+          body.contains('AppLifecycleState.paused'),
+          isTrue,
+          reason: 'paused 케이스가 존재해야 한다',
+        );
+        // paused와 show는 같은 switch arm에서 fall-through로 묶여야 한다.
+        // paused 이후 show() 등장 순서를 인덱스로 확인한다.
+        final pausedPos = body.indexOf('AppLifecycleState.paused');
+        final showPos = body.indexOf('NavFloatingOverlay.show');
+        expect(
+          showPos,
+          isNot(equals(-1)),
+          reason: 'NavFloatingOverlay.show() 호출이 lifecycle 블록 내에 있어야 한다',
+        );
+        expect(
+          pausedPos < showPos,
+          isTrue,
+          reason: 'paused case가 NavFloatingOverlay.show() 호출보다 앞에 있어야 한다',
+        );
+      },
+    );
+
+    // ─── 사례 (b) hidden → show ───────────────────────────────────────────────
+    test(
+      'hidden_state_calls_floating_overlay_show',
+      () {
+        final lifecycleBlockPattern = RegExp(
+          r'void didChangeAppLifecycleState\(AppLifecycleState state\)(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = lifecycleBlockPattern.firstMatch(source);
+        expect(match, isNotNull);
+        final body = match!.group(1)!;
+
+        expect(
+          body.contains('AppLifecycleState.hidden'),
+          isTrue,
+          reason: 'hidden 케이스가 존재해야 한다',
+        );
+        final hiddenPos = body.indexOf('AppLifecycleState.hidden');
+        final showPos = body.indexOf('NavFloatingOverlay.show');
+        expect(showPos, isNot(equals(-1)));
+        // hidden은 paused와 fall-through로 묶여 있어 hidden < show 이거나
+        // hidden과 paused가 인접해 모두 show 앞에 위치해야 한다.
+        // hidden이 show보다 앞에 있으면 충분하다.
+        expect(
+          hiddenPos < showPos,
+          isTrue,
+          reason:
+              'hidden case가 NavFloatingOverlay.show() 호출보다 앞에 있어야 한다 '
+              '(fall-through arm 공유)',
+        );
+      },
+    );
+
+    // ─── 사례 (c) resumed → hide ─────────────────────────────────────────────
+    test(
+      'resumed_state_calls_floating_overlay_hide',
+      () {
+        final lifecycleBlockPattern = RegExp(
+          r'void didChangeAppLifecycleState\(AppLifecycleState state\)(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = lifecycleBlockPattern.firstMatch(source);
+        expect(match, isNotNull);
+        final body = match!.group(1)!;
+
+        expect(
+          body.contains('AppLifecycleState.resumed'),
+          isTrue,
+          reason: 'resumed 케이스가 존재해야 한다',
+        );
+        expect(
+          body.contains('NavFloatingOverlay.hide'),
+          isTrue,
+          reason: 'NavFloatingOverlay.hide() 호출이 lifecycle 블록 내에 있어야 한다',
+        );
+        final resumedPos = body.indexOf('AppLifecycleState.resumed');
+        final hidePos = body.indexOf('NavFloatingOverlay.hide');
+        expect(
+          resumedPos < hidePos,
+          isTrue,
+          reason: 'resumed case가 NavFloatingOverlay.hide() 호출보다 앞에 있어야 한다',
+        );
+      },
+    );
+
+    // ─── 사례 (d) inactive → no-op  [S3 회귀 핵심 불변식] ───────────────────
+    test(
+      'inactive_state_must_not_call_show_or_hide — S3_regression_guard',
+      () {
+        // inactive arm에서 break만 있고 show/hide 호출이 없어야 한다.
+        // inactive case 이후 첫 번째 break까지의 구간에 show/hide가 없는지 확인.
+        final lifecycleBlockPattern = RegExp(
+          r'void didChangeAppLifecycleState\(AppLifecycleState state\)(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = lifecycleBlockPattern.firstMatch(source);
+        expect(match, isNotNull);
+        final body = match!.group(1)!;
+
+        final inactivePos = body.indexOf('AppLifecycleState.inactive');
+        expect(
+          inactivePos,
+          isNot(equals(-1)),
+          reason: 'inactive 케이스가 lifecycle switch에 존재해야 한다',
+        );
+
+        // inactive 케이스 이후 구간 추출 (switch 블록 끝까지)
+        final afterInactive = body.substring(inactivePos);
+
+        // inactive arm 안에 show() 또는 hide() 직접 호출이 없어야 한다.
+        // break 전에 NavFloatingOverlay 호출이 있으면 실패.
+        final breakPos = afterInactive.indexOf('break;');
+        expect(
+          breakPos,
+          isNot(equals(-1)),
+          reason: 'inactive case에 break;가 있어야 한다 (no-op 확인)',
+        );
+        final inactiveArm = afterInactive.substring(0, breakPos);
+        expect(
+          inactiveArm.contains('NavFloatingOverlay.show'),
+          isFalse,
+          reason:
+              'inactive arm에서 NavFloatingOverlay.show()를 호출해서는 안 된다 '
+              '— S3 "알림창 내림 오검출" 회귀 방지',
+        );
+        expect(
+          inactiveArm.contains('NavFloatingOverlay.hide'),
+          isFalse,
+          reason:
+              'inactive arm에서 NavFloatingOverlay.hide()를 호출해서는 안 된다 '
+              '— S3 회귀 방지',
+        );
+      },
+    );
+
+    // ─── 사례 (e) detached → no-op ────────────────────────────────────────────
+    test(
+      'detached_state_must_not_call_show_or_hide',
+      () {
+        final lifecycleBlockPattern = RegExp(
+          r'void didChangeAppLifecycleState\(AppLifecycleState state\)(.*?)^  \}',
+          dotAll: true,
+          multiLine: true,
+        );
+        final match = lifecycleBlockPattern.firstMatch(source);
+        expect(match, isNotNull);
+        final body = match!.group(1)!;
+
+        final detachedPos = body.indexOf('AppLifecycleState.detached');
+        expect(
+          detachedPos,
+          isNot(equals(-1)),
+          reason: 'detached 케이스가 lifecycle switch에 존재해야 한다',
+        );
+
+        // detached가 inactive와 같은 fall-through arm에 묶여 있고,
+        // 두 케이스 사이에 NavFloatingOverlay 호출이 없어야 한다.
+        // detached 이후부터 break까지의 구간에 show/hide가 없는지 확인.
+        final afterDetached = body.substring(detachedPos);
+        final breakPos = afterDetached.indexOf('break;');
+        expect(
+          breakPos,
+          isNot(equals(-1)),
+          reason: 'detached case에 break;가 있어야 한다 (no-op 확인)',
+        );
+        final detachedArm = afterDetached.substring(0, breakPos);
+        expect(
+          detachedArm.contains('NavFloatingOverlay.show'),
+          isFalse,
+          reason: 'detached arm에서 NavFloatingOverlay.show()를 호출해서는 안 된다',
+        );
+        expect(
+          detachedArm.contains('NavFloatingOverlay.hide'),
+          isFalse,
+          reason: 'detached arm에서 NavFloatingOverlay.hide()를 호출해서는 안 된다',
+        );
+      },
+    );
+  });
+
+  // ── _currentGuidance() km/m 단위 계약 고정 ───────────────────────────────
+  //
+  // _currentGuidance()와 _TurnStep._formatDist()는 둘 다 private이므로
+  // 외부 테스트에서 직접 호출할 수 없다. 위젯 풀 마운트는 geolocator·TTS·
+  // wakelock·MapLibre 채널을 모두 모킹해야 하므로 이 단일 계약 검증을 위해
+  // 프로덕션 코드에 테스트 전용 backdoor를 추가하는 것은 하드룰 위반이다.
+  //
+  // 대신 소스 텍스트로 단위 계약을 고정한다:
+  //   "_cardRemainingM / 1000" → _formatDist(km) 호출 패턴이 코드에 존재하는지,
+  //   _formatDist가 km 단위를 받아 < 1.0 이면 m 변환(×1000), ≥ 1.0 이면 km 표시함을
+  //   소스 리터럴로 확인한다.
+  group('_currentGuidance km/m 단위 계약 고정 (소스 검사)', () {
+    late String source;
+    setUpAll(() {
+      source = File(navScreenPath).readAsStringSync();
+    });
+
+    test(
+      'currentGuidance_divides_cardRemainingM_by_1000_before_formatDist',
+      () {
+        // _cardRemainingM / 1000 을 _formatDist에 넘기는 표현이 있어야 한다.
+        // 이 패턴이 깨지면 "m를 km로 넘기는" 단위 버그가 재도입된 것이다.
+        expect(
+          source.contains('_formatDist(_cardRemainingM / 1000)'),
+          isTrue,
+          reason:
+              '_currentGuidance()가 _cardRemainingM을 /1000 변환 후 '
+              '_formatDist에 넘겨야 한다. 이 변환이 사라지면 단위 오류.',
+        );
+      },
+    );
+
+    test(
+      'formatDist_converts_sub_1km_to_meters_and_above_1km_appends_km_suffix',
+      () {
+        // _TurnStep._formatDist 구현 불변식:
+        // km < 1.0 이면 ×1000 반올림 + 'm' 접미사
+        // km ≥ 1.0 이면 소수점1자리 + 'km' 접미사
+        expect(
+          source.contains("return '\${(km * 1000).round()}m';"),
+          isTrue,
+          reason:
+              '_formatDist가 km<1.0 구간에서 m 변환을 해야 한다 '
+              '(km 단위 입력 → m 문자열 출력)',
+        );
+        expect(
+          source.contains("return '\${km.toStringAsFixed(1)}km';"),
+          isTrue,
+          reason:
+              '_formatDist가 km≥1.0 구간에서 km 접미사를 붙여야 한다',
+        );
+      },
+    );
+  });
+
+
   late String source;
 
   setUpAll(() {
