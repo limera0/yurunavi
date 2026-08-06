@@ -5,7 +5,8 @@
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
 **진행 요약: 4 / 38 완료** (S0·S1·S2·S3 코드 완료 — 실기기 검증만 마스터 대기.
-S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 마스터 A/B 결정 대기로 남았다.
+S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b 구현 완료** —
+알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다.
 **S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정).
 다음은 S1b(조사))
@@ -242,7 +243,7 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 마스터 A/B 결정
 > 없음**을 `git diff`로 확인했고, 히스토리 재작성은 위험 조작이라 하지 않았다.
 > `git log`로 S2 변경분을 추적할 땐 `49643df` + `bd57885` + `71380de` 세 개를 봐야 한다.
 
-### S3 · 라이프사이클 정상화  `상태: [x]` — 코드 완료, 알림 일원화·PIP 복구 UX 2건은 마스터 A/B 결정 대기
+### S3 · 라이프사이클 정상화  `상태: [x]` — 코드 완료 (S3 기본 + S3b 알림 A·플로팅 오버레이 전환 2026-08-06 밤)
 
 > 근본원인 C. `inactive`가 알림창·캡쳐·엣지패널에서도 발화 → PIP 오진입 → 안내 중단.
 > **완료 2026-08-05** · 청크1 `a5beab1` · 청크2 `18da084` · 청크3 `386a2f3`
@@ -255,16 +256,22 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 마스터 A/B 결정
 - [x] **wakelock 정리**: 실측 결과 **2중이 옳음**(RECON의 "3중"은 오기 — `NavForegroundService`에
       `PowerManager.WakeLock` 획득 코드 없음). geolocator `enableWakeLock: true` → `false`로
       제거. `WakelockPlus`(화면) + FGS(프로세스)만 유지 (청크2, `18da084`)
-- [!] 알림 2개(geolocator FGS + NavForegroundService) 일원화 — **§2-5 마스터 A/B 결정 대기.**
-      방법 B(공유 채널)는 `geolocator_android-5.0.2`가 `CHANNEL_ID`/`ONGOING_NOTIFICATION_ID`
-      하드코딩이라 물리적 불가. 방법 A(geolocator FGS 제거)는 헤드리스 서버라 실기기 검증
-      불가 — 잘못 건들면 백그라운드 위치 fix 유실 → 안내 전면 실패 위험
+- [x] 알림 2개(geolocator FGS + NavForegroundService) 일원화 — **마스터 결정 A 구현 완료 (2026-08-06 밤, S3b 청크1 `2ffd233`)**.
+      `map_providers.dart`의 `foregroundNotificationConfig` 삭제 → "주행 안내" 알림 1개만 남음.
+      백그라운드 위치 스트림은 `NavForegroundService`(`foregroundServiceType=location`)가 유지.
+      **실기기 백그라운드 위치 fix 유실 여부 검증은 마스터 몫**(홈 화면 5분 방치 후 안내 진행 여부).
 - [x] PIP/백그라운드 중 지도 API 호출 가드 — `_canCallMap()` 게이트(`mounted && _mlCtrl != null
       && !_isInPip && !_isDisposing`) + `_isDisposing` 플래그(dispose 첫 문장) 도입.
       `nav_screen.dart`의 지도 호출 19+개소 전수 게이트, 신규 test 포함 (청크3, `386a2f3`)
-- [!] PIP 복구를 **우측 작은 아이콘 터치**로 (마스터 요구) — **§2-7 마스터 A/B 결정 대기.**
-      해석 A(시스템 PIP + RemoteAction 아이콘) vs 해석 B(시스템 PIP 폐기 + 상단바 알림).
-      §2-1~2-3 완료로 오검출 자체는 사라져 60행 첫 문장은 이미 해소됨
+- [x] PIP 복구 UX — **플로팅 오버레이 전환 구현 완료 (2026-08-06 밤, S3b 청크1~3 `2ffd233`+`7e68a72`+`77b2ce8`)**.
+      시스템 PIP 전량 폐기(dart `android_pip` 제거, `AndroidManifest`의 `supportsPictureInPicture` 삭제,
+      `MainActivity.onUserLeaveHint`·`nav_pip_hint` 채널 삭제, `_buildPipCompactView` 삭제).
+      대신 자체 구현 `FloatingOverlayService.kt`(`WindowManager.addView(TYPE_APPLICATION_OVERLAY)`)
+      + Dart `NavFloatingOverlay` 서비스 신설. `flutter_overlay_window` 패키지는 `FOREGROUND_SERVICE_SPECIAL_USE`
+      권한 요구로 반려. 아이콘 1탭 → `FLAG_ACTIVITY_NEW_TASK|SINGLE_TOP|CLEAR_TOP` intent로 앱 즉시 복귀.
+      권한(`SYSTEM_ALERT_WINDOW`)은 이미 매니페스트에 존재. 첫 실행 시 안내 다이얼로그로 사용자에게
+      `ACTION_MANAGE_OVERLAY_PERMISSION` 유도. 라이프사이클 회귀 테스트 7건 추가(`nav_lifecycle_test.dart`, +7 → 382/382 통과).
+      **실기기 검증(홈→카카오톡→플로팅 아이콘 표시 및 1탭 복귀·30분 방치)은 마스터 몫**.
 - [ ] **검증**: 알림창 내림·스크린샷·엣지패널 → PIP 진입 안 함 / 홈 버튼 → PIP 진입 /
       홈 상태 30분 유지 후 안내·히스토리 정상 — **마스터 실기기 수동 검증 대기**
 
