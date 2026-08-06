@@ -1,17 +1,16 @@
-// 회귀 가드: didChangeAppLifecycleState가 inactive/hidden 상태에서
-// _maybeEnterPip()를 트리거하지 않음을 결정론적으로 검증한다.
+// 회귀 가드: S3b 청크1 — PIP 폐기 후 dispose-race 게이트 불변식 검증.
 //
 // 배경(2026-08-05): 알림창 내림·스크린샷·엣지패널 조작만으로 inactive가 발화해
-// 내비가 PIP로 튀어 안내가 끊기는 결함이 실확인됐다. 정상 경로는 이미
-// nav_pip_hint 채널(onUserLeaveHint 포워딩)과 Auto-PIP(API 31+)가 커버하므로
-// lifecycle 분기 자체를 제거했다. 이 테스트는 그 불변식을 잠근다.
+// 내비가 PIP로 튀어 안내가 끊기는 결함이 실확인됐다. S3 청크1에서 lifecycle
+// 분기 자체를 제거했고, S3b 청크1에서 PIP 코드 전량을 폐기했다.
+// didChangeAppLifecycleState는 청크2(플로팅 오버레이)에서 재활용 예정이므로
+// 오버라이드 자체가 남아있는지만 검증한다.
 //
 // 구현 선택: 정적 파일 검사 방식 채택.
 // _NavScreenState가 private이라 위젯 마운트 없이는 메서드를 직접 관찰할 수
-// 없고, NavScreen 풀 마운트는 AndroidPIP·geolocator·TTS·wakelock 채널 모킹을
-// 모두 요구해 인프라 코드 테스트가 된다. didChangeAppLifecycleState의 불변식은
-// "특정 호출이 존재하지 않는다"는 구조적 사실이므로 소스 파일 직독이 가장
-// 직접적이고 결정론적인 검증 수단이다.
+// 없고, NavScreen 풀 마운트는 geolocator·TTS·wakelock 채널 모킹을
+// 모두 요구해 인프라 코드 테스트가 된다. 불변식은 "특정 호출이 존재하지 않는다"는
+// 구조적 사실이므로 소스 파일 직독이 가장 직접적이고 결정론적인 검증 수단이다.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -27,37 +26,38 @@ void main() {
   });
 
   test(
-    'didChangeAppLifecycleState_no_longer_triggers_pip_on_inactive_hidden',
+    'pip_code_fully_removed_from_nav_screen',
     () {
-      // didChangeAppLifecycleState 메서드 본문만 추출한다.
-      // 패턴: 오버라이드 선언부터 다음 @override 또는 메서드 선언 이전까지.
-      final methodPattern = RegExp(
-        r'void didChangeAppLifecycleState\(AppLifecycleState state\)\s*\{([^}]*)\}',
-        dotAll: true,
-      );
-      final match = methodPattern.firstMatch(source);
+      // S3b 청크1 불변식: PIP 관련 심볼이 소스에 남지 않아야 한다.
       expect(
-        match,
-        isNotNull,
-        reason: 'didChangeAppLifecycleState 메서드가 nav_screen.dart에 존재해야 한다',
-      );
-
-      final body = match!.group(1)!;
-
-      // 핵심 불변식: 메서드 본문에 _maybeEnterPip 호출이 없어야 한다.
-      expect(
-        body.contains('_maybeEnterPip'),
+        source.contains('android_pip'),
         isFalse,
-        reason:
-            'didChangeAppLifecycleState가 _maybeEnterPip()를 직접 호출해서는 안 된다. '
-            'PIP 진입은 nav_pip_hint 채널과 Auto-PIP가 전담한다.',
+        reason: 'android_pip import가 nav_screen.dart에 남아있어서는 안 된다',
       );
-
-      // 부가 검증: debugPrint 진단 로그는 유지돼야 한다.
       expect(
-        body.contains("debugPrint('YNAV_LIFECYCLE"),
-        isTrue,
-        reason: 'YNAV_LIFECYCLE 진단 로그는 유지돼야 한다',
+        source.contains('AndroidPIP'),
+        isFalse,
+        reason: 'AndroidPIP 참조가 nav_screen.dart에 남아있어서는 안 된다',
+      );
+      expect(
+        source.contains('_isInPip'),
+        isFalse,
+        reason: '_isInPip 필드가 nav_screen.dart에 남아있어서는 안 된다',
+      );
+      expect(
+        source.contains('_pipHintChannel'),
+        isFalse,
+        reason: '_pipHintChannel이 nav_screen.dart에 남아있어서는 안 된다',
+      );
+      expect(
+        source.contains('_maybeEnterPip'),
+        isFalse,
+        reason: '_maybeEnterPip()이 nav_screen.dart에 남아있어서는 안 된다',
+      );
+      expect(
+        source.contains('_buildPipCompactView'),
+        isFalse,
+        reason: '_buildPipCompactView()가 nav_screen.dart에 남아있어서는 안 된다',
       );
     },
   );
@@ -66,7 +66,7 @@ void main() {
   //
   // _canCallMap() 게이트가 dispose() 진입 즉시 _isDisposing=true 로 막히는 구조적
   // 사실을 소스 텍스트로 검증한다. "native view만 살아있고 controller reference만
-  // 죽은" 경우를 잡지 못하던 _mlCtrl? 널가드의 한계를 3겹 게이트로 보완했음.
+  // 죽은" 경우를 잡지 못하던 _mlCtrl? 널가드의 한계를 게이트로 보완했음.
   test(
     'dispose_sets_isDisposing_before_stream_close_to_gate_map_calls',
     () {
@@ -110,7 +110,7 @@ void main() {
             '— 비동기 콜백이 스트림 close 이후에 도달해도 게이트가 막도록',
       );
 
-      // 3. _canCallMap() 게이트가 _isDisposing을 포함해야 한다.
+      // 3. _canCallMap() 게이트가 _isDisposing과 mounted를 포함해야 한다.
       final canCallMapPattern = RegExp(
         r'bool _canCallMap\(\)\s*=>\s*([^;]+);',
         dotAll: true,
@@ -132,10 +132,11 @@ void main() {
         isTrue,
         reason: '_canCallMap() 게이트가 mounted를 검사해야 한다',
       );
+      // S3b 청크1: _isInPip은 폐기됐으므로 게이트에서 제거됐어야 한다.
       expect(
         gateExpr.contains('_isInPip'),
-        isTrue,
-        reason: '_canCallMap() 게이트가 _isInPip을 검사해야 한다',
+        isFalse,
+        reason: '_canCallMap() 게이트에서 _isInPip 조건이 제거됐어야 한다 (S3b 청크1)',
       );
 
       // 4. 주요 호출부들이 게이트를 경유함을 확인한다.

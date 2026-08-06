@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'dart:math' as math show sin, cos, sqrt, asin, pi;
 
 import 'package:http/http.dart' as http;
 
-import 'package:android_pip/android_pip.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -335,17 +333,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 최신 경로에 잘못 반영되지 않게 한다.
   int _routeGeneration = 0;
 
-  // Phase B: PiP 미니창 — 다른 앱으로 전환(paused) 시 android_pip 콜백으로
-  // true가 되고, PIP가 닫히거나(onPipExited) 사용자가 앱으로 복귀(onPipMaximised)하면
-  // false로 되돌아온다. build()가 이 플래그로 전체 UI ↔ 컴팩트 뷰를 스위칭한다.
-  bool _isInPip = false;
-  // 포그라운드 서비스 알림 표시 시 onUserLeaveHint 조기 발화 방지용 — initState
-  // 진입 후 2초 뒤에 true가 되며, 그 전에는 _maybeEnterPip()가 no-op.
-  bool _pipReady = false;
-  AndroidPIP? _pip;
-  static const MethodChannel _pipHintChannel =
-      MethodChannel('com.westinx.yurunavi/nav_pip_hint');
-
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
 
@@ -390,48 +377,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _liveWaypoints = List<LatLng>.of(widget.waypoints);
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
-    // Phase B: PiP 미니창. enterPipMode()는 액티비티가 아직 화면에 보이는 동안
-    // 호출해야 성공한다 — didChangeAppLifecycleState(paused)는 Android onStop()
-    // 이후에야 발화해 이미 늦다(실기기 검증: HOME 직후 dumpsys activity activities의
-    // mLastReportedPictureInPictureMode가 계속 false로 남음). 대신 네이티브
-    // onUserLeaveHint()(MainActivity.kt, onPause 이전 시점)를 nav_pip_hint 채널로
-    // 포워딩받아 트리거한다. Android 전용이라 다른 플랫폼(iOS/desktop/테스트)에서는
-    // 채널 핸들러도, AndroidPIP 인스턴스도 만들지 않는다.
-    if (Platform.isAndroid) {
-      _pip = AndroidPIP(
-        onPipEntered: () {
-          if (mounted) setState(() => _isInPip = true);
-        },
-        onPipExited: () {
-          if (mounted) setState(() => _isInPip = false);
-        },
-        onPipMaximised: () {
-          if (mounted) setState(() => _isInPip = false);
-        },
-      );
-      _pipHintChannel.setMethodCallHandler((call) async {
-        if (call.method == 'onUserLeaveHint') await _maybeEnterPip();
-      });
-      Future.delayed(const Duration(seconds: 2), () async {
-        if (!mounted) return;
-        setState(() => _pipReady = true);
-        // Auto-enter PiP (Android 12/API 31+): OS가 액티비티를 어떤 이유로든(홈/
-        // 최근앱전환/전화수신 등) 백그라운드로 보낼 때 자동으로 PIP 진입시켜준다.
-        // onUserLeaveHint 수동 트리거(_maybeEnterPip)가 놓치는 조건 3(전화 수신 등
-        // onUserLeaveHint가 발화하지 않는 인터럽션)까지 구조적으로 커버한다.
-        // 항상 켜둔 채 유지한다(_isManualMode/_showCourseSheet에 따라 토글하지
-        // 않음) — 토글 지점이 5곳 이상이라 복잡도가 크고, "더 자주 PIP가 뜨는 쪽이
-        // 안전한 방향"이라는 판단(라운드9 계획서 참고). isAutoPipAvailable이
-        // false인 기기(API 26~30)는 기존 onUserLeaveHint 수동 경로가 폴백으로
-        // 그대로 남는다.
-        final pip = _pip;
-        if (pip == null) return;
-        if (!await AndroidPIP.isPipAvailable) return;
-        if (!await AndroidPIP.isAutoPipAvailable) return;
-        if (!mounted) return;
-        await pip.setAutoPipMode(autoEnter: true);
-      });
-    }
     // TTS 초기화 + 첫 안내
     _initTts();
     _applyRouteGuidance(widget.maneuvers);
@@ -457,34 +402,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     });
   }
 
-  /// 다른 앱으로 전환 직전(네이티브 onUserLeaveHint → nav_pip_hint 채널) PiP
-  /// 미니창 진입을 시도한다. 목적지가 없거나 수동/코스시트 모드 중이면 시도하지
-  /// 않음(_startLocation의 동일 가드 패턴 참고) — 도착배너 표시 중에도 PiP 진입
-  /// 자체는 막지 않는다(스코프 밖). 종료는 OS가 관리하고 onPipExited/onPipMaximised
-  /// 콜백이 _isInPip을 되돌린다. PiP 미지원 기기(API<26 등)에서 enterPipMode()를
-  /// 호출하면 안전하지 않을 수 있어 isPipAvailable로 먼저 확인한다.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    debugPrint('YNAV_LIFECYCLE state=${state.name}');
-    // inactive/hidden 분기는 오검출(알림창·스크린샷·엣지패널) 근원이라 제거.
-    // 홈/최근앱 시나리오는 nav_pip_hint 채널(onUserLeaveHint 포워딩)이,
-    // 전화 등 인터럽션은 Auto-PIP(:429)가 커버한다.
-  }
-
-  Future<void> _maybeEnterPip() async {
-    if (!_pipReady || _isInPip) return;
-    final pip = _pip;
-    if (pip == null ||
-        widget.destination == null ||
-        _isManualMode ||
-        _showCourseSheet) {
-      return;
-    }
-    if (!await AndroidPIP.isPipAvailable) return;
-    await pip.enterPipMode();
-    debugPrint('YNAV_PIP enter ok');
-  }
-
   @override
   void dispose() {
     // 비동기 콜백이 스트림 close 이후에 도달해도 지도 API 호출을 막도록
@@ -503,7 +420,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       systemNavigationBarIconBrightness: Brightness.dark,
       systemNavigationBarContrastEnforced: false,
     ));
-    _pipHintChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     _recenterTimer?.cancel();
     _offRouteDebounce?.cancel();
@@ -518,18 +434,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
     super.dispose();
   }
 
-  /// 지도 API 호출 허용 여부 3겹 게이트.
+  /// 지도 API 호출 허용 여부 게이트.
   /// - mounted: 위젯 트리에서 분리되지 않았는지
   /// - _mlCtrl != null: controller가 연결됐는지 (nullptr 가드는 이미 있지만
   ///   controller reference가 살아있고 native view만 죽은 경우를 추가 방어)
-  /// - !_isInPip: PIP 미니창 중엔 플랫폼뷰가 축소돼 대부분 무용
   /// - !_isDisposing: dispose() 진입 후 비동기 콜백이 늦게 도달하는 경우 차단
   ///
   /// 로그 근거: MissingPluginException(source#setGeoJson) 431건,
   /// camera#move 136건 — _mlCtrl? 널가드는 controller reference가 살아있고
   /// native view만 죽은 경우를 잡지 못한다.
-  bool _canCallMap() =>
-      mounted && _mlCtrl != null && !_isInPip && !_isDisposing;
+  bool _canCallMap() => mounted && _mlCtrl != null && !_isDisposing;
 
   Future<void> _startLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) return;
@@ -1875,56 +1789,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
         _buildRouteGeoJson(remainingPts.length >= 2 ? remainingPts : const []));
   }
 
-  /// PiP 미니창 전용 컴팩트 뷰 — 지도(MapLibre)나 나머지 UI 없이 다음 턴
-  /// 아이콘 + 라벨 + 남은 거리만 표시한다. 온스크린 카드(build()의 `upcoming`)와
-  /// 동일한 기존 데이터(_steps[_stepIdx + 1]/_cardRemainingM)만 재사용하고
-  /// 새 아이콘/에셋은 추가하지 않는다.
-  Widget _buildPipCompactView() {
-    final upcoming =
-        _stepIdx + 1 < _steps.length ? _steps[_stepIdx + 1] : _steps[_stepIdx];
-    final distText = _TurnStep._formatDist(_cardRemainingM / 1000.0);
-    return ColoredBox(
-      color: Colors.black,
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SvgPicture.asset(upcoming.svgAsset, width: 40, height: 40),
-                const SizedBox(height: 6),
-                Text(
-                  upcoming.label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  distText,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Phase B: PiP 미니창에서는 지도/전체 UI를 그리지 않고 다음 턴 아이콘+거리만
-    // 보여주는 컴팩트 뷰로 대체한다 (onUserLeaveHint → nav_pip_hint 채널 →
-    // _maybeEnterPip → onPipEntered 콜백이 _isInPip을 true로 세팅).
-    if (_isInPip) return _buildPipCompactView();
     final navState = ref.watch(navStateProvider);
     final step = _steps[_stepIdx];
     // 카드에 표시할 "다가오는 회전" — 마지막 step이면 step 자신(목적지)으로 폴백
