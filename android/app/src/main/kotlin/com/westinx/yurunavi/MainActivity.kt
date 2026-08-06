@@ -106,6 +106,9 @@ class MainActivity : FlutterActivity() {
         // GPU/전체 메모리 주기 스냅샷 — 메모리·GPU 압박 대응 청크6 B-2. dumpsys 없이
         // Debug API만으로 얻은 근사치를 Dart가 60초 간격으로 요청해 진단로그에 남긴다.
         GpuMemBridge(flutterEngine.dartExecutor.binaryMessenger)
+
+        // 한글 지원 시스템 폰트 열거 — O1 청크3, 지도 표의문자 폰트 선택 UI.
+        IdeographFontBridge(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     private fun sendOverlayIntent(action: String, iconType: String, distText: String) {

@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../models/map_language.dart';
+import '../../../services/ideograph_font_service.dart';
 import '../../../services/language_service.dart';
 
 final languageServiceProvider = Provider((_) => LanguageService());
+final ideographFontServiceProvider = Provider((_) => IdeographFontService());
 
 // ── 내비 지도 방향 (헤딩업=true 기본, 노스업=false) ─────────────────────────
 final navHeadingUpProvider =
@@ -61,3 +63,34 @@ class MapLanguageNotifier extends AsyncNotifier<MapLanguage> {
     state = AsyncData(l);
   }
 }
+
+// ── 지도 표의문자(한글) 폰트 (O1 청크3, Android 전용) ───────────────────────
+// `localIdeographFontFamily`는 MapView 생성 시점에만 적용되고 런타임 override가
+// 안 된다 — 저장값은 다음에 지도 화면을 새로 열 때부터 반영된다.
+// 기본값 'sans-serif'는 특정 폰트명이 아니라 OS가 알아서 제조사 기본 한글 폰트로
+// 치환해주는 별칭이다(One UI 등 버전마다 실제 폰트명이 바뀌는 문제를 피하기 위함).
+final mapIdeographFontFamilyProvider =
+    AsyncNotifierProvider<MapIdeographFontFamilyNotifier, String>(
+        MapIdeographFontFamilyNotifier.new);
+
+class MapIdeographFontFamilyNotifier extends AsyncNotifier<String> {
+  static const _key = 'map_ideograph_font_family_v1';
+  static const defaultFamily = 'sans-serif';
+
+  @override
+  Future<String> build() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_key) ?? defaultFamily;
+  }
+
+  Future<void> set(String fontFamily) async {
+    state = AsyncData(fontFamily);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, fontFamily);
+  }
+}
+
+/// 한글 지원 시스템 폰트 후보 목록 — 설정 화면을 열 때마다 새로 조회한다(캐싱 없음).
+final koreanFontListProvider = FutureProvider<List<String>>(
+  (ref) => ref.read(ideographFontServiceProvider).listKoreanFonts(),
+);

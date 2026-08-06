@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -57,6 +59,7 @@ class SettingsScreen extends ConsumerWidget {
 
           const _SectionHeader(title: '앱 설정'),
           _LanguageSelector(),
+          if (Platform.isAndroid) _IdeographFontSelector(),
           Consumer(builder: (ctx, ref, _) {
             final headingUp = ref.watch(navHeadingUpProvider).value ?? true;
             return ListTile(
@@ -143,6 +146,74 @@ class _LanguageSelector extends ConsumerWidget {
             }
           },
         ),
+      ),
+    );
+  }
+}
+
+String _ideographFontLabel(String fontFamily) => fontFamily ==
+        MapIdeographFontFamilyNotifier.defaultFamily
+    ? '시스템 기본'
+    : fontFamily;
+
+/// 지도 한글 폰트 선택 (O1 청크3, Android 전용 — iOS는 런타임 override가 안 돼
+/// 이 항목 자체를 노출하지 않는다, 호출부에서 `Platform.isAndroid` 게이팅).
+///
+/// `localIdeographFontFamily`는 MapView 생성 시점에만 적용되므로, 여기서 값을
+/// 바꿔도 이미 열려 있는 지도 화면에는 반영되지 않는다 — 다음에 지도를 새로
+/// 열 때부터 적용된다는 점을 서브타이틀에 명시한다.
+class _IdeographFontSelector extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedAsync = ref.watch(mapIdeographFontFamilyProvider);
+    final fontsAsync = ref.watch(koreanFontListProvider);
+
+    if (selectedAsync.isLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+            child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (selectedAsync.hasError) return const SizedBox.shrink();
+
+    final selected =
+        selectedAsync.value ?? MapIdeographFontFamilyNotifier.defaultFamily;
+    // 열거 실패/로딩 중이면 빈 목록으로 폴백 — "시스템 기본"만 있는 상태로 처리한다.
+    final fonts = fontsAsync.value ?? const <String>[];
+    final options = <String>{
+      MapIdeographFontFamilyNotifier.defaultFamily,
+      ...fonts,
+    }.toList();
+    // 저장된 값이 현재 열거 결과에 없어도(예: 로딩 중이거나 폰트가 사라짐) 드롭다운
+    // value가 items에 없는 상태가 되지 않도록 항상 포함시킨다.
+    if (!options.contains(selected)) options.add(selected);
+
+    return ListTile(
+      visualDensity: VisualDensity.compact,
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      title: const Text('지도 한글 폰트'),
+      subtitle: const Text(
+        '한글을 지원하는 폰트만 표시됩니다. 변경 사항은 지도 화면을 다시 열 때 적용됩니다.',
+      ),
+      trailing: DropdownButton<String>(
+        value: selected,
+        underline: const SizedBox.shrink(),
+        items: options
+            .map((f) => DropdownMenuItem(
+                  value: f,
+                  child: Text(_ideographFontLabel(f)),
+                ))
+            .toList(),
+        onChanged: (v) {
+          if (v != null) {
+            ref.read(mapIdeographFontFamilyProvider.notifier).set(v);
+          }
+        },
       ),
     );
   }

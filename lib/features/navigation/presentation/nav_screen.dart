@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math' as math show sin, cos, sqrt, asin, pi;
 
 import 'package:http/http.dart' as http;
@@ -137,6 +138,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   String? _rawStyle;
   String? _styleJson;
+  // O1 청크3: 지도 한글 폰트 — MapView 생성 시점에만 적용되고 런타임 변경이
+  // 안 되므로(maplibre_gl 포크 제약), 스타일 로드 시 한 번만 읽어 고정한다.
+  // Android 전용, iOS는 항상 null(플러그인이 해당 키를 읽지 않음).
+  String? _ideographFontFamily;
 
   bool _locLayerReady = false;
   bool _destLayerReady = false;
@@ -405,9 +410,15 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
     if (!mounted) return;
     final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
+    // Android 전용 — 값은 한 번만 읽는다(런타임 override 불가, 위 필드 주석 참고).
+    final ideographFont = Platform.isAndroid
+        ? (ref.read(mapIdeographFontFamilyProvider).value ??
+            MapIdeographFontFamilyNotifier.defaultFamily)
+        : null;
     setState(() {
       _rawStyle = raw;
       _styleJson = applyMapLanguageToStyle(raw, lang);
+      _ideographFontFamily = ideographFont;
     });
   }
 
@@ -1926,6 +1937,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
             child: ml.MapLibreMap(
               styleString: _styleJson!,
               minMaxZoomPreference: const ml.MinMaxZoomPreference(6.0, 17.0),
+              localIdeographFontFamily: _ideographFontFamily,
               initialCameraPosition: ml.CameraPosition(
                 target: _toMl(ref.read(navStateProvider)?.pos ?? _kInitialMapView),
                 zoom: 15,

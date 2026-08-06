@@ -40,6 +40,10 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
 
   ml.MapLibreMapController? _mlCtrl;
   String? _styleJson;
+  // O1 청크3: 지도 한글 폰트 — MapView 생성 시점에만 적용되고 런타임 변경이
+  // 안 되므로(maplibre_gl 포크 제약), 스타일 로드 시 한 번만 읽어 고정한다.
+  // Android 전용, iOS는 항상 null(플러그인이 해당 키를 읽지 않음).
+  String? _ideographFontFamily;
 
   List<LatLng> _track = const [];
   bool _trackLoaded = false;
@@ -207,7 +211,15 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
     final raw = await rootBundle.loadString('assets/images/osm_liberty_yurunavi.json');
     if (!mounted) return;
     final lang = ref.read(mapLanguageProvider).value ?? MapLanguage.korean;
-    setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
+    // Android 전용 — 값은 한 번만 읽는다(런타임 override 불가, 위 필드 주석 참고).
+    final ideographFont = Platform.isAndroid
+        ? (ref.read(mapIdeographFontFamilyProvider).value ??
+            MapIdeographFontFamilyNotifier.defaultFamily)
+        : null;
+    setState(() {
+      _styleJson = applyMapLanguageToStyle(raw, lang);
+      _ideographFontFamily = ideographFont;
+    });
   }
 
   /// TourTrackWriter가 기록한 `[epochMs, lat, lng, speedKmh]` 형식의
@@ -356,6 +368,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
               height: _captureMapHeight,
               child: ml.MapLibreMap(
                 styleString: _styleJson!,
+                localIdeographFontFamily: _ideographFontFamily,
                 initialCameraPosition: ml.CameraPosition(
                   target: ml.LatLng(tourLog.startLat, tourLog.startLng),
                   zoom: 12,
@@ -368,6 +381,7 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
             Positioned.fill(
               child: ml.MapLibreMap(
                 styleString: _styleJson!,
+                localIdeographFontFamily: _ideographFontFamily,
                 initialCameraPosition: ml.CameraPosition(
                   target: ml.LatLng(tourLog.startLat, tourLog.startLng),
                   zoom: 12,
