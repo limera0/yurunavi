@@ -1,0 +1,151 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// ({iconType, distanceText}) — nav_screen이 _currentGuidance()로 채워 넘긴다.
+typedef GuidanceInfo = ({String iconType, String distanceText});
+
+/// 플로팅 오버레이 Dart 래퍼 (S3b 청크2, 2026-08-06)
+///
+/// 마스터 결정 2(2026-08-06): 시스템 PIP → 네이버지도/카카오내비 스타일
+/// SYSTEM_ALERT_WINDOW 플로팅 아이콘(1탭 → 앱 즉시 복귀)으로 전환.
+///
+/// API:
+/// - [attach] / [detach] — nav_screen initState/dispose에서 호출.
+/// - [show] / [update] / [hide] — 라이프사이클 훅(paused/hidden/resumed)에서 호출.
+/// - [checkPermissionAndMaybePrompt] — 첫 내비 시작 시 권한 다이얼로그 표시.
+///
+/// Android 전용 — 다른 플랫폼에서는 모든 메서드가 즉시 반환.
+class NavFloatingOverlay {
+  NavFloatingOverlay._();
+
+  static const MethodChannel _channel =
+      MethodChannel('com.westinx.yurunavi/nav_floating');
+
+  // ── 라이프사이클 관리 ──────────────────────────────────────────────────────
+
+  /// initState 마지막에 호출. ref는 현재 Dart 래퍼 레벨에서는 직접 사용하지
+  /// 않지만 향후 상태 구독 확장을 위해 서명에 유지한다.
+  // ignore: avoid_unused_parameters
+  static void attach(WidgetRef ref, BuildContext ctx) {
+    // 현재 구현에서 ref/ctx를 저장하지 않음 — 권한 다이얼로그는 nav_screen이
+    // addPostFrameCallback에서 checkPermissionAndMaybePrompt(context)로 직접 호출.
+  }
+
+  /// dispose 처음에 호출. 오버레이가 남아있으면 숨긴다(좀비 방지).
+  static void detach() {
+    hide(); // 좀비 방지: 내비 종료 시 오버레이 강제 해제
+  }
+
+  // ── 오버레이 표시/갱신/숨김 ────────────────────────────────────────────────
+
+  /// 오버레이를 표시한다. 권한이 없으면 no-op.
+  static Future<void> show(GuidanceInfo info) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('show', {
+        'iconType': info.iconType,
+        'distanceText': info.distanceText,
+      });
+    } on PlatformException catch (e) {
+      debugPrint('NavFloatingOverlay.show error: $e');
+    } on MissingPluginException catch (e) {
+      debugPrint('NavFloatingOverlay.show MissingPlugin: $e');
+    }
+  }
+
+  /// 표시 중인 오버레이의 내용을 갱신한다.
+  static Future<void> update(GuidanceInfo info) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('update', {
+        'iconType': info.iconType,
+        'distanceText': info.distanceText,
+      });
+    } on PlatformException catch (e) {
+      debugPrint('NavFloatingOverlay.update error: $e');
+    } on MissingPluginException catch (e) {
+      debugPrint('NavFloatingOverlay.update MissingPlugin: $e');
+    }
+  }
+
+  /// 오버레이를 숨기고 FloatingOverlayService를 종료한다.
+  static Future<void> hide() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('hide');
+    } on PlatformException catch (e) {
+      debugPrint('NavFloatingOverlay.hide error: $e');
+    } on MissingPluginException catch (e) {
+      debugPrint('NavFloatingOverlay.hide MissingPlugin: $e');
+    }
+  }
+
+  // ── 권한 조회 및 UX ────────────────────────────────────────────────────────
+
+  /// SYSTEM_ALERT_WINDOW 권한 여부 조회. Android 전용; 다른 플랫폼은 true 반환.
+  static Future<bool> canDrawOverlays() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final result = await _channel.invokeMethod<bool>('canDrawOverlays');
+      return result ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// SYSTEM_ALERT_WINDOW 권한이 없으면 안내 다이얼로그를 표시한다.
+  ///
+  /// Play 정책 준수: 앱이 권한 목적을 사용자에게 명확히 설명해야 한다.
+  /// 다이얼로그 문구는 HANDOFF_0806_S3b_floating_and_notif.md §2-C 원문.
+  ///
+  /// 권한이 이미 있으면 즉시 반환(다이얼로그 미표시).
+  static Future<void> checkPermissionAndMaybePrompt(BuildContext ctx) async {
+    if (!Platform.isAndroid) return;
+    final hasPermission = await canDrawOverlays();
+    if (hasPermission) return;
+    if (!ctx.mounted) return;
+    await showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('화면 위에 안내 표시 권한이 필요합니다'),
+        content: const Text(
+          '라이딩 중 카톡·전화·네이버지도 등을 잠깐 확인할 때, '
+          '유루나비 안내 아이콘을 화면 위에 띄워줍니다. '
+          '아이콘을 한 번 누르면 앱으로 즉시 돌아옵니다.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('나중에'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(dialogCtx).pop();
+              await _openOverlaySettings();
+            },
+            child: const Text('설정 열기'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 시스템 오버레이 설정 화면을 연다 (ACTION_MANAGE_OVERLAY_PERMISSION).
+  /// Android는 SYSTEM_ALERT_WINDOW를 런타임 permission으로 부여하지 않으므로
+  /// 반드시 시스템 설정 화면을 통해야 한다.
+  static Future<void> _openOverlaySettings() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('openOverlaySettings');
+    } on PlatformException catch (e) {
+      debugPrint('NavFloatingOverlay.openOverlaySettings error: $e');
+    } on MissingPluginException catch (e) {
+      debugPrint('NavFloatingOverlay.openOverlaySettings MissingPlugin: $e');
+    }
+  }
+}

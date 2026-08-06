@@ -25,6 +25,7 @@ import '../../../services/exit_landmark_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
 import '../../../services/native_engine.dart';
+import '../../../services/nav_floating_overlay.dart';
 import '../../../services/nav_foreground_service.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
@@ -390,6 +391,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _startLocation();
     unawaited(NavForegroundService.start('경로 안내 중'));
     _loadRawStyle();
+    // 결정 2(2026-08-06) 반영: 플로팅 오버레이 진입점 초기화.
+    // attach는 ref/context를 보관하고, 권한 다이얼로그는 첫 프레임 이후에 표시.
+    NavFloatingOverlay.attach(ref, context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(NavFloatingOverlay.checkPermissionAndMaybePrompt(context));
+      }
+    });
   }
 
   Future<void> _loadRawStyle() async {
@@ -404,6 +413,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   @override
   void dispose() {
+    // 결정 2(2026-08-06) 반영: 내비 종료 시 플로팅 오버레이 강제 해제(좀비 방지).
+    // _isDisposing 세팅보다 먼저 호출해 오버레이 hide가 비동기 차단 없이 발송됨.
+    NavFloatingOverlay.detach();
     // 비동기 콜백이 스트림 close 이후에 도달해도 지도 API 호출을 막도록
     // 가장 먼저 세팅한다. _canCallMap()이 이 플래그를 확인한다.
     _isDisposing = true;
@@ -432,6 +444,42 @@ class _NavScreenState extends ConsumerState<NavScreen>
     unawaited(NavForegroundService.stop());
     WakelockPlus.disable(); // 내비 종료 시 wakelock 해제
     super.dispose();
+  }
+
+  /// 결정 2(2026-08-06) 반영: 시스템 PIP 폐기 후 SYSTEM_ALERT_WINDOW 플로팅 아이콘
+  /// 방식으로 대체. paused/hidden에서 오버레이 표시, resumed에서 숨김.
+  ///
+  /// ⚠️ inactive에는 절대 반응하지 않는다 — S3 청크1에서 근원 차단한
+  /// "알림창 내림·스크린샷으로 오검출" 문제가 여기서 재도입되면 안 됨.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (widget.destination == null) return;
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        unawaited(NavFloatingOverlay.show(_currentGuidance()));
+      case AppLifecycleState.resumed:
+        unawaited(NavFloatingOverlay.hide());
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break; // 반응 없음 — S3 오검출 회귀 방지
+    }
+  }
+
+  /// 현재 안내 스텝의 아이콘 타입과 잔여 거리를 반환한다.
+  /// FloatingOverlayService에 전달할 [GuidanceInfo]를 생성한다.
+  /// _steps / _stepIdx / _cardRemainingM는 progressSub가 매 tick 갱신한다.
+  GuidanceInfo _currentGuidance() {
+    final step = _steps.isNotEmpty ? _steps[_stepIdx.clamp(0, _steps.length - 1)] : null;
+    // svgAsset 경로에서 파일명만 추출해 iconType으로 변환
+    // (예: 'assets/images/nav_icons/nav_right.svg' → 'nav_right')
+    final iconType = step != null
+        ? step.svgAsset.split('/').last.replaceAll('.svg', '')
+        : 'nav_straight';
+    final distText = _cardRemainingM > 0
+        ? _TurnStep._formatDist(_cardRemainingM / 1000)
+        : '';
+    return (iconType: iconType, distanceText: distText);
   }
 
   /// 지도 API 호출 허용 여부 게이트.

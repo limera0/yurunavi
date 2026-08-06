@@ -39,6 +39,11 @@
             android:name=".NavForegroundService"
             android:foregroundServiceType="location"
             android:exported="false"/>
+        <!-- 플로팅 오버레이 서비스 — SYSTEM_ALERT_WINDOW(이미 선언됨)로 다른 앱 위에 안내 아이콘 표시.
+             일반 Service(foreground 아님) — NavForegroundService와 분리해 단일 책임 유지. -->
+        <service
+            android:name=".FloatingOverlayService"
+            android:exported="false"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

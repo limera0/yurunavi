@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 좌회전 화살표 — FloatingOverlayService 오버레이 아이콘 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- 곡선 몸통: 아래 → 왼쪽 -->
+    <path
+        android:pathData="M30,36 L30,22 Q30,14 22,14 L14,14"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"/>
+    <!-- 화살표 머리 (왼쪽) -->
+    <path
+        android:pathData="M22,8 L14,14 L22,20"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+</vector>

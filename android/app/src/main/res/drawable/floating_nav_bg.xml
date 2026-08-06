@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 플로팅 오버레이 배경 — 반투명 다크 라운드 (카카오내비 스타일) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="16dp"/>
+    <solid android:color="#CC1A1A2E"/>
+    <!-- #CC = 80% 불투명, #1A1A2E = 다크 네이비 -->
+</shape>

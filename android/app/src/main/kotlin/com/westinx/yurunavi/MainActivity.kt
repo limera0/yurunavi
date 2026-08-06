@@ -2,6 +2,7 @@ package com.westinx.yurunavi
 
 import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -18,6 +19,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val e2eHarnessChannel = "com.westinx.yurunavi/e2e_harness"
     private val navServiceChannel = "com.westinx.yurunavi/nav_service"
+    private val navFloatingChannel = "com.westinx.yurunavi/nav_floating"
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -56,6 +58,55 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // 플로팅 오버레이 채널 (S3b 청크2, 2026-08-06)
+        // SYSTEM_ALERT_WINDOW 권한은 AndroidManifest에 이미 선언됨.
+        // 권한 부여는 런타임이 아니라 시스템 설정 화면으로 보내야 하므로
+        // canDrawOverlays 조회/설정화면 인텐트는 Dart 쪽에서 처리한다.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, navFloatingChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canDrawOverlays" -> {
+                        result.success(Settings.canDrawOverlays(this))
+                    }
+                    "openOverlaySettings" -> {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:$packageName")
+                        ).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                        startActivity(intent)
+                        result.success(null)
+                    }
+                    "show" -> {
+                        val iconType = call.argument<String>("iconType") ?: "nav_straight"
+                        val distText = call.argument<String>("distanceText") ?: ""
+                        sendOverlayIntent(FloatingOverlayService.ACTION_SHOW, iconType, distText)
+                        result.success(null)
+                    }
+                    "update" -> {
+                        val iconType = call.argument<String>("iconType") ?: "nav_straight"
+                        val distText = call.argument<String>("distanceText") ?: ""
+                        sendOverlayIntent(FloatingOverlayService.ACTION_UPDATE, iconType, distText)
+                        result.success(null)
+                    }
+                    "hide" -> {
+                        startService(Intent(this, FloatingOverlayService::class.java).apply {
+                            action = FloatingOverlayService.ACTION_HIDE
+                        })
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun sendOverlayIntent(action: String, iconType: String, distText: String) {
+        val intent = Intent(this, FloatingOverlayService::class.java).apply {
+            this.action = action
+            putExtra(FloatingOverlayService.EXTRA_ICON, iconType)
+            putExtra(FloatingOverlayService.EXTRA_TEXT, distText)
+        }
+        startService(intent)
     }
 
     private fun sendNavServiceIntent(action: String, text: String?) {
