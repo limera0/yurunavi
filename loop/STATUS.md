@@ -5,13 +5,13 @@
 > Claude는 이 파일을 먼저 읽고, 필요한 항목만 아래 줄번호로 찾아 들어가라
 > (예: `sed -n '161,183p' loop/RELEASE_ROADMAP.md`). 로드맵을 통째로 읽지 마라.
 
-생성: 2026-07-31 04:47 · 브랜치 `verify/ride-0711` · HEAD `ac3d484`
+생성: 2026-08-06 04:00 · 브랜치 `verify/ride-0711` · HEAD `d8f2b0b`
 
 ## 1. 지금 상태
 
 - 야간루프: 정지
-- 마지막 handoff: `STATUS: DONE` (갱신 2026-07-29 14:34)
-- 작업트리: **미커밋 27건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
+- 마지막 handoff: `STATUS: DONE` (갱신 2026-08-06 01:51)
+- 작업트리: **미커밋 38건** — 다른 세션 작업일 수 있으니 `git status`로 확인 후
   내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: `git add -A` 금지)
 
 ## 2. 미완료 릴리스 항목
@@ -26,32 +26,32 @@
 
 ## 3. 최근 실행 결과
 
-- [MORNING_REPORT_0730_gasstation_search_chip_and_premium_bug.md](MORNING_REPORT_0730_gasstation_search_chip_and_premium_bug.md)
-  - *목표 달성 판정:** 원래 목표: 지도 검색창 주유소 단독 선택 시 오피넷 가격순 전환 + 고급휘발유
-- [MORNING_REPORT_0730_ufw_fail2ban_done.md](MORNING_REPORT_0730_ufw_fail2ban_done.md)
-  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
-- [MORNING_REPORT_0730_access_log_and_ufw_prep.md](MORNING_REPORT_0730_access_log_and_ufw_prep.md)
-  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_
+- [MORNING_REPORT_0806_S3b_floating_and_notif.md](MORNING_REPORT_0806_S3b_floating_and_notif.md)
+  - *목표 달성 판정:** 원래 목표: 시스템 PIP를 폐기하고 네이버지도/카카오내비 스타일의 플로팅 오버레이(아이콘 1탭 → 앱 즉시 복귀)로 재구현하며, 동�
+- [MORNING_REPORT_0805_S3_lifecycle.md](MORNING_REPORT_0805_S3_lifecycle.md)
+  - *목표 달성 판정:** 원래 목표: 알림창·화면캡쳐·엣지패널만 건드려도 PIP로 튀어 안내가
+- [MORNING_REPORT_0805_S2_network_flood.md](MORNING_REPORT_0805_S2_network_flood.md)
+  - *목표 달성 판정:** 원래 목표: POI 네트워크 요청 폭주(초당 ~10회, 로그상 69,875건
 
 ## 4. 최근 작업 지시서
 
-- [HANDOFF_0731_layout_batch2_map_course_flow.md](HANDOFF_0731_layout_batch2_map_course_flow.md)
-- [HANDOFF_0730_renderflex_overflow_fix.md](HANDOFF_0730_renderflex_overflow_fix.md)
-- [HANDOFF_0730_gasstation_search_chip_and_premium_bug.md](HANDOFF_0730_gasstation_search_chip_and_premium_bug.md)
+- [HANDOFF_0806_S3b_floating_and_notif.md](HANDOFF_0806_S3b_floating_and_notif.md)
+- [HANDOFF_0805_S3_lifecycle.md](HANDOFF_0805_S3_lifecycle.md)
+- [HANDOFF_0806_S1b_continue.md](HANDOFF_0806_S1b_continue.md)
 
 ## 5. 최근 커밋
 
 ```
-ac3d484 docs(roadmap): 22번(투어 진단 로그) 신규 기록 + release 설치·스모크테스트 결과 반영
-4c8cd03 feat(logging): 투어 진단 로그 커버리지 확대 (20번 관련, 500km 실주행 대비)
-f0f69b1 chore(status): STATUS.md 재생성 (14번 완료, 라운드1 반영)
-0619872 docs(roadmap): 14번(RenderFlex overflow) 완료 반영 — 전수감사 DONE 전환
-d8d00b0 fix(nav): 주유소 시트 제목 Row RenderFlex overflow 수정 (14번 신규 건)
-0ab4807 fix(splash): 스플래시 태그라인 삭제 + 하단 내비게이션 바 색상 통일 (라운드1)
-b6695a6 docs: 라운드17(앱 종료 확인 카드) 구현완료 반영
-9254a79 feat(map): 앱 종료 시 확인 카드 도입 (라운드17)
-e85d637 docs: 라운드10-2→11→12(히스토리 화면) 구현완료 반영
-2b8c393 feat(history): 공유 이미지 카드+지도 정사각/세로형 캡처 + 메모 클립보드 전환 (라운드12)
+d8f2b0b docs: S3b 완료 반영 — 체크리스트 [x]·모닝리포트 (알림 A + 플로팅 오버레이 자체 구현 3청크 완료)
+77b2ce8 test(nav): S3b 청크3 — 플로팅 오버레이 라이프사이클 회귀 테스트
+7e68a72 feat(nav): S3b 청크2 — 플로팅 오버레이 신규 구현(SYSTEM_ALERT_WINDOW, 아이콘 1탭 복귀)
+2ffd233 refactor(nav): S3b 청크1 — PIP·nav_pip_hint 폐기 + geolocator FGS 알림 제거(결정 A)
+c1a7847 docs: S3 완료 반영 — 체크리스트 [x]·모닝리포트 (알림 A/C·PIP UX A/B 마스터 결정 대기)
+386a2f3 fix(nav): S3 청크3 — 지도 API 호출부 게이트로 MissingPluginException 억제
+18da084 fix(nav): S3 청크2 — geolocator wakelock 중복 제거
+a5beab1 fix(nav): S3 청크1 — 라이프사이클 오검출 근원 제거 + FGS 재전달 반환
+dcc4c29 feat(discord): 대화 세션 크기 상한 + 인수인계 자동 롤오버
+ebd5a84 fix(discord): !new 명령 추가 — 대화 세션 무한 누적 방지
 ```
 
 ## 6. 더 깊이 볼 때
