@@ -297,21 +297,28 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] **검증**: 실기기 안내 청취 — 교차로 550m/350m 발화, 0m 추가 발화 없음,
       로터리 350m/150m 2회만 발화 — **마스터 실기기 수동 검증 대기**
 
-### S4b · 안내 중재기 신설  `상태: [ ]`
+### S4b · 안내 중재기 신설  `상태: [x]` — 완료 2026-08-06
 
-> **구조적 결함**: `voice_engine.dart`의 독립 엔진 4개가 서로를 모른 채 각자 발화.
-> 로그 실측 — 한 로터리에서 92초간 **9회 발화**.
+> **완료 2026-08-06** · 커밋 `461dc43` · code-auditor **PASS**
+> `flutter analyze` 이슈 0 · `flutter test` **395건 전건 통과**(신규 13건)
+>
+> 우선순위(마스터 결정): 후면단속 > 회전안내 > 구조물 > 급커브
+> 최소 발화 간격 4초(마스터 결정). 후면단속은 간격 무시.
+> `roundabout_exit` 비활성화 방법: JSON `enabled: false` + `_profileEventKey()` 키 분리
+> (코드에서 하드차단보다 JSON 제어가 마스터 결정).
 
-- [ ] `GuidanceArbiter` 신설 — 4개 엔진(`VoiceEngine:47`, `StructureVoiceEngine:182`,
-      `CurveVoiceEngine:255`, `RearCameraVoiceEngine:329`) 출력 통합
-- [ ] 이벤트 **우선순위** 정의 (안전 우선 — memory: `feedback_safety_priority`)
-- [ ] **최소 발화 간격** 도입 (권고 4초) — 초과분은 큐잉이 아니라 **폐기**
-- [ ] **상호 억제** — 로터리 안내 중 급커브 안내 억제 등
-- [ ] `_profileEventKey()` (`voice_engine.dart:41`) — `roundabout_enter`/`roundabout_exit`
-      **분리** (현재 한 키로 병합되어 진출만 못 끔)
-- [ ] **원형교차로 진출 안내 전부 삭제** (마스터: "진입만 안내하면 됨")
-- [ ] 통과 후 안내 지속 문제 — 30m 이상 벗어나면 pending 큐 폐기
+- [x] `GuidanceArbiter` 신설 (`guidance_arbiter.dart`) — 4개 엔진 출력 통합
+- [x] 이벤트 **우선순위** 정의 — 후면단속 > 회전안내 > 구조물 > 급커브
+- [x] **최소 발화 간격** 4초 — 초과분 폐기(큐잉 없음), 후면단속은 간격 무시
+- [x] **상호 억제** — 우선순위 + 4초 gap으로 자연히 처리
+      (로터리 안내 후 4초 내 급커브 안내 → 폐기)
+- [x] `_profileEventKey()` — `roundabout_enter`/`roundabout_exit` 독립 키로 분리
+- [x] **원형교차로 진출 안내 전부 삭제** — `guidance_profile.json`에
+      `"roundabout_exit": { "enabled": false }` 추가
+- [x] 통과 후 안내 지속 문제 — `VoiceEngine._prevD` 도입, 동일 step에서
+      `d > _prevD + 30` 시 `_pendingPoints` 폐기
 - [ ] **검증**: 한 교차로당 3회 이하 / 간격 4초 이상 / `roundabout_exit_*` 0건
+      — **마스터 실기기 수동 검증 대기**
 
 ### S4c · TTS 숫자 한글화  `상태: [ ]`
 
