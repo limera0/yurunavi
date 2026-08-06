@@ -1,32 +1,32 @@
 {
   "schema_version": 1,
   "profile_id": "default",
-  "imminent_m": 10,
+  "imminent_m": 99999,
   "arrival_voice_m": 8,
   "tiers": [
-    { "min_entry_m": 500, "points_m": [500, 300, 50] },
-    { "min_entry_m": 150, "points_m": [300, 50] },
-    { "min_entry_m": 30,  "points_m": [100, 50] },
+    { "min_entry_m": 500, "points_m": [550, 350, 100] },
+    { "min_entry_m": 150, "points_m": [350, 100] },
+    { "min_entry_m": 30,  "points_m": [150, 100] },
     { "min_entry_m": 0,   "points_m": [] }
   ],
   "events": {
     "turn_left": {
       "enabled": true,
-      "imminent_m": 50,
+      "imminent_m": 70,
       "tiers": [
-        { "min_entry_m": 500, "points_m": [500, 300] },
-        { "min_entry_m": 150, "points_m": [300] },
-        { "min_entry_m": 30,  "points_m": [100] },
+        { "min_entry_m": 500, "points_m": [550, 350] },
+        { "min_entry_m": 150, "points_m": [350] },
+        { "min_entry_m": 30,  "points_m": [150] },
         { "min_entry_m": 0,   "points_m": [] }
       ]
     },
     "turn_right": {
       "enabled": true,
-      "imminent_m": 50,
+      "imminent_m": 70,
       "tiers": [
-        { "min_entry_m": 500, "points_m": [500, 300] },
-        { "min_entry_m": 150, "points_m": [300] },
-        { "min_entry_m": 30,  "points_m": [100] },
+        { "min_entry_m": 500, "points_m": [550, 350] },
+        { "min_entry_m": 150, "points_m": [350] },
+        { "min_entry_m": 30,  "points_m": [150] },
         { "min_entry_m": 0,   "points_m": [] }
       ]
     },
@@ -58,9 +58,8 @@
     "roundabout": {
       "enabled": true,
       "tiers": [
-        { "min_entry_m": 300, "points_m": [300, 100, 30] },
-        { "min_entry_m": 80,  "points_m": [80, 20] },
-        { "min_entry_m": 0,   "points_m": [20] }
+        { "min_entry_m": 300, "points_m": [350, 150] },
+        { "min_entry_m": 0,   "points_m": [] }
       ]
     },
     "continue":    { "enabled": true },
