@@ -550,18 +550,24 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
   - [x] **라이선스 분리** — `tourism.db` 별도 파일로 실제 분리 배포, `poi.db` 무변경 확인
   - [x] `PoiType` 신규 — `touristSpot`/`viewpoint` 2종 분리, 아이콘·minZoomLevel·
         `displayPriority` 전부 반영
-- [ ] **O1 · 스타일 에셋 로컬화** — 글리프(한글 CJK)·스프라이트가 아직
-      `tiles.westinx.com`을 가리킨다. 타일만 받아두면 폰트를 계속 네트워크로 가져감.
-      **설계 완료(코드 없음) 2026-08-06, 방향 전환**: [RECON_0806_O1_asset_localization_design.md](RECON_0806_O1_asset_localization_design.md).
-      다운로드/번들 방식(초안, 폐기)이 아니라 **MapLibre `localIdeographFontFamily`로
-      기기 내장 폰트를 그 자리에서 렌더링** — 한글·한자 글리프 다운로드·번들 자체가
-      불필요해짐. iOS는 `Info.plist` 키 한 줄(`Apple SD Gothic Neo`, 플러그인 패치 불요).
-      **Android는 `maplibre_gl` 플러그인이 이 옵션을 안 뚫어놔서 포크 패치 필요**
-      (착수는 별도 세션) — 기본값은 삼성 폰트명 하드코딩 대신 시스템 별칭(`sans-serif`).
-      **신규**: 설정 화면에 기기 설치 폰트 선택 UI 추가 결정 — iOS는 `UIFont.familyNames`
-      공식 API로 가능, Android는 열거 공식 API가 없어 `fonts.xml` 비공식 파싱 +
-      `Paint.hasGlyph()` 한글 필터링으로 절충(실패 시 "시스템 기본"만 폴백).
-      착수 전 남은 결정은 문서 §4 참고
+- [x] **O1 · 스타일 에셋 로컬화** — 글리프(한글 CJK)·스프라이트가 서버(`tiles.westinx.com`)
+      대신 기기 내장 폰트로 로컬 렌더링되도록 전환 완료(2026-08-06, 3청크 전부
+      code-auditor PASS·커밋됨).
+  - [x] 청크1 · iOS `Info.plist`에 `MLNIdeographicFontFamilyName`=`Apple SD Gothic Neo`
+        추가(`6281b41`)
+  - [x] 청크2 · `maplibre_gl` 플러그인 포크(`github.com/limera0/flutter-maplibre-gl-yurunavi-fork`,
+        브랜치 `yurunavi-fork`) — Android 네이티브·Dart에 `localIdeographFontFamily` 옵션
+        노출, `pubspec.yaml` git 의존성 전환, `flutter build apk --debug` 성공 확인(`cb63868`)
+  - [x] 청크3 · 설정 화면 "지도 한글 폰트 선택" UI — **Android 전용으로 범위 축소**
+        (`ea9631f`). 착수 중 `MLNRendererConfiguration.localFontFamilyName`이 **readonly**임을
+        실제 maplibre-native 소스로 확인 — iOS는 런타임에 폰트를 바꿔도 지도에 반영할
+        방법이 없어(Info.plist는 빌드 타임에만 고정) 폰트 선택 UI 자체가 무의미함을
+        마스터 확인 후 제외 결정. Android는 `fonts.xml` 파싱 + `Paint.hasGlyph()` 필터링
+        (실패 시 "시스템 기본" 폴백), 기본값 `sans-serif`, 선택값은 지도 3화면(4개
+        `MapLibreMap` 생성 지점)에 `ref.read`(1회성, 런타임 미반영 제약 반영)로 전달
+  - [ ] **남은 것 — 실기기 검증(헤드리스 서버라 이 세션에서 불가)**: iOS 실기기/시뮬레이터
+        한글 라벨 `Apple SD Gothic Neo` 렌더 확인 · Android(갤럭시 우선) `sans-serif` 별칭이
+        One UI 기본 폰트로 렌더되는지 · 설정에서 폰트 변경 → 지도 화면 재진입 시 반영 확인
 - [ ] **O2 · 타일 오프라인** — 서버에서 **전국 + 17개 시도 mbtiles 사전 생성** →
       `installOfflineMapTiles` 사이드로드 + 선택 UI + WiFi 백그라운드.
       ⚠️ `setOfflineTileCountLimit` 안 올리면 조용히 끊김.
