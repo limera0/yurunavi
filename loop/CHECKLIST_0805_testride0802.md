@@ -9,6 +9,7 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다.
 **S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정).
+**O0(관광지 데이터 파이프라인) 2026-08-06 저녁 코드 완료** — §O 참고, 38건 카운트와 별도 트랙.
 다음은 S1b(조사))
 
 ---
@@ -524,22 +525,31 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 사용자 선택**, POI는 5종 + **관광지 추가** ③ **POI는 묻지 말고 전량 자동 백그라운드
 다운로드**, 지도만 선택 ④ 전국 통짜 옵션 **제공** ⑤ Rust **2단계안 동의**(측정 후 판단)
 
-- [ ] **O0 · 관광지 데이터 파이프라인** — ⭐ **오프라인과 독립적으로 값어치 있음.
-      O2/O3 안 기다리고 먼저 해도 된다**
-  - [ ] OSM 추출 — 서버에 이미 있는 `korea_patched.osm.pbf`(267MB)에서 `osmium`으로
-        **4초**. 실측: `boundary=national_park` **24**(실제 23개와 일치) ·
-        `tourism=viewpoint` **2,277**(전망대 — 라이더 최고가치) · `attraction` 1,676 ·
-        `museum` 1,550 · `historic` 5,309 · `natural=peak` 16,548(이름 있는 것만) →
-        **합계 약 2.8만건 / ~5MB**
-  - [ ] `data.go.kr` **전국관광지정보표준데이터**([15021141](https://www.data.go.kr/data/15021141/standard.do))로
-        한국어 공식 명칭 보강 — 관광지명·구분·위도·경도 포함, CSV, 연 1회 갱신.
-        ⚠️ 지자체 지정 관광지라는 법적 정의라 범위가 좁다(전망대·고개 없음)
-  - [ ] ⚠️ **TourAPI(26만건)는 신중** — 오픈API 일일 트래픽 제한.
-        memory `project_poi_datasource`의 **쿼터 공유 결함 이력**을 반복하지 말 것
-  - [ ] ⚠️ **라이선스 분리** — OSM은 ODbL(share-alike). 공공누리인 `poi.db`에 병합해
-        배포하면 파생DB로 걸릴 수 있다 → **`tourism.db` 별도 파일로 분리 배포**
-  - [ ] `PoiType` 신규 — 관광지/**전망대 분리 권고**(라이더에게 전혀 다른 가치) +
-        아이콘·minZoomLevel·`displayPriority` 반영
+- [x] **O0 · 관광지 데이터 파이프라인** — 코드 완료 (2026-08-06 저녁)
+  > 작업지시서: [HANDOFF_0806_O0_tourism_data.md](HANDOFF_0806_O0_tourism_data.md).
+  > 착수 전 4문항(범위/PoiType 분리/data.go.kr 키/TourAPI) 마스터 확인 완료 후 진행.
+  > 커밋 `694e9a2`(데이터 파이프라인) + `44b932b`(PoiType 신규 + 크래시 위험 격리).
+  > code-auditor **PASS**(2026-08-06) — `cargo test` 170건, `flutter test` 382건 전건 통과.
+  > **실행 결과**: `tourist_spot` 28,067 · `viewpoint` 2,330 (RECON §9-1 실측치와 자릿수 일치,
+  > OSM 29,582 + data.go.kr 병합 201 + data.go.kr 단독 614). `/data/poi/tourism.db`(7MB)로
+  > `poi.db`와 물리적 분리 확인.
+  > **감사 중 스코프 밖 크래시 위험 발견·즉시 수정**: `poiIcons`/`poiIconBgColors`에 신규
+  > 2종 엔트리가 없어 스타일 로드 시 `poiIcons[type]!`이 즉시 throw하는 문제를
+  > flutter-coder가 발견·보고 후 STOP → 오케스트레이터가 아이콘 추가 + 나머지 5개 호출부
+  > `PoiService.serverSupportedTypes` 격리로 직접 해소.
+  > **다음 단계(스코프 밖, 후속 청크)**: 서버 `/poi/nearby`에 `tourism.db` 연동(§2-4) +
+  > 지도 화면 실제 표시 배선 — 이게 끝나야 사용자가 실제로 관광지/전망대를 본다.
+  - [x] OSM 추출 — `korea_patched.osm.pbf`(267MB)에서 `osmium`. 실측:
+        `national_park` 25 · `viewpoint` 2,330 · `attraction` 1,938 · `museum` 2,274 ·
+        `historic` 6,755 · `nature_reserve` 54 · 이름있는 `peak` 16,382 → **합계 약 3만건**
+        (RECON 예상보다 다소 많음 — 자릿수는 일치, `peak`가 예상과 달리 대부분 이름 있었음)
+  - [x] `data.go.kr` **전국관광지정보표준데이터**(15021141) 보강 — 표준데이터 그리드
+        다운로드 API(로그인/키 불필요, `columList.json`+`standard.json` 페이지네이션,
+        총 852건) 실측으로 확인, 좌표 근접 매칭(80m)으로 OSM과 병합
+  - [x] **TourAPI 제외** — 마스터 확인, 이번 범위에서 완전히 배제
+  - [x] **라이선스 분리** — `tourism.db` 별도 파일로 실제 분리 배포, `poi.db` 무변경 확인
+  - [x] `PoiType` 신규 — `touristSpot`/`viewpoint` 2종 분리, 아이콘·minZoomLevel·
+        `displayPriority` 전부 반영
 - [ ] **O1 · 스타일 에셋 로컬화** — 글리프(한글 CJK)·스프라이트가 아직
       `tiles.westinx.com`을 가리킨다. 타일만 받아두면 폰트를 계속 네트워크로 가져감
 - [ ] **O2 · 타일 오프라인** — 서버에서 **전국 + 17개 시도 mbtiles 사전 생성** →
