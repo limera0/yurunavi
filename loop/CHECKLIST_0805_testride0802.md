@@ -551,11 +551,22 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
   - [x] `PoiType` 신규 — `touristSpot`/`viewpoint` 2종 분리, 아이콘·minZoomLevel·
         `displayPriority` 전부 반영
 - [ ] **O1 · 스타일 에셋 로컬화** — 글리프(한글 CJK)·스프라이트가 아직
-      `tiles.westinx.com`을 가리킨다. 타일만 받아두면 폰트를 계속 네트워크로 가져감
+      `tiles.westinx.com`을 가리킨다. 타일만 받아두면 폰트를 계속 네트워크로 가져감.
+      **설계 완료(코드 없음) 2026-08-06, 방향 전환**: [RECON_0806_O1_asset_localization_design.md](RECON_0806_O1_asset_localization_design.md).
+      다운로드/번들 방식(초안, 폐기)이 아니라 **MapLibre `localIdeographFontFamily`로
+      기기 내장 폰트를 그 자리에서 렌더링** — 한글·한자 글리프 다운로드·번들 자체가
+      불필요해짐. iOS는 `Info.plist` 키 한 줄(`Apple SD Gothic Neo`, 플러그인 패치 불요).
+      **Android는 `maplibre_gl` 플러그인이 이 옵션을 안 뚫어놔서 포크 패치 필요**
+      (착수는 별도 세션) — 기본값은 삼성 폰트명 하드코딩 대신 시스템 별칭(`sans-serif`).
+      **신규**: 설정 화면에 기기 설치 폰트 선택 UI 추가 결정 — iOS는 `UIFont.familyNames`
+      공식 API로 가능, Android는 열거 공식 API가 없어 `fonts.xml` 비공식 파싱 +
+      `Paint.hasGlyph()` 한글 필터링으로 절충(실패 시 "시스템 기본"만 폴백).
+      착수 전 남은 결정은 문서 §4 참고
 - [ ] **O2 · 타일 오프라인** — 서버에서 **전국 + 17개 시도 mbtiles 사전 생성** →
       `installOfflineMapTiles` 사이드로드 + 선택 UI + WiFi 백그라운드.
       ⚠️ `setOfflineTileCountLimit` 안 올리면 조용히 끊김.
-      ⚠️ 시도 bbox가 서로 겹친다(경기 안에 서울) — 자르는 기준 정할 것
+      **2026-08-06 결정**: 시도 bbox 겹침(경기 안 서울) 처리는 **지금은 보류, 전국
+      통짜(382MB) 1개만 우선 제공**. 시도 단위 분할은 이후 별도 결정
 - [ ] **O3 · POI 오프라인** — `poi.db`+`tourism.db` **전량 자동** 다운로드 →
       Dart+`sqflite` 로컬 질의 전환(기존 R-tree 그대로) + 버전 매니페스트
   - [ ] ⚠️ **unmetered(WiFi) 한정 + 저장공간 사전 확인** — 묻지 않고 160MB를 받으므로
