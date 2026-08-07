@@ -342,6 +342,13 @@ class PoiService {
     return diff > 180 ? 360 - diff : diff;
   }
 
+  /// 두 방위각의 부호 있는 차이 (-180~180, `to`가 `from`보다 시계방향이면
+  /// 양수/우측, 반시계방향이면 음수/좌측). [bearingDiff]와 달리 좌/우 판별에
+  /// 쓸 수 있다 (회전교차로 진입/진출 방향 계산 — HANDOFF_0807_S6).
+  static double signedBearingDiff(double from, double to) {
+    return ((to - from + 540) % 360) - 180;
+  }
+
   // ── 상시(ambient) 표시 선정 로직 ─────────────────────────────────
 
   /// ambient POI 레이어(홈 지도 위 상시 점) 및 검색 시트의 지도 핀 레이어에서 공용으로

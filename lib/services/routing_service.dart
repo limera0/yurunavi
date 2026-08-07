@@ -97,6 +97,23 @@ class StructureZone {
 /// 급커브 방향 (좌/우).
 enum CurveDirection { left, right }
 
+/// 회전교차로(로터리) 진입~진출 방향 (좌/직/우).
+///
+/// `roundabout_exit_count`(출구 번호)는 신뢰 불가로 확인돼(HANDOFF_0807_S6
+/// 참조 — 업스트림 Valhalla도 검단 회전교차로 6개 조합 전부 틀린 값을
+/// 반환) 대신 경로 shape의 진입/진출 방위각 차이로 방향을 직접 판정한다.
+enum RoundaboutDirection { left, straight, right }
+
+/// 회전교차로 방향 → 한국어 안내 라벨. [StructureTypeLabel.labelKo]와
+/// 동일한 패턴.
+extension RoundaboutDirectionLabel on RoundaboutDirection {
+  String get labelKo => switch (this) {
+        RoundaboutDirection.left => '좌측',
+        RoundaboutDirection.straight => '직진',
+        RoundaboutDirection.right => '우측',
+      };
+}
+
 /// Valhalla maneuver가 커버하지 않는(교차로가 아닌) 급커브 구간
 /// (전역 shape 인덱스 기준, ManeuverStep/StructureZone과 동일 좌표계).
 class SharpCurveZone {
@@ -1058,6 +1075,19 @@ class RoutingService {
 
     filtered.sort((a, b) => a.beginShapeIdx.compareTo(b.beginShapeIdx));
     return filtered;
+  }
+
+  /// 부호 있는 방위차([PoiService.signedBearingDiff], -180~180)를 회전교차로
+  /// 좌/직/우로 3분류한다. [CurveDirection]과 동일한 부호 관례
+  /// (`delta < 0 → left, delta >= 0 → right`, `detectSharpCurves` :1001
+  /// 참조) — 음수는 좌, 양수는 우이며 그 사이(-45°~45° 미만, 미만쪽만 좌측
+  /// 경계 제외)는 직진. 임계값 ±45°는 표준 turn-by-turn 분류 관례이자
+  /// HANDOFF_0807_S6 프로브 5건이 이 값으로 좌/직 두 버킷에 고르게 나뉘는
+  /// 것으로 1차 확인됨(정확성은 실측 대조 대기).
+  static RoundaboutDirection classifyRoundaboutDirection(double signedTurnDeg) {
+    if (signedTurnDeg <= -45) return RoundaboutDirection.left;
+    if (signedTurnDeg >= 45) return RoundaboutDirection.right;
+    return RoundaboutDirection.straight;
   }
 
   /// 경로 좌표 목록으로 Valhalla trace_attributes를 호출해 다리/터널 구간을

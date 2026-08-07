@@ -767,4 +767,43 @@ void main() {
       expect(throttle.shouldFetch(center: center, types: {PoiType.cafe}), isTrue);
     });
   });
+
+  group('PoiService.signedBearingDiff', () {
+    // HANDOFF_0807_S6 — 검단 회전교차로 로컬 prod Valhalla 프로브 5건 실측값.
+    // "판정" 열은 routing_service.dart RoutingService.classifyRoundaboutDirection의
+    // ±45° 임계값 기대 버킷(별도 routing_service 테스트에서 재사용/검증).
+    const probes = [
+      (from: 56.2, to: 64.6, expected: 8.4, label: 'S→E'),
+      (from: 56.2, to: 265.3, expected: -150.9, label: 'S→W'),
+      (from: 171.7, to: 154.2, expected: -17.5, label: 'N→S'),
+      (from: 254.4, to: 265.3, expected: 10.9, label: 'E→W'),
+      (from: 56.2, to: 315.1, expected: -101.1, label: 'W→N'),
+    ];
+
+    for (final p in probes) {
+      test('${p.label}: signedBearingDiff(${p.from}, ${p.to}) ≈ ${p.expected}', () {
+        final diff = PoiService.signedBearingDiff(p.from, p.to);
+        expect(diff, closeTo(p.expected, 0.05));
+      });
+    }
+
+    test('0° 차이는 0을 반환한다', () {
+      expect(PoiService.signedBearingDiff(90, 90), closeTo(0, 1e-9));
+    });
+
+    test('경계값 180°는 -180으로 떨어진다(공식의 wrap 경계 — -180~180 반개구간 상한)', () {
+      // from=0, to=180 — 정확히 180 차이. 공식 ((to-from+540)%360)-180은
+      // 정확히 ±180 지점에서 -180 쪽으로 떨어진다
+      // (((180-0+540)%360)-180 = (720%360)-180 = 0-180 = -180).
+      expect(PoiService.signedBearingDiff(0, 180), closeTo(-180, 1e-9));
+    });
+
+    test('wrap-around: from=350, to=10 (동쪽으로 20도, 0도선을 넘어감) → +20', () {
+      expect(PoiService.signedBearingDiff(350, 10), closeTo(20, 1e-9));
+    });
+
+    test('wrap-around: from=10, to=350 (서쪽으로 20도, 0도선을 넘어감) → -20', () {
+      expect(PoiService.signedBearingDiff(10, 350), closeTo(-20, 1e-9));
+    });
+  });
 }

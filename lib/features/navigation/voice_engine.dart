@@ -1,6 +1,7 @@
 import 'package:latlong2/latlong.dart';
 
 import '../../../services/exit_landmark_service.dart';
+import '../../../services/poi_service.dart';
 import '../../../services/routing_service.dart';
 import 'guidance_profile.dart';
 
@@ -59,6 +60,43 @@ String _profileEventKey(String event) {
   if (event.startsWith('ramp_')) return 'ramp';
   if (event.startsWith('exit_')) return 'exit';
   return event;
+}
+
+/// `steps[turnIdx]`(roundabout_enter, type 26)의 진입 방위각과 짝을 이루는
+/// 바로 다음 스텝(`steps[turnIdx+1]`, roundabout_exit, type 27)의 진출
+/// 방위각으로 좌/직/우 방향을 계산한다. 짝 maneuver가 없거나 타입이 다르거나
+/// shape 인덱스가 경계를 벗어나면 null(호출자가 방향 없는 일반 문구로
+/// 폴백한다).
+RoundaboutDirection? _computeRoundaboutDirection(
+  int turnIdx,
+  List<ManeuverStep> steps,
+  List<LatLng> shapePoints,
+) {
+  final beginIdx = steps[turnIdx].beginShapeIdx;
+  if (beginIdx < 1 || beginIdx >= shapePoints.length) return null;
+  final entryBearing = PoiService.bearing(
+    shapePoints[beginIdx - 1],
+    shapePoints[beginIdx],
+  );
+
+  final exitStepIdx = turnIdx + 1;
+  if (exitStepIdx >= steps.length || steps[exitStepIdx].type != 27) {
+    return null;
+  }
+  final exitStep = steps[exitStepIdx];
+  final endIdx = exitStep.endShapeIdx;
+  if (endIdx < 1 ||
+      endIdx >= shapePoints.length ||
+      endIdx - 1 < exitStep.beginShapeIdx) {
+    return null;
+  }
+  final exitBearing = PoiService.bearing(
+    shapePoints[endIdx - 1],
+    shapePoints[endIdx],
+  );
+
+  final signedTurn = PoiService.signedBearingDiff(entryBearing, exitBearing);
+  return RoutingService.classifyRoundaboutDirection(signedTurn);
 }
 
 class VoiceEngine {
@@ -149,23 +187,15 @@ class VoiceEngine {
         }
         var key = '${event}_$phase';
         if (event == 'roundabout_enter') {
-          final exitCount = steps[turnIdx].roundaboutExitCount;
-          if (exitCount != null) {
-            vars['exit'] = exitCount.toString();
+          // roundaboutExitCount(출구 번호)는 Valhalla 자체가 신뢰 불가 값을
+          // 반환함이 확인돼(HANDOFF_0807_S6 — 업스트림 포함 검단 회전교차로
+          // 6개 조합 전부 오답) 더 이상 쓰지 않는다. 대신 진입/진출 shape
+          // 방위각 차이로 좌/직/우 방향을 직접 계산한다.
+          final direction = _computeRoundaboutDirection(turnIdx, steps, shapePoints);
+          if (direction != null) {
+            vars['direction'] = direction.labelKo;
           } else {
             key = 'roundabout_$phase';
-          }
-        }
-        if (event == 'roundabout_exit' && isImminent) {
-          // 진출 maneuver 자체엔 출구 번호가 없음 — 항상 바로 앞(enter)
-          // maneuver가 그 번호를 갖고 있으므로 그걸 이어받는다.
-          final enterIdx = turnIdx - 1;
-          final exitCount = (enterIdx >= 0 && enterIdx < steps.length)
-              ? steps[enterIdx].roundaboutExitCount
-              : null;
-          if (exitCount != null) {
-            vars['exit'] = exitCount.toString();
-            key = 'roundabout_exit_imminent_named';
           }
         }
         if (event.startsWith('ramp_') || event.startsWith('exit_')) {
