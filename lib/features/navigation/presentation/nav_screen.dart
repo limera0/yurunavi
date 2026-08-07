@@ -808,6 +808,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 정차 모드가 풀리는(속도 회복) 순간 다음 offRoute 판정에서 이 게이트를
     // 통과해 정상적으로 다시 재탐색이 걸린다.
     if (ref.read(isStationaryProvider)) return;
+    // S7: 터널 dead reckoning 중엔 추정 위치가 실측이 아니므로, 이 동안의
+    // offRoute 판정을 근거로 재탐색하면 안 된다 — 실측 fix가 돌아올 때까지
+    // 대기(HANDOFF_0807_S7 §5).
+    if (ref.read(routeProgressProvider)?.deadReckoning == true) return;
     _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
       _offRouteDebounce = null;
       final current = ref.read(navStateProvider)?.pos;

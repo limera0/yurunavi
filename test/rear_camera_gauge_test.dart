@@ -10,7 +10,7 @@ import 'package:yurunavi/features/navigation/presentation/nav_screen.dart';
 import 'package:yurunavi/features/navigation/presentation/rear_camera_gauge.dart';
 import 'package:yurunavi/features/navigation/providers/route_progress_provider.dart';
 
-/// [RouteProgress]는 필드 16개 전부 required라 테스트마다 통째로 채우면
+/// [RouteProgress]는 필드 18개 전부 required라 테스트마다 통째로 채우면
 /// 장황해진다 — 이 테스트에서 관심 있는 카메라 관련 값만 인자로 받고 나머지는
 /// "카메라와 무관"한 기본값으로 채우는 헬퍼.
 RouteProgress _progress({
@@ -36,6 +36,8 @@ RouteProgress _progress({
       nextCameraSpeedKmh: nextCameraSpeedKmh,
       nextCameraPostZoneM: nextCameraPostZoneM,
       inPostZone: inPostZone,
+      deadReckoning: false,
+      estimatedPos: null,
     );
 
 void main() {

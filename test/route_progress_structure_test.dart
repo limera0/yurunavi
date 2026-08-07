@@ -17,6 +17,7 @@ NavigationState _fixAt(LatLng pos) => NavigationState(
       headingDeg: null,
       firstFix: true,
       fixAt: DateTime.now(),
+      stale: false,
     );
 
 void main() {

@@ -54,6 +54,11 @@ dev_dependencies:
   # 직접 import하기 위한 depend_on_referenced_packages 린트 대응.
   wakelock_plus_platform_interface: ^1.5.1
   flutter_launcher_icons: ^0.14.4
+  # S7 터널 dead reckoning 테스트(route_progress_dead_reckoning_test.dart)의
+  # Timer.periodic 제어용 — 실벽시계 sleep 없이 가짜 시간 경과를 트리거한다.
+  # flutter_test의 전이 의존성으로 이미 잠겨 있던 패키지(pubspec.lock)를
+  # depend_on_referenced_packages 린트 대응을 위해 직접 선언으로 승격.
+  fake_async: ^1.3.3
 
 flutter_launcher_icons:
   android: true

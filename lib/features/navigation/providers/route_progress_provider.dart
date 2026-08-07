@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +28,14 @@ class RouteProgress {
   final int nextCameraSpeedKmh;   // 추적 중인 카메라의 제한속도. 없으면 0.
   final int nextCameraPostZoneM;  // 추적 중인 카메라의 사후구간 범위. 없으면 0.
   final bool inPostZone;          // 카메라를 통과해 사후구간(postZoneM 이내) 안에 있는 상태.
+  // S7: GPS 상실(NavigationState.stale) + 현재 스냅 위치가 터널 zone 안일 때
+  // true — 실측 fix 대신 최근 1분 평균속도×1.05로 경로 shape를 따라 위치를
+  // 추정 중인 상태. nav_screen.dart의 _triggerReroute() 재탐색 가드가 이
+  // 플래그를 읽는다(추측항법 중 이탈 오탐으로 인한 재탐색 방지).
+  final bool deadReckoning;
+  // deadReckoning이 true일 때만 값이 있는 추정 좌표(경로 shape 위 보간).
+  // deadReckoning이 false면 항상 null — 실측 pos를 대신할 값이 없다는 뜻.
+  final LatLng? estimatedPos;
   const RouteProgress({
     required this.snapIdx,
     required this.activeStepIdx,
@@ -44,6 +53,8 @@ class RouteProgress {
     required this.nextCameraSpeedKmh,
     required this.nextCameraPostZoneM,
     required this.inPostZone,
+    required this.deadReckoning,
+    required this.estimatedPos,
   });
 }
 
@@ -97,6 +108,27 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   int _snapIdx = 0;
   double _traveledM = 0.0; // snap 세그먼트 내 실제 진행거리 포함, 폴리라인 시작 기준 누적거리
 
+  // S7: dead reckoning 진입 직후 종료(실측 fix 복귀)된 세션이 있으면 그 다음
+  // _advance() 호출 1회에 한해 스냅 탐색을 뒤쪽으로도 허용한다. ×1.05로
+  // 낙관적으로 추정하므로 실측 fix가 dead reckoning이 밀어둔 _snapIdx보다
+  // 뒤처진 지점일 수 있고, _advance()의 전방 전용 탐색 창은 이 경우를 못
+  // 찾는다(알려진 리스크, HANDOFF_0807_S7 참고).
+  bool _pendingBackwardSnap = false;
+
+  // S7: 실측 fix(!stale)에서만 채워지는 최근 60초 속도 이력 — dead
+  // reckoning 중 합성 tick은 여기 넣지 않는다(자기 추정치로 자기 평균을
+  // 오염시키지 않기 위함).
+  final _speedBuffer = <({DateTime t, double speedKmh})>[];
+  static const _kSpeedBufferSec = 60;
+
+  // S7: dead reckoning 진행 상태. _drTimer가 non-null이면 현재 dead
+  // reckoning 세션이 활성(터널 끝에 도달해 더 전진하지 않는 "대기" 상태
+  // 포함 — 종료조건 B는 타이머를 취소하지 않는다, HANDOFF §3 참고).
+  Timer? _drTimer;
+  double? _drEndCumM; // dead reckoning 상한(터널 끝 누적거리)
+  static const _kDrIntervalMs = 500;
+  static const _kDrSpeedFactor = 1.05;
+
   // ── 튜닝 상수 ──
   static const _kSnapWindow = 50;       // 앞쪽 탐색 세그먼트 수
   static const _kOffRouteM = 50.0;      // 코리도 이탈 임계(최근접 세그먼트 거리)
@@ -115,13 +147,142 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
 
   @override
   RouteProgress? build() {
-    // navState.pos 구독 → 매 fix advance.
+    // navState.pos 구독 → 매 fix advance. S7: stale 여부로 실측/추측항법
+    // 경로를 분기한다(_onRealFix/_onStaleFix, 아래 참고).
     final sub = ref.listen<NavigationState?>(navStateProvider, (_, next) {
-      final p = next?.pos;
-      if (p != null) _advance(p, next?.headingDeg);
+      if (next == null) return;
+      if (next.stale) {
+        _onStaleFix();
+      } else {
+        _onRealFix(next);
+      }
     });
-    ref.onDispose(sub.close);
+    ref.onDispose(() {
+      sub.close();
+      _drTimer?.cancel();
+    });
     return null;
+  }
+
+  /// 실측 fix(!stale) 처리 — 속도 이력 버퍼에 반영하고, dead reckoning
+  /// 세션이 활성 중이었다면 종료조건 A(실측 fix 복귀)로 취소한 뒤 정상
+  /// _advance()로 이어받는다.
+  void _onRealFix(NavigationState next) {
+    _feedSpeedBuffer(next);
+    if (_drTimer != null) {
+      // dead reckoning 세션 직후 첫 실측 fix — §"알려진 리스크" 완화책:
+      // 1회에 한해 _advance()가 뒤쪽 스냅도 허용하도록 신호를 남긴다.
+      _stopDeadReckoning();
+      _pendingBackwardSnap = true;
+    }
+    _advance(next.pos, next.headingDeg);
+  }
+
+  /// stale fix(GPS 상실) 처리 — 현재 스냅 위치가 터널 zone 안이면 dead
+  /// reckoning을 시작한다. 이미 세션이 활성 중이면(터널 밖 GPS 순단이거나
+  /// 같은 stale 구간의 반복 emit) 아무것도 하지 않는다 — 터널 밖 GPS 순단은
+  /// 이번 스코프가 아니라 기존 동작(위치 동결)을 그대로 유지한다.
+  void _onStaleFix() {
+    if (_drTimer != null) return;
+    final zone = _tunnelZoneContaining(_snapIdx);
+    if (zone == null) return;
+    _startDeadReckoning(zone);
+  }
+
+  /// 실측 fix speedKmh를 60초 롤링 버퍼에 반영(단순 산술평균용).
+  void _feedSpeedBuffer(NavigationState fix) {
+    _speedBuffer.add((t: fix.fixAt, speedKmh: fix.speedKmh));
+    _speedBuffer.removeWhere(
+        (e) => fix.fixAt.difference(e.t).inSeconds > _kSpeedBufferSec);
+  }
+
+  double _avgSpeedKmh() {
+    if (_speedBuffer.isEmpty) return 0.0;
+    final sum = _speedBuffer.fold<double>(0.0, (a, e) => a + e.speedKmh);
+    return sum / _speedBuffer.length;
+  }
+
+  /// _snapIdx가 속한 터널 zone(있으면). 다리/고가/지하차도는 이번 스코프 아님.
+  StructureZone? _tunnelZoneContaining(int seg) {
+    for (final z in _zones) {
+      if (z.type != StructureType.tunnel) continue;
+      if (seg >= z.beginShapeIdx && seg <= z.endShapeIdx) return z;
+    }
+    return null;
+  }
+
+  /// dead reckoning 세션 시작 — 진입 시점 상태를 즉시 한 번 emit(전진폭
+  /// 0, deadReckoning:true만 우선 반영)한 뒤 500ms 주기 타이머로 전진시킨다.
+  void _startDeadReckoning(StructureZone zone) {
+    _drEndCumM = _cumFromStartM.isEmpty
+        ? _traveledM
+        : _cumFromStartM[_clampIdx(zone.endShapeIdx)];
+    _emitDeadReckoningState();
+    _drTimer = Timer.periodic(
+        const Duration(milliseconds: _kDrIntervalMs), (_) => _drAdvanceTick());
+  }
+
+  void _stopDeadReckoning() {
+    _drTimer?.cancel();
+    _drTimer = null;
+    _drEndCumM = null;
+  }
+
+  /// 500ms 주기 tick — 최근 1분 평균속도×1.05로 _traveledM/_snapIdx를
+  /// 전진시키되 터널 끝 누적거리를 넘지 않는다(종료조건 B: 도달 후 타이머는
+  /// 유지한 채 더 전진하지 않고 실측 fix를 기다린다).
+  void _drAdvanceTick() {
+    final endM = _drEndCumM;
+    if (endM == null || _cumFromStartM.isEmpty) {
+      _stopDeadReckoning();
+      return;
+    }
+    final avgSpeedMps = (_avgSpeedKmh() / 3.6) * _kDrSpeedFactor;
+    const intervalSec = _kDrIntervalMs / 1000.0;
+    _traveledM = math.min(_traveledM + avgSpeedMps * intervalSec, endM);
+    _snapIdx = _segIdxForCumulativeM(_traveledM);
+    _emitDeadReckoningState();
+  }
+
+  /// 현재 _traveledM/_snapIdx 기준으로 RouteProgress를 재계산해 emit한다.
+  /// setRoute()/setStructureZones()/_advance()가 이미 쓰는
+  /// _structureFieldsFor/_curveFieldsFor 파생 헬퍼를 그대로 재사용한다.
+  void _emitDeadReckoningState() {
+    if (_cumFromStartM.isEmpty) return;
+    final estPos = _pointAtCumulativeM(_traveledM);
+    final structFields = _structureFieldsFor(_snapIdx, _traveledM);
+    final curveFields = _curveFieldsFor(_snapIdx, _traveledM);
+    final activeStep = _activeStepFor(_snapIdx);
+    final nextTurnShape = _nextTurnShapeIdx(_snapIdx);
+    final distToNext = (_cumFromStartM[_clampIdx(nextTurnShape)] - _traveledM)
+        .clamp(0.0, double.maxFinite);
+    final distToDest = (_totalM - _traveledM).clamp(0.0, double.maxFinite);
+    final arrived = distToDest <= _kArrivalM;
+    final prev = state;
+    state = RouteProgress(
+      snapIdx: _snapIdx,
+      activeStepIdx: activeStep,
+      distToNextTurnM: distToNext,
+      distToDestM: distToDest,
+      arrived: arrived,
+      // dead reckoning은 경로 shape 위 보간이라 정의상 코리도 이탈일 수 없음.
+      offRoute: false,
+      structureZoneIdx: structFields.idx,
+      distToNextStructureM: structFields.distM,
+      nextStructureType: structFields.type,
+      curveZoneIdx: curveFields.idx,
+      distToNextCurveM: curveFields.distM,
+      nextCurveDirection: curveFields.direction,
+      // 후면단속카메라는 GPS 직선거리+헤딩 기반 판정이라 dead reckoning
+      // 중엔 갱신 근거가 없다 — 직전 실측값을 그대로 유지(추적 로직 자체를
+      // 다시 타지 않음, 트레이드오프는 리포트에 기록).
+      distToNextCameraM: prev?.distToNextCameraM ?? double.infinity,
+      nextCameraSpeedKmh: prev?.nextCameraSpeedKmh ?? 0,
+      nextCameraPostZoneM: prev?.nextCameraPostZoneM ?? 0,
+      inPostZone: prev?.inPostZone ?? false,
+      deadReckoning: true,
+      estimatedPos: estPos,
+    );
   }
 
   /// 후면단속카메라 전체 목록 주입(앱/내비 시작 시 1회, RearCamera.loadAll 결과).
@@ -146,6 +307,10 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _curves = RoutingService.detectSharpCurves(points, maneuvers);
     _snapIdx = 0;
     _traveledM = 0.0;
+    // S7: 새 경로의 shape 인덱스는 이전 경로와 무관하므로, 활성 dead
+    // reckoning 세션(있다면)과 뒤쪽 스냅 허용 신호를 함께 리셋한다.
+    _stopDeadReckoning();
+    _pendingBackwardSnap = false;
 
     // 세그먼트 길이 + 누적 사전계산 (O(n) 1회)
     final n = points.length;
@@ -192,6 +357,8 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       nextCameraSpeedKmh: 0,
       nextCameraPostZoneM: 0,
       inPostZone: false,
+      deadReckoning: false,
+      estimatedPos: null,
     );
   }
 
@@ -224,6 +391,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       nextCameraSpeedKmh: current.nextCameraSpeedKmh,
       nextCameraPostZoneM: current.nextCameraPostZoneM,
       inPostZone: current.inPostZone,
+      // dead reckoning 여부/추정좌표도 이 메서드와 무관 — 기존 값 통과.
+      deadReckoning: current.deadReckoning,
+      estimatedPos: current.estimatedPos,
     );
   }
 
@@ -240,10 +410,23 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   }
 
   /// 점 pos를 [_snapIdx, _snapIdx+window] 범위 세그먼트에 스냅(단조).
+  /// S7 예외: dead reckoning 세션 직후 첫 호출은 [_snapIdx-window, _snapIdx]도
+  /// 함께 훑어 뒤처진 실측 위치를 허용한다(아래 allowBackward 참고).
   void _advance(LatLng pos, double? headingDeg) {
     if (_pts.length < 2 || _segLenM.isEmpty) return;
 
-    final start = _snapIdx;
+    // dead reckoning은 ×1.05로 낙관적으로 추정하므로, 터널을 빠져나온 첫
+    // 실측 fix가 dead reckoning이 밀어둔 _snapIdx보다 뒤처진 지점일 수
+    // 있다. 순수 전방 전용 탐색은 이 경우를 못 찾아 offRoute 오탐/이상한
+    // distToNextTurnM으로 이어진다 — 그 세션 직후 첫 fix 1회에 한해 탐색
+    // 시작점을 뒤로도 열어준다(HANDOFF_0807_S7 "알려진 리스크"). 1회
+    // 소진 플래그라 이 호출이 끝나면 즉시 꺼져 평소엔 순수 전방 전용
+    // 단조 탐색을 그대로 유지한다.
+    final allowBackward = _pendingBackwardSnap;
+    _pendingBackwardSnap = false;
+
+    final start =
+        allowBackward ? math.max(0, _snapIdx - _kSnapWindow) : _snapIdx;
     final end = math.min(_snapIdx + _kSnapWindow, _pts.length - 2);
 
     double bestPerp = double.maxFinite;
@@ -262,8 +445,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     // 코리도 이탈 판정
     final offRoute = bestPerp > _kOffRouteM;
 
-    // 단조 보장: 뒤로 가는 스냅은 소폭(_kBackTolerance)만 허용
-    if (bestSeg < _snapIdx) {
+    // 단조 보장: 뒤로 가는 스냅은 원칙적으로 고정. 단, allowBackward(위 S7
+    // 완화책)일 때만 이번 호출에 한해 뒤로 가는 스냅을 그대로 인정한다.
+    if (bestSeg < _snapIdx && !allowBackward) {
       // 같은 세그먼트 내 미세 후퇴는 무시, 세그먼트 자체가 뒤면 고정
       bestSeg = _snapIdx;
       bestAlongM = 0.0;
@@ -312,6 +496,9 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
       nextCameraSpeedKmh: cameraFields.speedKmh,
       nextCameraPostZoneM: cameraFields.postZoneM,
       inPostZone: cameraFields.inPostZone,
+      // 실측 fix로 이어받는 정상 경로 — dead reckoning 아님.
+      deadReckoning: false,
+      estimatedPos: null,
     );
   }
 
@@ -544,6 +731,46 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     final from = _cumFromStartM.isEmpty ? 0.0 : _cumFromStartM[_clampIdx(fromSeg)];
     final to = _cumFromStartM.isEmpty ? 0.0 : _cumFromStartM[_clampIdx(toShape)];
     return (to - from).clamp(0.0, double.maxFinite);
+  }
+
+  /// [_cumFromStartM]에서 targetM을 감싸는 세그먼트 시작 인덱스(이분탐색).
+  /// targetM이 범위 밖이면 양 끝으로 클램프. S7 dead reckoning tick마다
+  /// _snapIdx를 이 인덱스로 함께 전진시킨다(_advance()의 실측 스냅 로직과는
+  /// 별도 경로).
+  int _segIdxForCumulativeM(double targetM) {
+    if (_cumFromStartM.length < 2) return 0;
+    if (targetM <= _cumFromStartM.first) return 0;
+    if (targetM >= _cumFromStartM.last) return _cumFromStartM.length - 2;
+    int lo = 0, hi = _cumFromStartM.length - 1;
+    while (hi - lo > 1) {
+      final mid = (lo + hi) ~/ 2;
+      if (_cumFromStartM[mid] <= targetM) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  /// 누적거리 → 좌표 역변환(_pointAtCumulativeM). [_cumFromStartM]/[_pts]
+  /// 방향(좌표→누적거리)의 역방향 — 지금까지 필요 없었던(§HANDOFF_0807_S7)
+  /// 헬퍼. targetM을 감싸는 세그먼트 i를 찾아 (targetM - cum[i]) / segLen[i]
+  /// 비율로 _pts[i]~_pts[i+1] 사이를 선형보간한다.
+  LatLng _pointAtCumulativeM(double targetM) {
+    if (_pts.isEmpty) return const LatLng(0, 0);
+    if (_pts.length == 1 || _cumFromStartM.length < 2) return _pts.first;
+    final i = _segIdxForCumulativeM(targetM);
+    final segStartM = _cumFromStartM[i];
+    final segLen = i < _segLenM.length ? _segLenM[i] : 0.0;
+    final a = _pts[i];
+    final b = _pts[i + 1];
+    if (segLen <= 0) return a;
+    final t = ((targetM - segStartM) / segLen).clamp(0.0, 1.0);
+    return LatLng(
+      a.latitude + (b.latitude - a.latitude) * t,
+      a.longitude + (b.longitude - a.longitude) * t,
+    );
   }
 
   /// pos를 세그먼트 a-b에 투영. perpM=수직거리, alongM=a로부터 진행거리.

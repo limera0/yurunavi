@@ -35,6 +35,7 @@ NavigationState _fixAt(LatLng pos) => NavigationState(
       headingDeg: 0,
       firstFix: true,
       fixAt: DateTime.now(),
+      stale: false,
     );
 
 const _geolocatorChannel = MethodChannel('flutter.baseflow.com/geolocator');

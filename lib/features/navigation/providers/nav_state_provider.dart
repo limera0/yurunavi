@@ -21,6 +21,12 @@ class NavigationState {
   final double? headingDeg;
   final bool firstFix;
   final DateTime fixAt;
+  // S7: 마지막 fix로부터 _kStaleMs(8초) 넘게 지나 "GPS 상실"로 판정된
+  // 상태(_tickSpeed()에서 계산). RouteProgressNotifier의 터널 dead
+  // reckoning 진입 판단을 포함해, "GPS 상실"의 단일 기준선을 앱 전체가
+  // 이 필드 하나로 공유한다 — 다른 provider가 독자적으로 staleness를
+  // 다시 계산하지 않는다.
+  final bool stale;
 
   const NavigationState({
     required this.pos,
@@ -29,6 +35,7 @@ class NavigationState {
     required this.headingDeg,
     required this.firstFix,
     required this.fixAt,
+    required this.stale,
   });
   // ⚠️ copyWith 금지: heading null↔값 오가므로 copyWith(?? this)로는 null 복귀 불가.
   // 매 fix/tick마다 NavigationState(...) 전체 필드 명시 생성.
@@ -60,6 +67,7 @@ class NavStateNotifier extends Notifier<NavigationState?> {
   double? _headingDeg;
   bool _firstFixReceived = false;
   DateTime? _fixAt;
+  bool _stale = false;
 
   final _posBuffer = <({double lat, double lon, DateTime t, double acc})>[];
   DateTime? _lastSpeedAt;
@@ -101,6 +109,7 @@ if (state != null) return;
       if (last == null || state != null) return;
       _pos = LatLng(last.latitude, last.longitude);
       _fixAt = DateTime.now();
+      _stale = false;
       state = NavigationState(
         pos: _pos!,
         speedKmh: 0,
@@ -108,6 +117,7 @@ if (state != null) return;
         headingDeg: null,
         firstFix: true,
         fixAt: _fixAt!,
+        stale: false,
       );
     } catch (_) {
       return;
@@ -117,6 +127,8 @@ if (state != null) return;
   void _onFix(Position pos) {
     final loc = LatLng(pos.latitude, pos.longitude);
     final now = DateTime.now();
+    // S7: 실측 fix가 도착했으므로 이전 tick의 staleness 판정을 즉시 해제.
+    _stale = false;
 
     _posBuffer.add((lat: pos.latitude, lon: pos.longitude, t: now, acc: pos.accuracy));
     _posBuffer.removeWhere((e) => now.difference(e.t).inSeconds > _kBufferTtlSec);
@@ -137,6 +149,7 @@ if (state != null) return;
         headingDeg: _headingDeg,
         firstFix: _firstFixReceived,
         fixAt: now,
+        stale: false,
       );
       return;
     }
@@ -173,6 +186,7 @@ if (state != null) return;
       headingDeg: _headingDeg,
       firstFix: _firstFixReceived,
       fixAt: now,
+      stale: false,
     );
   }
 
@@ -187,9 +201,14 @@ if (state != null) return;
     if (curAt == null || vCur == null) return;
 
     final sinceFix = DateTime.now().difference(curAt).inMilliseconds;
+    // S7: staleness는 매 tick 재계산 — RouteProgressNotifier가 이 필드 하나로
+    // 터널 dead reckoning 진입을 판단하므로, 값이 안 바뀌어도(이미 정지 상태)
+    // false→true로 막 전환되는 tick은 반드시 emit해야 한다(아래 wasStale 비교).
+    final wasStale = _stale;
+    _stale = sinceFix > _kStaleMs;
 
-    if (sinceFix > _kStaleMs) {
-      if (_speedKmh != 0.0 || _moving) {
+    if (_stale) {
+      if (_speedKmh != 0.0 || _moving || _stale != wasStale) {
         _speedKmh = 0.0;
         _moving = false;
         _emitState();
@@ -265,6 +284,7 @@ if (state != null) return;
       headingDeg: _headingDeg,
       firstFix: _firstFixReceived,
       fixAt: _fixAt ?? DateTime.now(),
+      stale: _stale,
     );
   }
 
