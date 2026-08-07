@@ -1172,7 +1172,19 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "hsl(28, 30%, 80%)",
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-opacity": 0.55,
         "line-width": [
           "interpolate",
@@ -1595,7 +1607,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "hsl(28, 30%, 78%)",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
@@ -2464,7 +2476,19 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fff8e0",
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -2883,7 +2907,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fff8e0",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
@@ -4025,26 +4049,15 @@
         "line-color": [
           "case",
           [
-            "any",
+            "==",
             [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              1
+              "get",
+              "class"
             ],
-            [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              -1
-            ]
+            "secondary"
           ],
-          "#fea",
-          "#fce4a2"
+          "#FDF0B4",
+          "#FFFFFF"
         ],
         "line-opacity": 1,
         "line-width": [
@@ -4467,30 +4480,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": [
-          "case",
-          [
-            "any",
-            [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              1
-            ],
-            [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              -1
-            ]
-          ],
-          "#fea",
-          "#fce4a2"
-        ],
+        "line-color": "#F8D49A",
         "line-opacity": {
           "stops": [
             [
@@ -4923,30 +4913,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": [
-          "case",
-          [
-            "any",
-            [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              1
-            ],
-            [
-              "==",
-              [
-                "get",
-                "oneway"
-              ],
-              -1
-            ]
-          ],
-          "#fea",
-          "#fce4a2"
-        ],
+        "line-color": "#F8D49A",
         "line-opacity": {
           "stops": [
             [
@@ -5625,7 +5592,39 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "trunk"
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "primary"
+            ]
+          ],
+          "#F8D49A",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-width": {
           "base": 1.2,
           "stops": [
@@ -5737,7 +5736,19 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -6162,7 +6173,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
@@ -6587,7 +6598,7 @@
         "visibility": "visible"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
@@ -7480,7 +7491,19 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "hsl(28, 65%, 34%)",
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-opacity": 1,
         "line-width": [
           "interpolate",
@@ -7899,7 +7922,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "hsl(28, 70%, 32%)",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
@@ -8758,7 +8781,19 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "secondary"
+          ],
+          "#FDF0B4",
+          "#FFFFFF"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -9176,7 +9211,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fea",
+        "line-color": "#F8D49A",
         "line-width": [
           "interpolate",
           [
