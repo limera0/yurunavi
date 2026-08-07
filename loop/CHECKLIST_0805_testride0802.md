@@ -4,14 +4,15 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 8 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5 코드 완료 — 실기기 검증만 마스터 대기.
-S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b 구현 완료** —
+**진행 요약: 10 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7 코드 완료 — 실기기 검증만
+마스터 대기. S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b 구현 완료** —
 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다(아직 미착수).
 **S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정, 아직 미착수).
 **O0(관광지 데이터 파이프라인) 2026-08-06 저녁 코드 완료** — §O 참고, 38건 카운트와 별도 트랙.
-**S5(정차 모드) 2026-08-07 코드 완료** — 다음은 마스터가 지정하는 모듈부터
-(S6·S7·S8·S10·S11·S13 큐, S9·S12는 별도 승인/자료 대기로 제외))
+**S5·S6·S7(정차모드·로터리방향·터널추측항법) 2026-08-07 코드 완료** — S8 진행 중(S7과
+`nav_screen.dart`가 겹쳐 순차 진행). 다음 큐: S10·S11·S13 (S9는 Valhalla 포크 별도 승인
+필요, S12는 마스터 스크린샷 대기로 제외))
 
 ---
 
@@ -382,13 +383,14 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정 / 정차→재출발 시 안내
       정상 재개 — **마스터 실기기 수동 검증 대기**
 
-### S6 · 로터리 안내 재설계  `상태: [~]` — 진행중 2026-08-07, **원인 확정, 조사 단계 불필요**
+### S6 · 로터리 안내 재설계  `상태: [x]` — 완료 2026-08-07
 
-> 지시서: [HANDOFF_0807_S6_roundabout_direction.md](HANDOFF_0807_S6_roundabout_direction.md).
+> **완료 2026-08-07** · 커밋 `be54f5b` · 지시서 [HANDOFF_0807_S6_roundabout_direction.md](HANDOFF_0807_S6_roundabout_direction.md)
+> code-auditor **1차 PASS**(수정 없이). `flutter analyze` 이슈 0 · `flutter test` **456건 전건 통과**.
 > 착수 전 로컬 Valhalla(`localhost:8002`) 검단회전교차로 5개 조합 직접 프로브로 알고리즘
 > 실현 가능성 확인 완료(6번째 S→N은 로터리를 안 거치는 경로가 나와 제외). 체크리스트 원문의
-> "{exit} 템플릿 4종"은 재확인 결과 실제 도달 가능한 건 2종뿐(`roundabout_exit` 계열은
-> S4b로 이미 비활성화돼 도달 불가) — 상세는 지시서 참고.
+> "{exit} 템플릿 4종"은 재확인 결과 실제 도달 가능한 건 2종뿐이었음(`roundabout_exit` 계열은
+> S4b로 이미 비활성화돼 도달 불가).
 
 > **2026-08-05 자체 Valhalla 서버 직접 프로브로 재현 완료.**
 > 검단회전교차로 **6개 진입/진출 조합 전부 `roundabout_exit_count=2`**.
@@ -397,30 +399,52 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 > **공개 업스트림 Valhalla(FOSSGIS)도 동일** → **우리 포크 결함 아님. 앱 파싱 버그도 아님.**
 > → **`roundabout_exit_count`를 신뢰하면 안 된다.**
 
-- [ ] **출구 번호 발화 폐기** — `voice_engine.dart:125-144`의 `{exit}` 주입 경로 제거
-- [ ] **진입/진출 방위차로 방향 직접 계산** (좌/직/우) — 앱에 이미 있는 shape·bearing
-      활용 (`native_engine.dart`, `PoiService.bearing`)
-- [ ] `default_ko.json:64-68` `{exit}` 사용 템플릿 4종 교체
-      → "회전교차로에서 우측 방향입니다" 형태
-- [ ] 근거: memory `feedback_accurate_maneuver_wording` — **틀린 출구 번호를 말하느니
+- [x] **출구 번호 발화 폐기** — `voice_engine.dart`의 `{exit}` 주입 경로 2곳 제거
+      (`roundabout_enter` 블록의 exit-count 주입 + 이미 S4b로 비활성화돼 있던
+      `roundabout_exit && isImminent` 죽은 코드 블록 통째 삭제)
+- [x] **진입/진출 방위차로 방향 직접 계산** (좌/직/우) — `PoiService.signedBearingDiff`
+      신설(부호 있는 -180~180) + `RoutingService.classifyRoundaboutDirection`
+      (기존 `CurveDirection`과 동일 부호 관례, `RoundaboutDirection{left,straight,right}`
+      + `labelKo`). 진입(type26)-진출(type27) 페어링 실패 시 안전 폴백(방향 없는
+      일반 문구)으로 빠짐
+- [x] `default_ko.json` `{exit}` 사용 템플릿 **2종**(실제 도달 가능한 것만, 원문 "4종"은
+      정정됨) 교체 → "회전교차로에서 {direction} 방향입니다" 형태
+- [x] 근거: memory `feedback_accurate_maneuver_wording` — **틀린 출구 번호를 말하느니
       안 말하는 게 낫다.** 라이더에게 필요한 건 번호가 아니라 방향
-- [ ] (우선순위 하향) "원형교차로인데 우회전이라고 안내함" — Valhalla가 type 26 대신
-      9/10을 내는 별개 증상(`mini_roundabout` 가설). 위 수정 시 방향은 어차피 맞음
-- [ ] **검증**: 검단 6개 조합에서 앱 계산 방향이 실제 방위차와 일치 (프로브 스크립트 재사용)
+- [ ] (우선순위 하향, 이번 세션 제외) "원형교차로인데 우회전이라고 안내함" — Valhalla가
+      type 26 대신 9/10을 내는 별개 증상(`mini_roundabout` 가설)
+- [ ] **검증**: 검단 5개 조합(실측 bearing 표는 지시서·테스트 fixture에 기록)의 좌/직/우
+      판정이 **실제 도로 형상과 일치하는지** — 위성지도 육안 대조 또는 실기기 필요,
+      헤드리스 서버라 이 세션에서 완결 불가. **마스터 확인 대기**
 
-### S7 · 터널 추측항법  `상태: [~]` — 진행중 2026-08-07
+> **감사 부수 발견(스코프 밖, 조치 없음)**. `nav_screen.dart`의 화면 카드 텍스트
+> (`_svgAssetForType`/`_maneuverText`, type 26)는 여전히 `roundaboutExitCount`를
+> "회전교차로 N번째 출구"로 화면에 표시한다 — 이번 S6는 지시서상 **TTS(발화)만** 스코프였다.
+> 신뢰 불가로 확정된 값을 화면에는 여전히 보여준다는 뜻이라 후속 조치 검토 필요.
 
-> 지시서: [HANDOFF_0807_S7_tunnel_dead_reckoning.md](HANDOFF_0807_S7_tunnel_dead_reckoning.md).
+### S7 · 터널 추측항법  `상태: [x]` — 완료 2026-08-07
+
+> **완료 2026-08-07** · 커밋 `d7f88f3` · 지시서 [HANDOFF_0807_S7_tunnel_dead_reckoning.md](HANDOFF_0807_S7_tunnel_dead_reckoning.md)
+> code-auditor **1차 PASS**(수정 없이). `flutter analyze` 이슈 0 · `flutter test` **456건 전건 통과**.
 > `route_progress_provider.dart`(경로 shape·구조물 zone·진행거리를 다 아는 provider)에
-> dead reckoning을 붙이는 구체 설계 완료. S5가 만든 `_triggerReroute()` 게이트 자리에
-> "추측항법 중" 조건을 나란히 추가하는 형태라 **S5 이후, S8 이전** 순서로 진행(둘 다
-> `nav_screen.dart`를 건드리는 S8과 충돌 방지).
+> 배치(NavStateNotifier는 경로를 모르는 순수 GPS 계층이라 관심사 분리 유지).
 
-- [ ] 터널 zone(`StructureType.tunnel`) 진입 + GPS 상실 동시 감지
-- [ ] 직전 1분 평균속도 **× 1.05**로 경로 shape 따라 위치 시간적분 전진 (마스터 제안)
-- [ ] 터널 출구 도달 또는 GPS 복귀 시 스냅 복원
-- [ ] 추측항법 중 재탐색 금지 가드
-- [ ] **검증**: 가상GPS로 터널 구간 GPS 드롭 시나리오 재생
+- [x] 터널 zone(`StructureType.tunnel`) 진입 + GPS 상실 동시 감지 — `NavigationState.stale`
+      필드 신설(기존 `_kStaleMs=8000` 재사용) + `_tunnelZoneContaining(_snapIdx)`가
+      tunnel 타입 zone 범위 안일 때만 진입(다른 구조물 타입·무조건 stale은 진입 안 함)
+- [x] 직전 1분 평균속도 **× 1.05**로 경로 shape 따라 위치 시간적분 전진 (마스터 제안) —
+      60초 롤링 속도버퍼(실측 fix만 반영, 추정 tick 자기오염 없음) + 500ms 타이머로
+      `_traveledM` 전진, 신규 `_pointAtCumulativeM`(누적거리→좌표 역변환)로 위치 산출
+- [x] 터널 출구 도달 또는 GPS 복귀 시 스냅 복원 — 도달 시 그 지점에서 정지(더 추정 안 함),
+      실측 fix 복귀 시 정상 `_advance()`로 복귀. **알려진 리스크(×1.05 낙관 편향으로 실측
+      fix가 추정보다 뒤처질 수 있음)** 대응: 추측항법 직후 첫 실측 fix에 한해 스냅 탐색창을
+      뒤로도 1회 확장(`_pendingBackwardSnap`), 그 다음 fix부터 정상 전진전용 복귀 —
+      감사에서 "한 번만 작동하고 정상 복귀"까지 직접 확인됨
+- [x] 추측항법 중 재탐색 금지 가드 — `nav_screen.dart` `_triggerReroute()`에 S5의
+      `isStationaryProvider` 게이트 옆 `deadReckoning` 게이트 추가(정확히 그 한 줄만 추가,
+      감사로 확인)
+- [ ] **검증**: 가상GPS로 터널 구간 GPS 드롭 시나리오 재생 — memory `project_vgps_testing`
+      하네스 필요, **마스터 실기기/가상GPS 검증 대기**
 
 ### S8 · UI 잔여  `상태: [~]` — 진행중 2026-08-07, S7 완료 후 착수
 
