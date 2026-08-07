@@ -382,7 +382,13 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정 / 정차→재출발 시 안내
       정상 재개 — **마스터 실기기 수동 검증 대기**
 
-### S6 · 로터리 안내 재설계  `상태: [ ]` — **원인 확정, 조사 단계 불필요**
+### S6 · 로터리 안내 재설계  `상태: [~]` — 진행중 2026-08-07, **원인 확정, 조사 단계 불필요**
+
+> 지시서: [HANDOFF_0807_S6_roundabout_direction.md](HANDOFF_0807_S6_roundabout_direction.md).
+> 착수 전 로컬 Valhalla(`localhost:8002`) 검단회전교차로 5개 조합 직접 프로브로 알고리즘
+> 실현 가능성 확인 완료(6번째 S→N은 로터리를 안 거치는 경로가 나와 제외). 체크리스트 원문의
+> "{exit} 템플릿 4종"은 재확인 결과 실제 도달 가능한 건 2종뿐(`roundabout_exit` 계열은
+> S4b로 이미 비활성화돼 도달 불가) — 상세는 지시서 참고.
 
 > **2026-08-05 자체 Valhalla 서버 직접 프로브로 재현 완료.**
 > 검단회전교차로 **6개 진입/진출 조합 전부 `roundabout_exit_count=2`**.
@@ -402,7 +408,13 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
       9/10을 내는 별개 증상(`mini_roundabout` 가설). 위 수정 시 방향은 어차피 맞음
 - [ ] **검증**: 검단 6개 조합에서 앱 계산 방향이 실제 방위차와 일치 (프로브 스크립트 재사용)
 
-### S7 · 터널 추측항법  `상태: [ ]`
+### S7 · 터널 추측항법  `상태: [~]` — 진행중 2026-08-07
+
+> 지시서: [HANDOFF_0807_S7_tunnel_dead_reckoning.md](HANDOFF_0807_S7_tunnel_dead_reckoning.md).
+> `route_progress_provider.dart`(경로 shape·구조물 zone·진행거리를 다 아는 provider)에
+> dead reckoning을 붙이는 구체 설계 완료. S5가 만든 `_triggerReroute()` 게이트 자리에
+> "추측항법 중" 조건을 나란히 추가하는 형태라 **S5 이후, S8 이전** 순서로 진행(둘 다
+> `nav_screen.dart`를 건드리는 S8과 충돌 방지).
 
 - [ ] 터널 zone(`StructureType.tunnel`) 진입 + GPS 상실 동시 감지
 - [ ] 직전 1분 평균속도 **× 1.05**로 경로 shape 따라 위치 시간적분 전진 (마스터 제안)
@@ -410,10 +422,18 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] 추측항법 중 재탐색 금지 가드
 - [ ] **검증**: 가상GPS로 터널 구간 GPS 드롭 시나리오 재생
 
-### S8 · UI 잔여  `상태: [ ]`
+### S8 · UI 잔여  `상태: [~]` — 진행중 2026-08-07, S7 완료 후 착수
 
-- [ ] **시스템바 색상** — 홈: 상단/하단 모두 투명 / 내비: 상단 투명, 하단 검정
-      (`main.dart:47`, `nav_screen.dart:362`, `dispose():488` 3곳 동기화)
+> 지시서: [HANDOFF_0807_S8_ui_remainder.md](HANDOFF_0807_S8_ui_remainder.md).
+> **마스터 확인(2026-08-07) — 시스템바 항목 원문 정정**: "홈은 투명"이 아니라 "2026-07-30
+> 라운드2가 결정한 `#F5F1EC` 통일이 일부 화면에서 반영 안 됨"이 실제 지적이었다(체크리스트
+> 원문은 오전사). 원인은 이 세션에서 특정: `app_theme.dart`의 `AppBarTheme`에
+> `systemOverlayStyle` 미설정 → `AppBar`를 쓰는 5개 화면(히스토리·설정·프로필·즐겨찾기
+> 카테고리·약관)이 라운드2가 건 전역 색을 자체적으로 덮어씀. 상세는 지시서 참고.
+
+- [ ] **시스템바 색상 통일** — `app_theme.dart`의 `AppBarTheme`에 `systemOverlayStyle:
+      kSystemBarColor` 조합 추가(AppBar 5개 화면이 라운드2 통일을 덮어쓰던 근본원인 수정).
+      `main.dart`/`nav_screen.dart`의 기존 설정은 이미 정확해 변경 불필요
 - [ ] **주유소 경유지 마커 미표시** — `nav_screen.dart:1512` `_initDestLayer()`가
       `_destLayerReady` 가드로 1회만 실행 + 불변 `widget.waypoints`를 읽음.
       주행 중 추가분은 `_liveWaypoints`(`:378`)로 들어가 영영 안 그려짐 → **원인 확정**
