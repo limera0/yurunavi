@@ -47,6 +47,7 @@ import '../tour_recorder.dart';
 import '../guidance_arbiter.dart';
 import '../voice_engine.dart';
 import '../../route/offset_origin.dart';
+import 'nav_top_card.dart';
 import 'rear_camera_gauge.dart';
 
 /// Camera-framing default only — never treated as the rider's location.
@@ -210,6 +211,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
   GasStation? _selectedGasStation;
   late List<LatLng> _liveWaypoints; // widget.waypoints 런타임 복사본 — 주유소 추가 시 갱신
 
+  // 하단 카드 목적지명 ↔ 현위치(시/군/구) 3초 교대 표시 (§4).
+  // 3s Timer.periodic으로 토글, 다른 Timer 필드들(_recenterTimer 등)과 동일한
+  // "field 선언 + dispose에서 취소" 패턴을 따른다.
+  Timer? _cardLabelToggleTimer;
+  bool _showCurrentLocInCard = false;
+  String? _currentLocLabel; // reverseGeocodeCoarse 결과, 실패/미조회 시 null(널 가드로 목적지명 유지)
+  // 시/군/구는 자주 안 바뀌므로 1Hz GPS 틱마다 부르지 않고 300m/60초 중
+  // 먼저 오는 조건에서만 재조회 — PoiFetchThrottle 재사용(S2 429 폭주 방지
+  // 패턴, feedback_prefer_simple_reuse 메모리 참고). 기기 내장 geocoder라
+  // 네트워크 요청은 아니지만 불필요한 기기 API 호출 폭주는 마찬가지로 피한다.
+  final _coarseGeoThrottle = PoiFetchThrottle(
+    minInterval: const Duration(seconds: 60),
+    minMoveMeters: 300,
+  );
+
   // 도착 감지
   bool _arrived = false;
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
@@ -336,6 +352,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<ManeuverStep> _maneuvers = const [];
   int _stepIdx = 0;
   double _cardRemainingM = 0.0; // 카드에 표시할 실시간 잔여 거리(m); GPS틱마다 갱신
+  double _remainingRouteM = 0.0; // 하단 카드용 남은 경로 전체 거리(m); progressSub가 갱신, 초기엔 routeKm*1000 폴백
   // 구조물(다리/터널) zone 비동기 페치 stale-response 가드 — _applyRouteGuidance
   // 호출마다 증가시켜, 이전 세대의 fetchStructureZones 응답이 늦게 도착해도
   // 최신 경로에 잘못 반영되지 않게 한다.
@@ -381,8 +398,16 @@ class _NavScreenState extends ConsumerState<NavScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
     _routePoints = List<LatLng>.of(widget.routePolyline);
+    // 첫 GPS fix 전(progressSub 미도착) 표시용 폴백 — 이후 progressSub가
+    // prog.distToDestM으로 실시간 갱신한다.
+    _remainingRouteM = _polylineKm(widget.routePolyline) * 1000;
     _durationMin = widget.durationMin;
     _liveWaypoints = List<LatLng>.of(widget.waypoints);
+    // 하단 카드 목적지명 ↔ 현위치 3초 교대 표시 토글 (§4).
+    _cardLabelToggleTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted) return;
+      setState(() => _showCurrentLocInCard = !_showCurrentLocInCard);
+    });
     // 주행 중 화면 꺼짐 방지
     WakelockPlus.enable();
     // TTS 초기화 + 첫 안내
@@ -450,6 +475,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     _offRouteDebounce?.cancel();
     _exitAutoCloseTimer?.cancel();
     _compassNorthTimer?.cancel();
+    _cardLabelToggleTimer?.cancel();
     _locationSub?.close();
     _progressSub?.close();
     _pulseCtrl.dispose();
@@ -545,6 +571,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         }
         _ensureLocationMarker(effectiveHeadingDeg);
         if (!isStationary) unawaited(_maybeFetchAmbientPois());
+        unawaited(_maybeFetchCoarseLocation(loc));
         if (!_tourRecorderStarted) {
           _tourRecorderStarted = true;
           _navStartedAt = DateTime.now();
@@ -564,6 +591,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (prog == null || !mounted) return;
         setState(() {
           _cardRemainingM = prog.distToNextTurnM;
+          _remainingRouteM = prog.distToDestM;
           _stepIdx = _steps.isEmpty
               ? 0
               : prog.activeStepIdx.clamp(0, _steps.length - 1);
@@ -924,6 +952,18 @@ class _NavScreenState extends ConsumerState<NavScreen>
       }
     }
     _liveWaypoints.insert(insertIdx, stationLoc);
+    // 레이어가 이미 초기화된 이후에 추가되는 경우에만 즉시 심볼 하나를
+    // 그린다 — 레이어 자체가 아직이면 _initDestLayer()가 첫 실행 시
+    // _liveWaypoints를 순회하며 알아서 커버하므로 여기서 중복 추가하지 않음.
+    if (_canCallMap() && _destLayerReady) {
+      _mlCtrl?.addSymbol(ml.SymbolOptions(
+        geometry: _toMl(stationLoc),
+        iconImage: _kWpIcon,
+        iconSize: _kWpIconSize,
+        iconAnchor: 'bottom',
+        zIndex: 5,
+      ));
+    }
     setState(() => _selectedGasStation = null);
     // S5 판단: 이 reroute는 GPS 지터로 반복 발화하는 자동 이탈 재탐색이
     // 아니라, 사용자가 목록에서 주유소를 탭해 명시적으로 1회 트리거하는
@@ -1367,6 +1407,21 @@ class _NavScreenState extends ConsumerState<NavScreen>
     return result;
   }
 
+  /// 하단 카드 현위치(시/군/구) 표시용 — 300m 이동 또는 60초 경과 중 먼저
+  /// 오는 조건에서만 기기 내장 geocoder를 호출한다(_coarseGeoThrottle,
+  /// PoiFetchThrottle 재사용). 실패 시 _currentLocLabel은 이전 값을 유지
+  /// (§4 명세: 실패/미조회면 목적지명만 계속 표시, 빈 상태로 갱신하지 않음).
+  Future<void> _maybeFetchCoarseLocation(LatLng pos) async {
+    if (!_coarseGeoThrottle.shouldFetch(center: pos)) return;
+    // shouldFetch가 true인 이 자리에서(await 전에) 즉시 커밋 — 응답이
+    // 느릴 때 디바운스가 영원히 무장되지 않는 회귀(S2 429 폭주 원인)를
+    // 다시 도입하지 않기 위함(_ambientThrottle과 동일 패턴).
+    _coarseGeoThrottle.markStarted(center: pos);
+    final label = await GeocodingService().reverseGeocodeCoarse(pos.latitude, pos.longitude);
+    if (!mounted || label == null) return;
+    setState(() => _currentLocLabel = label);
+  }
+
   /// 현재 위치로 다음 미통과 경유지에 대한 [waypointPassageEvent] 판정을
   /// 굴려 도착/통과 이벤트를 처리한다. 두 이벤트 모두 _passedWaypointCount를
   /// 증가시켜 이후 재탐색에서 배제한다.
@@ -1555,7 +1610,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null || _destLayerReady) return;
     _destLayerReady = true;
-    for (final wp in widget.waypoints) {
+    // widget.waypoints(불변, 생성 시점 고정)이 아니라 _liveWaypoints(런타임
+    // 가변 복사본)를 순회 — 이 메서드가 처음 도는 시점까지 이미
+    // _addGasStationWaypoint()로 추가된 경유지까지 커버하기 위함.
+    // 스냅샷 복사본을 순회한다 — await 사이에 _addGasStationWaypoint()가
+    // _liveWaypoints를 변경하면(예: 플로팅 오버레이 복귀로 _onStyleLoaded가
+    // 재실행되는 동안) ConcurrentModificationError가 난다(code-auditor 지적).
+    for (final wp in List<LatLng>.of(_liveWaypoints)) {
       await ctrl.addSymbol(ml.SymbolOptions(
         geometry: _toMl(wp),
         iconImage: _kWpIcon,
@@ -1886,7 +1947,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final brandColor = skinColors.brand;
     final successColor = skinColors.success;
     final dangerColor = skinColors.danger;
-    final routeKm = _polylineKm(widget.routePolyline);
     final progress = ref.watch(routeProgressProvider);
     // 후면단속카메라(18번) 게이지 활성 여부 — 접근구간(150m 이내) + 사후구간
     // 전체. 활성 중엔 좌측 속도계가 게이지로 변신하고 DaylightBar를 숨긴다.
@@ -2019,138 +2079,37 @@ class _NavScreenState extends ConsumerState<NavScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // (A) 메인 상단 카드 — 도착 중엔 내부에서 "목적지 도착"으로 분기
-                GestureDetector(
-                  onTap: () {
-                    if (!_arrivalBannerVisible && _stepIdx < _steps.length - 1) {
-                      setState(() => _stepIdx++);
-                      _announceStep(_stepIdx);
-                    }
-                  },
-                  child: SizedBox(
-                    width: MediaQuery.of(context).size.width * 0.62,
-                    child: Container(
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(20),
-                          bottomRight: Radius.circular(20),
-                          topRight: Radius.circular(20),
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: SafeArea(
-                        bottom: false,
-                        top: false,
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // 아이콘박스: 폭 80 (30% 축소) — 도착 중엔 깃발 아이콘
-                              SizedBox(
-                                width: 80,
-                                child: ColoredBox(
-                                  color: cs.surface,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(10),
-                                    child: _arrivalBannerVisible
-                                        ? Icon(Icons.flag_rounded, size: 44, color: cs.tertiary)
-                                        : SvgPicture.asset(upcoming.svgAsset, width: 60, height: 60),
-                                  ),
-                                ),
-                              ),
-                              // 콘텐츠: 도착 중엔 "목적지 도착" + 소요시간, 평소엔 거리 + 도로명
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(10, 14, 10, 14),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: _arrivalBannerVisible
-                                        ? [
-                                            Text(
-                                              '목적지 도착',
-                                              style: TextStyle(
-                                                color: cs.onSurface,
-                                                fontSize: 28,
-                                                fontWeight: FontWeight.w800,
-                                                height: 1.1,
-                                              ),
-                                            ),
-                                            if (_arrivalDurationS != null)
-                                              Padding(
-                                                padding: const EdgeInsets.only(top: 4),
-                                                child: Text(
-                                                  '소요시간 ${formatTourDuration(_arrivalDurationS!)}',
-                                                  style: TextStyle(
-                                                    color: cs.onSurfaceVariant,
-                                                    fontSize: 18,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                          ]
-                                        : [
-                                            if (_cardRemainingM > 0 || step.dist.isNotEmpty)
-                                              Builder(builder: (ctx) {
-                                                final raw = _cardRemainingM > 0
-                                                    ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
-                                                    : step.dist;
-                                                final parts = _TurnStep._splitDistStr(raw);
-                                                return RichText(
-                                                  text: TextSpan(
-                                                    children: [
-                                                      TextSpan(
-                                                        text: parts.$1,
-                                                        style: TextStyle(
-                                                          color: cs.onSurface,
-                                                          fontSize: 53,
-                                                          fontWeight: FontWeight.w800,
-                                                          height: 1.1,
-                                                        ),
-                                                      ),
-                                                      TextSpan(
-                                                        text: parts.$2,
-                                                        style: TextStyle(
-                                                          color: cs.onSurface,
-                                                          fontSize: 24,
-                                                          fontWeight: FontWeight.w700,
-                                                          height: 1.1,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-                                              }),
-                                            if (upcoming.streetNames.isNotEmpty)
-                                              Text(
-                                                upcoming.streetNames.first,
-                                                style: TextStyle(
-                                                  color: cs.onSurfaceVariant,
-                                                  fontSize: 22,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                          ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                // (A) 메인 상단 카드 — 도착 중엔 내부에서 "목적지 도착"으로 분기.
+                // §5(HANDOFF_0807_S8): 자체 위젯(NavTopCard)으로 분리 — 컨텐츠에
+                // 맞춰 늘어나되 기존 62% 밑으로는 안 줄어드는 ConstrainedBox+
+                // IntrinsicWidth 레이아웃(nav_top_card.dart 헤더 주석 참고),
+                // nav_screen.dart 전체를 마운트하지 않고도 위젯 테스트 가능.
+                Builder(builder: (_) {
+                  final raw = _cardRemainingM > 0
+                      ? _TurnStep._formatDist(_cardRemainingM / 1000.0)
+                      : step.dist;
+                  final parts = (_cardRemainingM > 0 || step.dist.isNotEmpty)
+                      ? _TurnStep._splitDistStr(raw)
+                      : ('', '');
+                  return NavTopCard(
+                    svgAsset: upcoming.svgAsset,
+                    minWidth: MediaQuery.of(context).size.width * 0.62,
+                    maxWidth: MediaQuery.of(context).size.width - 12,
+                    arrivalBannerVisible: _arrivalBannerVisible,
+                    arrivalDurationText: _arrivalDurationS != null
+                        ? '소요시간 ${formatTourDuration(_arrivalDurationS!)}'
+                        : null,
+                    distMain: parts.$1,
+                    distUnit: parts.$2,
+                    streetName: upcoming.streetNames.isNotEmpty ? upcoming.streetNames.first : null,
+                    onTap: () {
+                      if (!_arrivalBannerVisible && _stepIdx < _steps.length - 1) {
+                        setState(() => _stepIdx++);
+                        _announceStep(_stepIdx);
+                      }
+                    },
+                  );
+                }),
                 // (B) 다음 이벤트 별개 카드 — 도착 중엔 숨김(카드2가 새 목업엔 없음)
                 if (_stepIdx + 2 < _steps.length && !_arrivalBannerVisible)
                   Padding(
@@ -2481,13 +2440,25 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                     crossAxisAlignment: CrossAxisAlignment.center,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text(
-                                        ref.watch(mapInteractionProvider).destinationName ?? '목적지',
-                                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.normal, color: cs.onSurface),
-                                        textAlign: TextAlign.center,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      Builder(builder: (_) {
+                                        // 3초마다 목적지 이름 ↔ 현위치(시/군/구) 교대 표시.
+                                        // 현위치 조회가 아직 안 됐거나 실패했으면(null) 교대하지
+                                        // 않고 목적지 이름만 계속 보여준다(빈 상태로 깜빡이지
+                                        // 않게). ref.watch는 분기와 무관하게 항상 먼저 호출해
+                                        // 구독이 매 빌드 끊기지 않게 한다.
+                                        final destName =
+                                            ref.watch(mapInteractionProvider).destinationName ?? '목적지';
+                                        final label = (_showCurrentLocInCard && _currentLocLabel != null)
+                                            ? _currentLocLabel!
+                                            : destName;
+                                        return Text(
+                                          label,
+                                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.normal, color: cs.onSurface),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        );
+                                      }),
                                       const SizedBox(height: 4),
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.center,
@@ -2498,7 +2469,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
                                           ),
                                           const SizedBox(width: 10),
                                           Text(
-                                            routeKm > 0 ? '${routeKm.toStringAsFixed(1)} km' : '--',
+                                            _remainingRouteM > 0
+                                                ? '${(_remainingRouteM / 1000).toStringAsFixed(1)} km'
+                                                : '--',
                                             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: cs.onSurfaceVariant),
                                           ),
                                         ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ── YuruNavi Design Token ─────────────────────────────────────────────────────
@@ -162,6 +163,20 @@ class AppTheme {
         foregroundColor: Colors.white,
         centerTitle: false,
         titleTextStyle: AppTextStyles.headlineMD.copyWith(color: Colors.white),
+        // Flutter's AppBar auto-computes SystemUiOverlayStyle from its own
+        // backgroundColor brightness and re-applies it on every build unless
+        // told otherwise — this silently overrides the global kSystemBarColor
+        // unification main.dart/nav_screen.dart set up (loop/layout_fixes/
+        // PROGRESS.md 라운드2 was scoped to only 3 non-AppBar screens, so any
+        // screen using AppBar never got covered). Pin it here once so every
+        // current and future AppBar screen stays in sync automatically.
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: kSystemBarColor,
+          statusBarIconBrightness: Brightness.dark,
+          systemNavigationBarColor: kSystemBarColor,
+          systemNavigationBarIconBrightness: Brightness.dark,
+          systemNavigationBarContrastEnforced: false,
+        ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
