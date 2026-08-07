@@ -333,17 +333,26 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] **검증**: 실기기 발화 청취 — 거리가 모두 한글 수사로 읽힘, 이상 발음 없음
       — **마스터 실기기 수동 검증 대기**
 
-### S5 · 정차 모드 + 전력  `상태: [ ]`
+### S5 · 정차 모드 + 전력  `상태: [~]` — 진행중 2026-08-07
 
 > `YNAV_REROUTE` 분당 최대 151건. `distanceFilter: 0` + 정지 GPS 지터가 원인.
 
-- [ ] **정차 모드** 신설 — 속도 < N km/h가 T초 지속 시 재탐색·POI·카메라추종 정지
-- [ ] `map_providers.dart:77` `distanceFilter: 0` → 속도 연동 가변
-- [ ] `accuracy: bestForNavigation` 정차 시 다운시프트
-- [ ] `map_providers.dart:71` `ref.keepAlive()` 재검토 — 홈/설정 화면에서도 1Hz 상시 구동
-- [ ] 재탐색 origin 오프셋 **40m → 50m** (`nav_screen.dart:842`, `:1643`)
-- [ ] (선택) Thermal Governor — Android `PowerManager` 열 상태 연동 FPS/GPS 다운시프트
-- [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정
+> **착수 전 마스터 확인 완료 (2026-08-07)**: 이번 세션은 S5만 진행(모듈당 1세션 하드룰).
+> 정차 판정 임계값 **5km/h 미만 · 10초 지속**(마스터 결정). S9는 Valhalla 포크 별도 승인
+> 필요해 이번 스코프 전체 제외, S12는 마스터 스크린샷 대기로 보류. 상세 지시서:
+> [HANDOFF_0807_S5_stationary_mode.md](HANDOFF_0807_S5_stationary_mode.md)
+
+- [ ] **정차 모드** 신설 — 속도 **5km/h 미만이 10초 지속** 시 재탐색·POI·카메라추종 정지,
+      해제는 속도 회복 즉시(지연 없음)
+- [ ] `map_providers.dart:77` `distanceFilter: 0` → 정차 시 `15`로 가변
+- [ ] `accuracy: bestForNavigation` → 정차 시 `LocationAccuracy.high`로 다운시프트
+- [ ] `map_providers.dart:72` `ref.keepAlive()` — **재검토 결론: 유지**(제거 시 S0 "내 위치
+      상시 표시" 회귀 위험). 다운시프트(위 항목)로 홈/설정 화면 배터리 절감은 같은 공유
+      스트림을 통해 확보
+- [ ] 재탐색 origin 오프셋 **40m → 50m** (`nav_screen.dart:835`, `:1684` — 현재 확인된 줄번호,
+      체크리스트 원문의 842/1643은 이후 커밋으로 밀린 낡은 값)
+- [-] (선택) Thermal Governor — 옵션 항목, 이번 세션 스코프 밖(백로그 유지)
+- [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정 — 마스터 실기기 검증 대기
 
 ### S6 · 로터리 안내 재설계  `상태: [ ]` — **원인 확정, 조사 단계 불필요**
 
