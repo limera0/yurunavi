@@ -4,15 +4,16 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 10 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7 코드 완료 — 실기기 검증만
-마스터 대기. S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b 구현 완료** —
-알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
+**진행 요약: 11 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7·S8 코드 완료 — 실기기
+검증만 마스터 대기. S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
+구현 완료** — 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이
+(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다(아직 미착수).
 **S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정, 아직 미착수).
 **O0(관광지 데이터 파이프라인) 2026-08-06 저녁 코드 완료** — §O 참고, 38건 카운트와 별도 트랙.
-**S5·S6·S7(정차모드·로터리방향·터널추측항법) 2026-08-07 코드 완료** — S8 진행 중(S7과
-`nav_screen.dart`가 겹쳐 순차 진행). 다음 큐: S10·S11·S13 (S9는 Valhalla 포크 별도 승인
-필요, S12는 마스터 스크린샷 대기로 제외))
+**S5·S6·S7·S8(정차모드·로터리방향·터널추측항법·UI잔여) 2026-08-07 코드 완료** — P1(주행
+품질) 트랙 전부 완료. 다음 큐: S10·S11·S13 (S9는 Valhalla 포크 별도 승인 필요, S12는
+마스터 스크린샷 대기로 제외))
 
 ---
 
@@ -446,27 +447,41 @@
 - [ ] **검증**: 가상GPS로 터널 구간 GPS 드롭 시나리오 재생 — memory `project_vgps_testing`
       하네스 필요, **마스터 실기기/가상GPS 검증 대기**
 
-### S8 · UI 잔여  `상태: [~]` — 진행중 2026-08-07, S7 완료 후 착수
+### S8 · UI 잔여  `상태: [x]` — 완료 2026-08-07
 
-> 지시서: [HANDOFF_0807_S8_ui_remainder.md](HANDOFF_0807_S8_ui_remainder.md).
+> **완료 2026-08-07** · 커밋 `fc638f2` · 지시서 [HANDOFF_0807_S8_ui_remainder.md](HANDOFF_0807_S8_ui_remainder.md)
+> code-auditor **1차 FAIL → 정밀 수정 1건 → 커밋**(재감사 없이 반영 — 감사 지적 그대로
+> 한 줄 수정). `flutter analyze` 이슈 0 · `flutter test` **629건 전건 통과**.
 > **마스터 확인(2026-08-07) — 시스템바 항목 원문 정정**: "홈은 투명"이 아니라 "2026-07-30
 > 라운드2가 결정한 `#F5F1EC` 통일이 일부 화면에서 반영 안 됨"이 실제 지적이었다(체크리스트
 > 원문은 오전사). 원인은 이 세션에서 특정: `app_theme.dart`의 `AppBarTheme`에
 > `systemOverlayStyle` 미설정 → `AppBar`를 쓰는 5개 화면(히스토리·설정·프로필·즐겨찾기
-> 카테고리·약관)이 라운드2가 건 전역 색을 자체적으로 덮어씀. 상세는 지시서 참고.
+> 카테고리·약관)이 라운드2가 건 전역 색을 자체적으로 덮어씀.
 
-- [ ] **시스템바 색상 통일** — `app_theme.dart`의 `AppBarTheme`에 `systemOverlayStyle:
+- [x] **시스템바 색상 통일** — `app_theme.dart`의 `AppBarTheme`에 `systemOverlayStyle:
       kSystemBarColor` 조합 추가(AppBar 5개 화면이 라운드2 통일을 덮어쓰던 근본원인 수정).
-      `main.dart`/`nav_screen.dart`의 기존 설정은 이미 정확해 변경 불필요
-- [ ] **주유소 경유지 마커 미표시** — `nav_screen.dart:1512` `_initDestLayer()`가
-      `_destLayerReady` 가드로 1회만 실행 + 불변 `widget.waypoints`를 읽음.
-      주행 중 추가분은 `_liveWaypoints`(`:378`)로 들어가 영영 안 그려짐 → **원인 확정**
-- [ ] 하단 카드 — 전체 거리 → **남은 거리**
-- [ ] 하단 카드 — 현위치(시/군/구)를 목적지와 **3초 간격 교대 표시**
-- [ ] **상단 카드 — 남은 거리 10.0km 이상일 때 가로폭 한계로 줄바꿈 발생.**
-      우선 해법: 카드 width를 평소엔 현재 크기 그대로 두고 글자 길이에 맞춰
-      **flexible하게 확장**되도록 처리. 이게 불가능하면 차선책으로 **88.8km까지도
-      한 줄에 들어가도록 width 자체를 넓힘** (평소 불필요한 여백이 생기지 않는 쪽을 우선)
+      `main.dart`/`nav_screen.dart`의 기존 설정은 이미 정확해 변경 없음
+- [x] **주유소 경유지 마커 미표시** — `_initDestLayer()`가 `widget.waypoints` 대신
+      `_liveWaypoints`를 순회하도록 수정 + `_addGasStationWaypoint()`에서 삽입 직후
+      즉시 `addSymbol` 호출. **감사에서 동시성 결함 발견·수정**: `_liveWaypoints`를
+      직접 순회하며 매 반복 `await`하는데 그 사이 `_addGasStationWaypoint()`가 같은
+      리스트를 변경하면(예: 플로팅 오버레이 복귀로 `_onStyleLoaded` 재실행 중)
+      `ConcurrentModificationError` 위험 — `List<LatLng>.of(...)` 스냅샷 순회로 수정
+- [x] 하단 카드 — 전체 거리 → **남은 거리**(`progressSub`의 `distToDestM` 실시간 반영)
+- [x] 하단 카드 — 현위치(시/군/구, `GeocodingService.reverseGeocodeCoarse` 신설,
+      기기 내장 geocoder + 300m/60s 스로틀)를 목적지와 **3초 간격 교대 표시**
+- [x] **상단 카드 — 남은 거리 10.0km 이상 줄바꿈 해결.** 마스터 1순위(flexible 확장)로
+      해결 — `nav_top_card.dart`로 위젯 분리, `ConstrainedBox(minWidth 62%) +
+      IntrinsicWidth + Flexible`(내부 `Expanded`는 `IntrinsicWidth` 안에서 동작 안 해
+      `Flexible`로 교체). 5개 화면폭 × 8개 거리문자열 × 4개 도로명 길이 조합 위젯
+      테스트로 overflow 0건 확인
+- [ ] **검증(실기기)**: 5개 AppBar 화면 육안 확인 / 실제 남은거리 감소 확인 / 3초 교대
+      표시 육안 확인 / 88.8km급 목적지 줄바꿈 없음 / 주유소 추가 시 마커 즉시 표시 —
+      **마스터 실기기 수동 검증 대기**
+
+> **감사 부수 발견(스코프 밖, 조치 없음)**. S6 감사에서도 나온 얘기와 별개로,
+> `nav_screen.dart`의 화면 카드(`_maneuverText`)는 여전히 신뢰 불가로 확정된
+> `roundaboutExitCount`를 그대로 표시한다 — S6/S8 어느 쪽 스코프도 아니었다.
 
 ### S14 · 일출일몰 바 야간 모드 결함  `상태: [ ]` — **원인 확정, 조사 불필요**
 
