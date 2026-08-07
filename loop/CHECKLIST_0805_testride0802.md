@@ -4,13 +4,14 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 4 / 38 완료** (S0·S1·S2·S3 코드 완료 — 실기기 검증만 마스터 대기.
+**진행 요약: 8 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5 코드 완료 — 실기기 검증만 마스터 대기.
 S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b 구현 완료** —
 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이(SYSTEM_ALERT_WINDOW) 자체 구현 완료.
-**S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다.
-**S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정).
+**S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다(아직 미착수).
+**S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정, 아직 미착수).
 **O0(관광지 데이터 파이프라인) 2026-08-06 저녁 코드 완료** — §O 참고, 38건 카운트와 별도 트랙.
-다음은 S1b(조사))
+**S5(정차 모드) 2026-08-07 코드 완료** — 다음은 마스터가 지정하는 모듈부터
+(S6·S7·S8·S10·S11·S13 큐, S9·S12는 별도 승인/자료 대기로 제외))
 
 ---
 
@@ -333,26 +334,53 @@ S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 - [ ] **검증**: 실기기 발화 청취 — 거리가 모두 한글 수사로 읽힘, 이상 발음 없음
       — **마스터 실기기 수동 검증 대기**
 
-### S5 · 정차 모드 + 전력  `상태: [~]` — 진행중 2026-08-07
+### S5 · 정차 모드 + 전력  `상태: [x]` — 코드 완료 2026-08-07, 실기기 검증만 남음
 
 > `YNAV_REROUTE` 분당 최대 151건. `distanceFilter: 0` + 정지 GPS 지터가 원인.
 
-> **착수 전 마스터 확인 완료 (2026-08-07)**: 이번 세션은 S5만 진행(모듈당 1세션 하드룰).
-> 정차 판정 임계값 **5km/h 미만 · 10초 지속**(마스터 결정). S9는 Valhalla 포크 별도 승인
-> 필요해 이번 스코프 전체 제외, S12는 마스터 스크린샷 대기로 보류. 상세 지시서:
-> [HANDOFF_0807_S5_stationary_mode.md](HANDOFF_0807_S5_stationary_mode.md)
+> **완료 2026-08-07** · 커밋 `fd667f1` · 지시서 [HANDOFF_0807_S5_stationary_mode.md](HANDOFF_0807_S5_stationary_mode.md)
+> code-auditor **1차 PASS**(수정 없이). `flutter analyze` 이슈 0 · `flutter test` **419건 전건 통과**(신규 17건).
+> 착수 전 마스터 확인(2026-08-07): 이번 세션 S5만 진행(모듈당 1세션 하드룰). 정차 판정
+> 임계값 **5km/h 미만 · 10초 지속**(마스터 결정). S9는 Valhalla 포크 별도 승인 필요해
+> 이번 스코프 전체 제외, S12는 마스터 스크린샷 대기로 보류.
 
-- [ ] **정차 모드** 신설 — 속도 **5km/h 미만이 10초 지속** 시 재탐색·POI·카메라추종 정지,
-      해제는 속도 회복 즉시(지연 없음)
-- [ ] `map_providers.dart:77` `distanceFilter: 0` → 정차 시 `15`로 가변
-- [ ] `accuracy: bestForNavigation` → 정차 시 `LocationAccuracy.high`로 다운시프트
-- [ ] `map_providers.dart:72` `ref.keepAlive()` — **재검토 결론: 유지**(제거 시 S0 "내 위치
+- [x] **정차 모드** 신설 — `StationaryDetector`(순수 클래스, 주입 가능 clock, 신규
+      `lib/features/navigation/providers/stationary_detector.dart`). 속도 **5km/h 미만이
+      10초 지속** 시 진입, 속도 회복(≥5km/h) **즉시** 해제(지연 없음 — safety-first).
+      진입 시 재탐색 디바운스 타이머 등록(`_triggerReroute()`)·카메라추종(`_recenter`)·
+      앰비언트 POI 페치(`_maybeFetchAmbientPois`) 정지. `_ensureLocationMarker`(파란 점)는
+      계속 갱신
+- [x] `map_providers.dart` `distanceFilter: 0` → 정차 시 `15`로 가변 (`stationaryModeProvider`를
+      `locationStreamProvider`가 watch, 전이 시 Geolocator 스트림 재구독)
+- [x] `accuracy: bestForNavigation` → 정차 시 `LocationAccuracy.high`로 다운시프트.
+      **참고(감사 확인)**: geolocator_android 문서상 `high`와 `bestForNavigation`은 Android에서
+      동일한 `PRIORITY_HIGH_ACCURACY`로 매핑됨 — 실측 배터리 절감은 주로 `distanceFilter` 쪽에서
+      나올 가능성이 큼(결함 아님, 실기기 검증 시 참고)
+- [x] `map_providers.dart:72` `ref.keepAlive()` — **재검토 결론: 유지**(제거 시 S0 "내 위치
       상시 표시" 회귀 위험). 다운시프트(위 항목)로 홈/설정 화면 배터리 절감은 같은 공유
       스트림을 통해 확보
-- [ ] 재탐색 origin 오프셋 **40m → 50m** (`nav_screen.dart:835`, `:1684` — 현재 확인된 줄번호,
-      체크리스트 원문의 842/1643은 이후 커밋으로 밀린 낡은 값)
+- [x] 재탐색 origin 오프셋 **40m → 50m** (`nav_screen.dart:846`(`_reroute`), `:1702`(`_openCourseSheet`)
+      — 체크리스트 원문의 842/1643은 이후 커밋으로 밀린 낡은 값, 두 곳 모두 확인 후 반영)
 - [-] (선택) Thermal Governor — 옵션 항목, 이번 세션 스코프 밖(백로그 유지)
-- [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정 — 마스터 실기기 검증 대기
+
+> **스코프 판단 1건 — `_addGasStationWaypoint`의 재탐색은 게이트 제외.** HANDOFF는 이
+> 호출부도 "동일 가드"를 적용하되 판단은 코더에게 맡겼다. 코드 확인 결과 이건 사용자가
+> 주유소 카드를 **명시적으로 탭**해야만 발화하는 1회성 트리거이며, `YNAV_REROUTE` 151건/분의
+> 원인인 GPS 지터 자동 재탐색(`_triggerReroute()`)과는 다른 경로다. 게이트를 걸면 정차 중
+> 사용자가 요청한 경유지 추가·재탐색이 조용히 무시되는 역효과만 생긴다 — 게이트 없이 유지가
+> 맞다고 판단(code-auditor 확인 완료, 사용자 탭에서만 호출됨을 콜사이트 추적으로 검증).
+
+> **스트림 재구독 리스크 — 감사로 실증 확인.** `stationaryModeProvider` 전이 시
+> `locationStreamProvider`가 재구독되며 기존 Geolocator 스트림 구독이 끊긴다. geolocator의
+> 플랫폼 구현이 스트림을 필드에 캐시해 두고 `onCancel`에서만 비우는 구조라, disposal이
+> rebuild보다 먼저 실행되지 않으면 새 설정이 적용 안 된 낡은 스트림이 재사용될 위험이 있었다.
+> Riverpod 소스(`ProviderElement._performRebuild()`)로 dispose-먼저 순서를 확인했고,
+> `location_stream_stationary_test.dart`가 실제 플랫폼 채널을 모킹해 정차↔주행 전이 시
+> `distanceFilter`/`accuracy` 값이 매번 새로 전달됨을 직접 검증(감사자가 트리비얼하지 않음을
+> 확인).
+
+- [ ] **검증**: 정차 10분간 `YNAV_REROUTE` 0건 / 배터리 소모 측정 / 정차→재출발 시 안내
+      정상 재개 — **마스터 실기기 수동 검증 대기**
 
 ### S6 · 로터리 안내 재설계  `상태: [ ]` — **원인 확정, 조사 단계 불필요**
 
