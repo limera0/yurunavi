@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// StateProvider는 Riverpod 3에서 legacy.dart로 분리됐다 — stationaryModeProvider
+// (S5)가 단순 명령형 bool 플래그로 이 API를 쓴다.
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../models/poi.dart';
@@ -63,7 +66,20 @@ class SavedRoutesNotifier extends AsyncNotifier<List<SavedRoute>> {
 
 // ── Location ──────────────────────────────────────────────────────────────────
 
+/// 정차 모드 플래그(S5) — `NavStateNotifier`가 자신의 `StationaryDetector`
+/// 결과가 바뀔 때마다 명령형으로 갱신한다(다른 provider를 watch하지 않는
+/// 단순 플래그라 순환 없음). `locationStreamProvider`가 이 값을 watch해
+/// 정차 중 GPS 정확도/거리필터를 낮춘다 — 정차 중 GPS 지터로 인한 fix
+/// 폭주(재탐색 분당 최대 151건 실측, RECON 근거)와 배터리 소모를 억제한다.
+/// nav_state_provider.dart의 `isStationaryProvider`와는 별도 플래그다(모듈
+/// 독립성 유지 — 이 파일은 위치 스트림 설정만 책임진다).
+final stationaryModeProvider = StateProvider<bool>((_) => false);
+
 final locationStreamProvider = StreamProvider<Position>((ref) async* {
+  // ref.watch는 async gap(아래 await) 이전, 최상단에서 호출한다 — 값을
+  // 스트림 시작 시점에 한 번 캡처하고, stationaryModeProvider가 바뀌면
+  // Riverpod가 이 provider 전체를 재빌드(재구독)한다.
+  final stationary = ref.watch(stationaryModeProvider);
   final permission = await Geolocator.checkPermission();
   if (permission != LocationPermission.whileInUse &&
       permission != LocationPermission.always) {
@@ -72,9 +88,12 @@ final locationStreamProvider = StreamProvider<Position>((ref) async* {
   ref.keepAlive();
   yield* Geolocator.getPositionStream(
     locationSettings: AndroidSettings(
-      accuracy: LocationAccuracy.bestForNavigation,
+      // 정차 중(true)엔 한 단계 낮은 정확도로 배터리를 절감한다. distanceFilter
+      // 15m는 정차 중 GPS 지터로 인한 fix 폭주를 걸러내면서도 실제 이동
+      // 재개 시 수 초 내 감지되는 값(HANDOFF_0807_S5 §5 근거).
+      accuracy: stationary ? LocationAccuracy.high : LocationAccuracy.bestForNavigation,
       intervalDuration: const Duration(milliseconds: 1000),
-      distanceFilter: 0,
+      distanceFilter: stationary ? 15 : 0,
       // 디버그 빌드에서는 classic LocationManager를 강제해 Play Services
       // FusedLocationProviderClient를 우회한다 — 가상 GPS(mock test-provider)로
       // 재생 중에도 FLP가 주기적으로(~60초 간격) 자체 판단의 실측 fix를 섞어

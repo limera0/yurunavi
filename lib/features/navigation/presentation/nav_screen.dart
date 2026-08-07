@@ -531,7 +531,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
         // (RECON §6, _recenter가 await를 포함한 비동기라 호출부가 다음 틱을
         // 기다리지 않고 흘려보내는 구조에서 발생).
         final effectiveHeadingDeg = _resolveHeading(next.speedKmh, next.headingDeg);
-        if (!_isManualMode && !_showCourseSheet) {
+        // S5: 정차 모드(5km/h 미만 10초 지속) 동안엔 카메라 추종/앰비언트
+        // POI 페치를 멈춘다 — GPS 지터로 인한 미세 흔들림·불필요 네트워크
+        // 호출 방지. 파란 점(_ensureLocationMarker)은 정차 중에도 최신 위치/
+        // 방향을 반영해야 하므로 게이트하지 않는다.
+        final isStationary = ref.read(isStationaryProvider);
+        if (!isStationary && !_isManualMode && !_showCourseSheet) {
           final isNorthUp = !(ref.read(navHeadingUpProvider).value ?? true);
           _recenter(loc,
               speedKmh: next.speedKmh,
@@ -539,7 +544,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
               forceBearingNorth: isNorthUp);
         }
         _ensureLocationMarker(effectiveHeadingDeg);
-        unawaited(_maybeFetchAmbientPois());
+        if (!isStationary) unawaited(_maybeFetchAmbientPois());
         if (!_tourRecorderStarted) {
           _tourRecorderStarted = true;
           _navStartedAt = DateTime.now();
@@ -797,6 +802,12 @@ class _NavScreenState extends ConsumerState<NavScreen>
       debugPrint('YNAV_REROUTE cooldown skip');
       return;
     }
+    // S5: 정차 중엔 GPS 지터로 인한 이탈 오검출이 반복 재탐색을 유발한다
+    // (분당 최대 151건 실측, RECON 근거) — 디바운스 타이머 자체를 등록하지
+    // 않고 조용히 리턴한다. 이탈 로직(offRoute 판정) 자체는 건드리지 않으므로
+    // 정차 모드가 풀리는(속도 회복) 순간 다음 offRoute 판정에서 이 게이트를
+    // 통과해 정상적으로 다시 재탐색이 걸린다.
+    if (ref.read(isStationaryProvider)) return;
     _offRouteDebounce ??= Timer(const Duration(seconds: _kDebounceSec), () {
       _offRouteDebounce = null;
       final current = ref.read(navStateProvider)?.pos;
@@ -832,9 +843,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final heading =
         navState != null ? _resolveHeading(navState.speedKmh, navState.headingDeg) : null;
     debugPrint('YNAV_REROUTE hdg_src spd=${navState?.speedKmh} rawHdg=${navState?.headingDeg} used=$heading');
-    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
+    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 50);
     final routeOrigin = LatLng(off.lat, off.lng);
-    debugPrint('YNAV_REROUTE off origin hdg=$heading d=40');
+    debugPrint('YNAV_REROUTE off origin hdg=$heading d=50');
     try {
       final routes = await RoutingService.fetchRoutes(
         origin: routeOrigin,
@@ -910,6 +921,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     _liveWaypoints.insert(insertIdx, stationLoc);
     setState(() => _selectedGasStation = null);
+    // S5 판단: 이 reroute는 GPS 지터로 반복 발화하는 자동 이탈 재탐색이
+    // 아니라, 사용자가 목록에서 주유소를 탭해 명시적으로 1회 트리거하는
+    // 호출이다 — isStationary 게이트를 적용하면 정차 중 추가한 경유지가
+    // 반영되지 않는 채로 조용히 묵살돼 실제 사용자 요청을 드롭하는 회귀가
+    // 된다. 재탐색 폭주 억제(§2)는 자동 이탈 감지 경로(_triggerReroute)에만
+    // 적용하고 여기는 게이트하지 않는다 — HANDOFF_0807_S5 §2 참고,
+    // 최종 판단은 이번 세션 구현 시점에 코드를 읽고 내렸다.
     _reroute(currentPos, silent: true);
   }
 
@@ -1681,7 +1699,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // (단순 speedKmh>2 게이트의 2회+ 연속 재탐색 버그, 위 _reroute()와 동일).
     final heading =
         navState != null ? _resolveHeading(navState.speedKmh, navState.headingDeg) : null;
-    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 40);
+    final off = offsetOrigin(origin.latitude, origin.longitude, heading, 50);
     final routeOrigin = LatLng(off.lat, off.lng);
     try {
       final routes = await RoutingService.fetchRoutes(

@@ -3,10 +3,15 @@ import 'dart:math' show sin, cos, sqrt, asin;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// StateProvider는 Riverpod 3에서 legacy.dart로 분리됐다 — isStationaryProvider
+// (S5)가 단순 명령형 bool 플래그로 이 API를 쓴다.
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../map/providers/map_providers.dart' show locationStreamProvider;
+import '../../map/providers/map_providers.dart'
+    show locationStreamProvider, stationaryModeProvider;
+import 'stationary_detector.dart';
 
 @immutable
 class NavigationState {
@@ -32,6 +37,14 @@ class NavigationState {
 final navStateProvider =
     NotifierProvider<NavStateNotifier, NavigationState?>(NavStateNotifier.new);
 
+/// 정차 모드(속도 5km/h 미만 10초 이상 지속, [StationaryDetector] 참고) 판정
+/// 결과. `NavStateNotifier`가 매 속도 틱마다 명령형으로 갱신한다(watch
+/// 순환이 아니라 단순 플래그) — nav_screen.dart의 재탐색/POI페치/카메라추종
+/// 게이트가 이 값을 읽는다. GPS 스트림 설정 자체를 낮추는
+/// `stationaryModeProvider`(map_providers.dart)와는 별도 플래그다 — 모듈
+/// 독립성 유지 목적(같은 순간에 같은 값으로 함께 갱신된다).
+final isStationaryProvider = StateProvider<bool>((_) => false);
+
 class NavStateNotifier extends Notifier<NavigationState?> {
   static const _kStaleMs      = 8000;
   static const _kFastStopMs   = 1500;
@@ -56,6 +69,10 @@ class NavStateNotifier extends Notifier<NavigationState?> {
   LatLng? _vPrevPos, _vCurPos;
 
   Timer? _ticker;
+
+  // S5: 정차 모드 상태머신 — _moving(순간 판정, 위)과는 별개의 지속시간
+  // 판정. _tickSpeed()가 200ms마다 최신 _speedKmh를 공급한다.
+  final _stationaryDetector = StationaryDetector();
 
   @override
   NavigationState? build() {
@@ -160,6 +177,11 @@ if (state != null) return;
   }
 
   void _tickSpeed() {
+    // S5: 첫 fix를 받기 전엔 _speedKmh가 "아직 모름"이지 "정지"가 아니므로
+    // 피드하지 않는다 — 정차 모드를 앞당겨 GPS 정확도를 낮추면 최초 fix
+    // 획득이 늦어질 위험이 있다.
+    if (_firstFixReceived) _updateStationary(_speedKmh);
+
     final curAt = _vCurAt;
     final vCur = _vCur;
     if (curAt == null || vCur == null) return;
@@ -219,6 +241,18 @@ if (state != null) return;
       _speedKmh = kmh;
       _emitState();
     }
+  }
+
+  /// [StationaryDetector]에 이번 틱의 속도를 공급하고, 판정 결과가 바뀌면
+  /// `isStationaryProvider`/`stationaryModeProvider` 두 플래그를 함께
+  /// 명령형으로 갱신한다(둘 다 아무것도 watch하지 않는 단순 플래그라 순환
+  /// 없음 — HANDOFF_0807_S5 §5 참고).
+  void _updateStationary(double speedKmh) {
+    final was = _stationaryDetector.isStationary;
+    final now = _stationaryDetector.feed(speedKmh);
+    if (now == was) return;
+    ref.read(isStationaryProvider.notifier).state = now;
+    ref.read(stationaryModeProvider.notifier).state = now;
   }
 
   void _emitState() {
