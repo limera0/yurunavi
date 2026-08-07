@@ -593,10 +593,14 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 - [ ] `nav_screen.dart:2685` B034 표시 경로 점검
 - [ ] 참고: `MORNING_REPORT_0730_gasstation_search_chip_and_premium_bug.md` (기존 수정 이력)
 
-### S12 · 도로 색상  `상태: [ ]`
+### S12 · 도로 색상  `상태: [x]` (커밋 45580bd)
 
-- [ ] `assets/images/osm_liberty_yurunavi.json` — 국도만 노란색, 지방도 흰색
-- [ ] OSMAND·네이버지도 대조
+- [x] `assets/images/osm_liberty_yurunavi.json` — trunk+primary(국도)=#F8D49A,
+      secondary(지방도)=#FDF0B4, tertiary+minor/service/track(나머지)=#FFFFFF.
+      본선+케이싱+터널+교량+ramp(highway-link) 전부 적용. 고속도로(motorway)
+      기존 색상·굵기 미변경. 색상값은 `loop/testride_result/road_color.jpg`
+      픽셀 샘플링 + 로컬 tileserver-gl 렌더 미리보기로 검증.
+- [ ] OSMAND·네이버지도 대조 — **실기기·육안 확인은 마스터 몫으로 남김**
 
 ### S13 · Valhalla CI 실패  `상태: [ ]` — 우선순위 최하
 
