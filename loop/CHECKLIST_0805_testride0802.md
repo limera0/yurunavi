@@ -577,13 +577,28 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 - [ ] 나무위키 자동차전용도로 목록으로 **검증 좌표셋** 구성
 - [ ] **검증**: 검증셋 전 구간에 대해 경로가 진입하지 않음
 
-### S10 · 지방도 좌회전 오안내 억제  `상태: [ ]`
+### S10 · 회전 안내 등급 기반 억제  `상태: [x]` (커밋 35d29e1)
 
-- [ ] Valhalla 응답에 `road_class` 포함 여부 **계약 확인** (curl)
-- [ ] `ManeuverStep`에 진입/진출 도로 등급 추가 (`routing_service.dart:46` 근처)
-- [ ] **등급 유지·상승 회전은 안내 억제, 하락할 때만 안내** (마스터 요구 그대로)
-- [ ] memory `feedback_accurate_maneuver_wording` 준수 — 실제 회전이 아닌 이벤트에
-      "회전" 표현 금지
+- [x] Valhalla 응답에 `road_class` 포함 여부 **계약 확인** (curl) — `/route`
+      maneuvers엔 없음, `/trace_attributes`의 `edge.road_class`로 확인
+      (기존 trace_attributes 호출에 속성 1개만 추가, 신규 HTTP 호출 없음)
+- [x] `ManeuverStep`에 필드 직접 추가 **대신** 진입/진출 도로 등급을
+      `route_progress_provider`의 별도 맵(`exitStructureByManeuverIdx`와
+      동일 패턴)으로 계산·캐싱 — trace_attributes 비동기 도착 타이밍 문제로
+      불변 클래스에 필드 추가보다 기존 패턴 재사용이 적합하다고 판단
+      (HANDOFF 참조)
+- [x] **등급 유지·상승 회전은 안내 억제, 하락할 때만 안내** — 마스터 확인:
+      모든 회전 방향(좌/우/직진 갈림) 적용. turn_left/turn_right/
+      sharp_turn_*/keep*에만 적용, ramp/exit/roundabout/uturn/merge/
+      destination/continue는 등급 무관 항상 정상 안내. road_class 판정
+      불가 시 fail-open(정상 안내)
+- [x] memory `feedback_accurate_maneuver_wording` 준수 — 갈림길 차선유지
+      (keep/keep_left/keep_right = Valhalla type 22/23/24)가 억제 대상
+      이벤트군에 정확히 포함됨
+- [ ] **음성만 억제, 화면 상단 턴 카드는 미반영** — 의도적 스코프 제한
+      (HANDOFF "알려진 리스크" 참조). 카드까지 반영하려면 별도 작업 필요
+- [ ] **실기기 검증 대기** — 국도→지방도 갈림길(안내 나와야 함) vs 지방도
+      내 등급 유지 갈림길(안내 없어야 함) 실주행 확인
 
 ### S11 · 고급휘발유 미표시  `상태: [ ]`
 
