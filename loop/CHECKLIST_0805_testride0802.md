@@ -595,17 +595,22 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 
 ## 🟡 P2 — 데이터·라우팅
 
-### S9 · 자동차전용도로 하드 배제  `상태: [ ]`
+### S9 · 자동차전용도로 하드 배제  `상태: [ ] 착수` (2026-08-10, S1b 다음 순번)
 
 > **오토바이 법적 절대 원칙** (memory: `project_motorcycle_legal_constraints`).
 > 현재는 소프트 패널티라 대안 없으면 뚫고 지나간다.
+>
+> 지시서: [HANDOFF_0810_S9_motorroad_hard_exclusion.md](HANDOFF_0810_S9_motorroad_hard_exclusion.md).
+> **`motorroad=yes`가 "코스팅만 고치면 됨"이라던 아래 전제는 정정됨** — 해당 태그는
+> 그래프에 남지 않아 코스팅 레벨에서 조회 불가함을 확인. 대안(exclude_polygons 등)은
+> 지시서 §2 참고. 아래 원 항목은 참고용으로만 남김, 실제 작업은 지시서 기준.
 
-- [ ] `routing_service.dart:157, 178` — `use_highways: 0.0` + `highway_classes {'0':100}`
-      **패널티 → 하드 배제**로 전환
-- [ ] **`motorroad=yes` 태그 배제** — 38번 지방도 사례의 핵심.
-      `use_highways`/`highway_classes`가 이 태그를 **전혀 보지 않음**.
-      ⚠️ **`native/`(Rust) 아님 — Valhalla 포크(C++) 코스팅 수정 필요**
-- [ ] 나무위키 자동차전용도로 목록으로 **검증 좌표셋** 구성
+- [ ] `routing_service.dart:174-186, 195-206`(라인은 낡음, 지시서 §1 참고) —
+      `use_highways: 0.0` + `class_factors['0']:100` **패널티 → 하드 배제**로 전환
+      (지시서 §1 트랙A: Valhalla 포크 `motorcyclecost.cc` RoadClass 체크)
+- [ ] **`motorroad=yes` 태그 배제** — 38번 지방도 사례의 핵심 (지시서 §2 트랙B:
+      exclude_polygons 우선 검토, 목록 규모 확인 후 결정)
+- [ ] 나무위키 자동차전용도로 목록으로 **검증 좌표셋** 구성 (지시서 §2, 이 리포엔 아직 없음)
 - [ ] **검증**: 검증셋 전 구간에 대해 경로가 진입하지 않음
 
 ### S10 · 회전 안내 등급 기반 억제  `상태: [x]` (커밋 35d29e1)
