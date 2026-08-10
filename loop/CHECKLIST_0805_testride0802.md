@@ -4,16 +4,19 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 11 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7·S8 코드 완료 — 실기기
+**진행 요약: 12 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7·S8·S14 코드 완료 — 실기기
 검증만 마스터 대기. S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 구현 완료** — 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이
 (SYSTEM_ALERT_WINDOW) 자체 구현 완료.
 **S1b 신설** — 마스터 스크린샷 실측으로 백화가 두 개의 별개 결함이었음이 밝혀졌다(아직 미착수).
-**S14 신설** — 일출일몰 바 야간 결함(마스터 추가 제보, 원인 확정, 아직 미착수).
+**S14 2026-08-10 코드 완료** — nextBmnt ±24h 근사 버그 수정(실제 전일/익일 calculate() 조회로
+교체) + 야간 색상 반전(AppColors 토큰화 포함, 마스터 승인) + 서비스 테스트 신규 4건·위젯
+테스트 3건. code-auditor PASS(커밋 `d2eaf92`). 실기기 야간 육안 확인만 마스터 대기.
 **O0(관광지 데이터 파이프라인) 2026-08-06 저녁 코드 완료** — §O 참고, 38건 카운트와 별도 트랙.
 **S5·S6·S7·S8(정차모드·로터리방향·터널추측항법·UI잔여) 2026-08-07 코드 완료** — P1(주행
-품질) 트랙 전부 완료. 다음 큐: S10·S11·S13 (S9는 Valhalla 포크 별도 승인 필요, S12는
-마스터 스크린샷 대기로 제외))
+품질) 트랙 전부 완료. **S13은 2026-08-10 저녁 스티어링에서 스코프 확인 완료** — yurunavi
+저장소 밖(valhalla-src) 작업이라 별도 세션에서 진행하기로 결정(방식: 로컬 수정 후
+`git push backup yurunavi-fork`). S9·S10 기완료. 다음 큐: S1b·S11·S13.
 
 ---
 
@@ -514,7 +517,7 @@
 > `nav_screen.dart`의 화면 카드(`_maneuverText`)는 여전히 신뢰 불가로 확정된
 > `roundaboutExitCount`를 그대로 표시한다 — S6/S8 어느 쪽 스코프도 아니었다.
 
-### S14 · 일출일몰 바 야간 모드 결함  `상태: [ ]` — **원인 확정, 조사 불필요**
+### S14 · 일출일몰 바 야간 모드 결함  `상태: [x]` — 코드 완료(2026-08-10, 커밋 `d2eaf92`), 실기기 야간 육안 확인만 마스터 대기
 
 > **신설 2026-08-05** (마스터 추가 제보 — 최초 35건 목록에서 누락됐던 건).
 > 증상 두 가지: ① **밤에 게이지 핸들이 시간에 따라 제대로 안 움직인다**
@@ -561,13 +564,12 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 이후 새벽 내내 **정상 속도의 약 1/3.4로 기어간다** — 마스터가 "움직이지 않는다"고
 느낀 실체가 이것이다(아주 안 움직이는 게 아니라 3배 느리게 움직인다).
 
-- [ ] `daylight_service.dart:168-170` — `now.isBefore(today.bmnt)`일 때
+- [x] `daylight_service.dart:168-170` — `now.isBefore(today.bmnt)`일 때
       **끝점을 `today.bmnt`로** 잡도록 수정 (시작점 분기는 이미 옳다)
-- [ ] (권고) `±24h` 근사 대신 `calculate(date: 전일/익일)`로 **실제 전일 일몰·익일 일출**을
-      쓰면 정확도가 오른다. 로컬 계산이라 비용 거의 없음
-- [ ] **테스트가 0건이다** — `test/`에 `DaylightService` 테스트가 하나도 없어서 이 결함이
-      살아남았다. 최소 4케이스: 낮 중간 / 일몰 직후 / **자정 직전·직후 연속성** /
-      **일출 직전(이번 케이스)**
+- [x] (권고 채택) `±24h` 근사 대신 `calculate(date: 전일/익일)`로 **실제 전일 일몰·익일 일출**을
+      쓰도록 구현 — 근사 오차 자체를 제거
+- [x] **테스트 신설** — `test/services/daylight_service_test.dart` 4케이스(낮 중간·일몰 직후·
+      자정 전후 연속성·일출 직전) + code-auditor가 수정 전 코드로 되돌려 재현·확인함
 
 #### ② 야간 색상 반전 (마스터 요구)
 
@@ -575,18 +577,20 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 원인: `daylight_bar.dart:55` `containerBg`가 야간에 `cs.surface`인데 **라이트 테마의
 `surface`는 흰색**이라, 사실상 낮과 동일한 배경이 나온다.
 
-- [ ] **배경/그래프 반전** — 야간: 배경 **짙은 남색**(현 바 색 `0xFF1A237E` 계열),
-      바 **밝은 색**(`0xFFFFF9C4` 계열/흰색). 낮은 현행 유지(흰 배경 + 연노랑 바)
-- [ ] ⚠️ **라벨·아이콘 색도 함께 반전해야 한다** — 배경만 어둡게 하면
-      `sunriseColor`(`cs.onSurfaceVariant`)·`sunsetColor`(`cs.tertiary`) 라벨이 묻는다.
-      대비비(WCAG AA 4.5:1) 확인할 것
-- [ ] ⚠️ `containerBg`를 `cs.surface`에 의존하지 말 것 — 테마 밝기와 무관하게
-      **주야 상태로만** 결정돼야 한다(현 버그의 원인)
-- [ ] 로드맵 11번(하드코딩 스타일 → 토큰) 고려 — `daylight_bar.dart`의
-      `0xFF1A237E`/`0xFFFFF59D`/`0xFFFFF9C4`/`0xFFFFB300`을 `AppColors` 토큰으로
-      (현재 `AppColors.sunrise`/`sunset`만 존재)
-- [ ] **검증**: 낮/일몰직후/자정전후/일출직전 4시점 골든 또는 위젯 테스트 +
-      실기기 야간 육안 확인
+- [x] **배경/그래프 반전** — 야간: 배경 **짙은 남색**(`AppColors.daylightNightBg`
+      `0xFF1A237E`), 바/핸들 **밝은 색**(`AppColors.daylightNightAccent` `0xFFFFF9C4`).
+      낮은 현행 유지(흰 배경 + 연노랑 바, `daylightDayBg`/`daylightDayBar` 토큰화)
+- [x] **라벨·아이콘 색도 함께 반전** — `sunriseColor`/`sunsetColor` 모두 야간엔
+      `daylightNightAccent`로 통일. 대비비 재계산(code-auditor) **12.36:1** — AA(4.5:1) 물론
+      AAA(7:1)도 통과
+- [x] `containerBg`가 `cs.surface`에 의존하지 않도록 수정 — `AppColors.daylightNightBg`/
+      `daylightDayBg` 토큰이 주야 상태로만 결정 (현 버그의 원인 제거)
+- [x] 로드맵 11번(하드코딩 스타일 → 토큰) — **이번 건에 포함하기로 마스터 승인**.
+      `0xFF1A237E`/`0xFFFFF59D`/`0xFFFFF9C4`을 `AppColors.daylightNightBg`/`daylightDayBar`/
+      `daylightNightAccent`로, day 핸들 `0xFFFFB300`은 기존 `AppColors.sunrise`(동일값) 재사용
+- [x] **검증**: 위젯 테스트로 대체(골든 인프라 프로젝트에 없음, 신설 안 함) —
+      `daylight_bar_test.dart`에 야간/낮 pill 배경색 케이스 3건 추가. 실기기 야간 육안
+      확인은 여전히 **마스터 대기**
 
 > **참고**: S1에서 이 위젯의 `clamp` 크래시를 고치며 렌더 경로는 이미 정리됐다.
 > 이번 건은 **계산부(`daylight_service.dart`)와 색상 결정 로직**이라 S1과 겹치지 않는다.
@@ -667,6 +671,15 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 - [ ] OSMAND·네이버지도 대조 — **실기기·육안 확인은 마스터 몫으로 남김**
 
 ### S13 · Valhalla CI 실패  `상태: [ ]` — 우선순위 최하
+
+> **2026-08-10 저녁 스티어링에서 스코프 확인**: 대상 파일은
+> `/data/projects/valhalla-src/.github/workflows/clean_cache.yml` —
+> **yurunavi 저장소 밖**(별도 로컬 체크아웃, `yurunavi-fork` 브랜치)이라
+> CLAUDE.md "이 저장소로 스코프 고정" 규칙에 걸린다. 마스터 결정: **별도 세션에서
+> 진행**(모듈당 1세션 원칙 준수) — 방식은 로컬에서 워크플로 파일을 수정/삭제하는
+> 커밋을 만들고 `git push backup yurunavi-fork`로 반영(기존 백업 절차와 동일,
+> `origin`은 공식 valhalla/valhalla라 push 금지). gh CLI 미설치 확인됨 — GitHub UI
+> 조작이 필요하면 마스터가 직접 처리.
 
 - [ ] 포크의 "Clear S3 cache" 워크플로 비활성화 (앱과 무관, 업스트림 잔재)
 
