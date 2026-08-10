@@ -1,6 +1,6 @@
 services:
   valhalla:
-    image: valhalla-fork:patch6-turnangle2
+    image: valhalla-fork:patch7-s9-hardexclude
     container_name: yurunavi-valhalla
     restart: unless-stopped
     ports:
