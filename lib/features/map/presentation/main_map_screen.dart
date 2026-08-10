@@ -2978,7 +2978,6 @@ class _PlacesSheet extends ConsumerWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 검색시트의 검색 모드 — 기본값 business로 기존 상호명 검색 동작을 그대로 보존한다.
-enum _SearchMode { business, address }
 
 class _PoiExploreSheet extends ConsumerStatefulWidget {
   final LatLng? origin;
@@ -3014,14 +3013,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   Future<List<GasStation>>? _gasStationFuture;
 
   // ── 주소 검색(V-World 지오코더 프록시) 관련 상태 ──────────────────────────
-  // 기본값 business로 고정 — 기존 사용자에게는 오늘 동작이 그대로 유지된다.
-  _SearchMode _searchMode = _SearchMode.business;
   final AddressSearchService _addressSearchService = AddressSearchService();
   List<AddressResult> _addressResults = [];
   bool _addressLoading = false;
   // "아직 검색 안 함"과 "검색했지만 0건"을 구분할 별도 플래그.
   bool _addressSearched = false;
-  String? _addressErrorMessage;
   // 텍스트 변경(자동완성 포함) 후 자동 검색까지의 디바운스 타이머 — 키 입력마다
   // 쏘지 않고 입력이 잠시 멈췄을 때만 조회해 쿼터가 있는 외부 지오코더 호출량을
   // 억제한다(2026-07-18: OS 키보드 자동완성으로 채워넣으면 onSubmitted가 전혀
@@ -3065,25 +3061,7 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
 
   /// 상호명/주소 검색 모드 전환. 검색창 텍스트와 각 모드의 검색 결과 상태를
   /// 초기화해 모드가 바뀐 뒤 이전 모드의 잔여 텍스트/결과가 뒤섞여 보이는 걸 막는다.
-  void _setSearchMode(_SearchMode mode) {
-    if (mode == _searchMode) return;
-    // 모드를 벗어나는 순간 아직 안 쏜 디바운스 검색이 남아있으면 안 된다(예: 주소
-    // 입력 중 모드를 상호명으로 바꿨는데 잠시 후 엉뚱하게 예전 텍스트로 조회가 발동).
-    _addressDebounce?.cancel();
-    setState(() {
-      _searchMode = mode;
-      _addressResults = [];
-      _addressLoading = false;
-      _addressSearched = false;
-      _addressErrorMessage = null;
-      // clear()가 리스너(_onSearchChanged)를 동기적으로 호출하므로, 그 시점에
-      // _searchMode가 이미 새 값이어야 business 전용 가드가 올바르게 동작한다.
-      _searchCtrl.clear();
-    });
-    ref.read(poiListProvider.notifier).set(_mapPinPois);
-  }
-
-  /// V-World 지오코더 프록시(`AddressSearchService`) 호출. 명시적 제출(엔터/검색
+/// V-World 지오코더 프록시(`AddressSearchService`) 호출. 명시적 제출(엔터/검색
   /// 버튼)과 디바운스 자동검색(`_onAddressTextChanged`) 양쪽에서 호출된다 — 어느
   /// 경로로 오든 아직 안 쏜 디바운스 타이머가 남아있으면 중복 호출을 막기 위해
   /// 먼저 취소한다(명시적 제출이 디바운스보다 먼저 도착한 경우 등).
@@ -3093,27 +3071,32 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
     if (trimmed.isEmpty) return;
     setState(() {
       _addressLoading = true;
-      _addressErrorMessage = null;
     });
     try {
-      final results = await _addressSearchService.search(trimmed);
+      final rawResults = await _addressSearchService.search(trimmed);
       if (!mounted) return;
       // 응답 대기 중 사용자가 검색창을 지우거나 다른 텍스트로 바꿨으면(디바운스로
       // 이미 새 검색이 걸렸을 수도 있음) 이 낡은 응답으로 화면을 덮어쓰지 않는다.
       if (_searchCtrl.text.trim() != trimmed) return;
+      final results = List<AddressResult>.from(rawResults);
+      final origin = widget.origin;
+      if (origin != null && results.length > 1) {
+        results.sort((a, b) =>
+            PoiService.haversineMeters(origin, a.location)
+                .compareTo(PoiService.haversineMeters(origin, b.location)));
+      }
       setState(() {
         _addressResults = results;
         _addressLoading = false;
         _addressSearched = true;
       });
-    } on AddressSearchException catch (e) {
+    } on AddressSearchException {
       if (!mounted) return;
       if (_searchCtrl.text.trim() != trimmed) return;
       setState(() {
         _addressResults = [];
         _addressLoading = false;
         _addressSearched = true;
-        _addressErrorMessage = e.toString();
       });
     }
   }
@@ -3143,13 +3126,11 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       _selectedTypes.length == 1 && _selectedTypes.single == PoiType.gasStation;
 
   void _onSearchChanged() {
-    if (_searchMode == _SearchMode.address) {
-      _onAddressTextChanged();
-      return;
-    }
-    // 상호명 실시간 필터링 — 키 입력마다 클라이언트에서만 필터링(재조회 없음).
+    // Business: instant client-side filter
     setState(() {});
     ref.read(poiListProvider.notifier).set(_mapPinPois);
+    // Address: debounced API call
+    _onAddressTextChanged();
   }
 
   /// 주소 모드에서 검색창 텍스트가 바뀔 때마다(키 입력은 물론, OS 키보드
@@ -3169,13 +3150,12 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         _addressResults = [];
         _addressLoading = false;
         _addressSearched = false;
-        _addressErrorMessage = null;
       });
       return;
     }
     if (trimmed.length < 2) return; // 한 글자만으로는 조회하지 않음.
     _addressDebounce = Timer(
-      const Duration(milliseconds: 500),
+      const Duration(milliseconds: 300),
       () => _searchAddress(trimmed),
     );
   }
@@ -3328,44 +3308,15 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
               ),
               const SizedBox(height: 8),
 
-              // ── 검색 모드 전환(상호명/주소) ───────────────────────────────
-              Row(
-                children: [
-                  ChoiceChip(
-                    label: const Text('상호명'),
-                    selected: _searchMode == _SearchMode.business,
-                    onSelected: (_) => _setSearchMode(_SearchMode.business),
-                    labelStyle: const TextStyle(fontSize: 12),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('주소'),
-                    selected: _searchMode == _SearchMode.address,
-                    onSelected: (_) => _setSearchMode(_SearchMode.address),
-                    labelStyle: const TextStyle(fontSize: 12),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-
-              // ── 상호명/주소 검색 입력창(공용) ─────────────────────────────
+              // ── 검색 입력창 ───────────────────────────────────────────────
               TextField(
                 controller: _searchCtrl,
                 focusNode: _searchFocusNode,
                 decoration: InputDecoration(
-                  hintText: _searchMode == _SearchMode.business
-                      ? '상호명으로 검색 (예: 스타벅스)'
-                      : '도로명주소 또는 지번주소 입력',
+                  hintText: '장소명 또는 주소 입력',
                   hintStyle: const TextStyle(fontSize: 13),
                   prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _searchMode == _SearchMode.address
-                      ? IconButton(
-                          icon: const Icon(Icons.search, size: 20),
-                          onPressed: () => _searchAddress(_searchCtrl.text),
-                        )
-                      : null,
+                  suffixIcon: null,
                   isDense: true,
                   filled: true,
                   fillColor: Colors.grey.shade100,
@@ -3376,13 +3327,12 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
                   ),
                 ),
                 style: const TextStyle(fontSize: 13),
-                onSubmitted: _searchMode == _SearchMode.address ? _searchAddress : null,
+                onSubmitted: _searchAddress,
               ),
               const SizedBox(height: 10),
 
-              // ── 카테고리 필터 칩(상호명 검색 전용) ─────────────────────────
-              if (_searchMode == _SearchMode.business)
-                SizedBox(
+              // ── 카테고리 필터 칩 ──────────────────────────────────────────
+              SizedBox(
                   height: 40,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
@@ -3445,10 +3395,163 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
         ),
       );
     }
-    if (_searchMode == _SearchMode.address) {
-      return _buildAddressBody(origin);
+    if (_searchCtrl.text.trim().isNotEmpty) {
+      return _buildUnifiedBody(origin);
     }
     return _buildBusinessBody(origin);
+  }
+
+  Widget _buildUnifiedBody(LatLng origin) {
+    if (_isGasStationOnly) return _buildGasStationBody();
+
+    final visible = _visibleResults;
+
+    // POI 섹션
+    late final Widget poiSection;
+    if (_loading) {
+      poiSection = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    } else if (visible.isNotEmpty) {
+      poiSection = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('상호명',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          ...visible.map((poi) {
+            final dist = PoiService.haversineMeters(origin, poi.location);
+            final address = poi.address;
+            return ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Color(poi.type.colorValue),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              title: Text(poi.name, style: const TextStyle(fontSize: 14)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_formatDistance(dist),
+                      style: const TextStyle(fontSize: 11)),
+                  if (address != null)
+                    Text(
+                      address,
+                      style: const TextStyle(
+                          fontSize: 10, color: Colors.grey),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+              trailing: _FavoriteStarButton(
+                lat: poi.location.latitude,
+                lng: poi.location.longitude,
+                initialName: poi.name,
+              ),
+              onTap: () {
+                ref
+                    .read(searchHistoryProvider.notifier)
+                    .add(SearchHistoryItem(
+                      query: poi.name,
+                      lat: poi.location.latitude,
+                      lng: poi.location.longitude,
+                      type: 'poi',
+                      timestamp: DateTime.now(),
+                    ));
+                widget.onSelectDest(poi);
+              },
+            );
+          }),
+        ],
+      );
+    } else {
+      poiSection = const SizedBox.shrink();
+    }
+
+    // 주소 섹션
+    late final Widget addressSection;
+    if (_addressLoading) {
+      addressSection = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    } else if (_addressResults.isNotEmpty) {
+      addressSection = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(
+                top: visible.isNotEmpty ? 8.0 : 0.0, bottom: 4.0),
+            child: const Text('주소',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w600)),
+          ),
+          ..._addressResults.map((r) {
+            final dist = PoiService.haversineMeters(origin, r.location);
+            return ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.location_on_outlined, size: 20),
+              title: Text(r.address, style: const TextStyle(fontSize: 14)),
+              subtitle: Text(_formatDistance(dist),
+                  style: const TextStyle(fontSize: 11)),
+              trailing: _FavoriteStarButton(
+                lat: r.location.latitude,
+                lng: r.location.longitude,
+                initialName: r.address,
+              ),
+              onTap: () {
+                ref
+                    .read(searchHistoryProvider.notifier)
+                    .add(SearchHistoryItem(
+                      query: r.address,
+                      lat: r.location.latitude,
+                      lng: r.location.longitude,
+                      type: 'address',
+                      timestamp: DateTime.now(),
+                    ));
+                widget.onSelectAddress(r);
+              },
+            );
+          }),
+        ],
+      );
+    } else {
+      addressSection = const SizedBox.shrink();
+    }
+
+    // 둘 다 비고 검색 완료인 경우 "결과 없음" 표시
+    if (visible.isEmpty &&
+        !_loading &&
+        _addressResults.isEmpty &&
+        !_addressLoading &&
+        _addressSearched) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text('검색 결과가 없습니다',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [poiSection, addressSection],
+    );
   }
 
   Widget _buildHistoryBody() {
@@ -3517,69 +3620,6 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
           ],
         );
       },
-    );
-  }
-
-  Widget _buildAddressBody(LatLng origin) {
-    if (_addressLoading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_addressErrorMessage != null) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: Text('검색 중 오류가 발생했습니다',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
-        ),
-      );
-    }
-    if (!_addressSearched) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: Text('주소를 입력하고 검색하세요',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
-        ),
-      );
-    }
-    if (_addressResults.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: Text('검색 결과가 없습니다',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
-        ),
-      );
-    }
-    return Column(
-      children: _addressResults.map((r) {
-        final dist = PoiService.haversineMeters(origin, r.location);
-        return ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.location_on_outlined, size: 20),
-          title: Text(r.address, style: const TextStyle(fontSize: 14)),
-          subtitle: Text(_formatDistance(dist), style: const TextStyle(fontSize: 11)),
-          trailing: _FavoriteStarButton(
-            lat: r.location.latitude,
-            lng: r.location.longitude,
-            initialName: r.address,
-          ),
-          onTap: () {
-            ref.read(searchHistoryProvider.notifier).add(SearchHistoryItem(
-              query: r.address,
-              lat: r.location.latitude,
-              lng: r.location.longitude,
-              type: 'address',
-              timestamp: DateTime.now(),
-            ));
-            widget.onSelectAddress(r);
-          },
-        );
-      }).toList(),
     );
   }
 
