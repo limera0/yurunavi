@@ -57,6 +57,10 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(height: 1),
           // TODO Phase 2: 안내 음성 / 안내 언어
 
+          const _SectionHeader(title: '이어서 안내하기'),
+          _ResumeThresholdSelector(),
+          const Divider(height: 1),
+
           const _SectionHeader(title: '앱 설정'),
           _LanguageSelector(),
           if (Platform.isAndroid) _IdeographFontSelector(),
@@ -143,6 +147,49 @@ class _LanguageSelector extends ConsumerWidget {
           onChanged: (v) {
             if (v != null) {
               ref.read(mapLanguageProvider.notifier).setLanguage(v);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+const _resumeThresholdOptions = [1, 2, 3, 6, 12, 24];
+
+String _resumeThresholdLabel(int hours) => '$hours시간';
+
+/// 강제종료/OOM으로 중단된 투어를 "이어서 안내"로 제안할지 판단하는 시간
+/// 범위(오탐 방지 임계치). 마지막 위치 기록이 이 시간 이내면 재개를
+/// 제안하고, 넘으면 일반 히스토리로 확정 저장한다(HANDOFF_0810_S15 §2).
+class _ResumeThresholdSelector extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final thresholdAsync = ref.watch(resumeThresholdHoursProvider);
+    return thresholdAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      ),
+      error: (err, _) => const SizedBox.shrink(),
+      data: (hours) => ListTile(
+        visualDensity: VisualDensity.compact,
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        title: const Text('재개 제안 시간 범위'),
+        subtitle: const Text('중단된 투어를 이어서 안내할지 제안하는 시간 범위입니다.'),
+        trailing: DropdownButton<int>(
+          value: hours,
+          underline: const SizedBox.shrink(),
+          items: _resumeThresholdOptions
+              .map((option) => DropdownMenuItem(
+                    value: option,
+                    child: Text(_resumeThresholdLabel(option)),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) {
+              ref.read(resumeThresholdHoursProvider.notifier).set(v);
             }
           },
         ),

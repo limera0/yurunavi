@@ -94,3 +94,25 @@ class MapIdeographFontFamilyNotifier extends AsyncNotifier<String> {
 final koreanFontListProvider = FutureProvider<List<String>>(
   (ref) => ref.read(ideographFontServiceProvider).listKoreanFonts(),
 );
+
+// ── "이어서 안내하기" 재개 제안 임계치 (시간 단위, 기본 2시간) ─────────────
+final resumeThresholdHoursProvider =
+    AsyncNotifierProvider<ResumeThresholdHoursNotifier, int>(
+        ResumeThresholdHoursNotifier.new);
+
+class ResumeThresholdHoursNotifier extends AsyncNotifier<int> {
+  static const _key = 'resume_threshold_hours_v1';
+  static const _default = 2;
+
+  @override
+  Future<int> build() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_key) ?? _default;
+  }
+
+  Future<void> set(int hours) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_key, hours);
+    state = AsyncData(hours);
+  }
+}
