@@ -87,6 +87,44 @@ class PlacesService {
     await prefs.setStringList(_recentKey, trimmed);
   }
 
+  // ── Search history ─────────────────────────────────────────────────────────
+
+  static const _searchHistoryKey = 'search_history_v1';
+  static const _maxSearchHistory = 20;
+
+  Future<List<SearchHistoryItem>> loadSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_searchHistoryKey) ?? [];
+    return raw
+        .map((s) => SearchHistoryItem.fromJsonString(s))
+        .toList()
+        .reversed
+        .toList();
+  }
+
+  Future<void> addSearchQuery(SearchHistoryItem item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_searchHistoryKey) ?? [];
+    // 중복 제거 (같은 query 이전 항목 제거)
+    raw.removeWhere((s) {
+      try {
+        return SearchHistoryItem.fromJsonString(s).query == item.query;
+      } catch (_) {
+        return false;
+      }
+    });
+    raw.add(item.toJsonString());
+    final trimmed = raw.length > _maxSearchHistory
+        ? raw.sublist(raw.length - _maxSearchHistory)
+        : raw;
+    await prefs.setStringList(_searchHistoryKey, trimmed);
+  }
+
+  Future<void> clearSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_searchHistoryKey);
+  }
+
   // ── Favorite categories (설정 > 즐겨찾기 카테고리) ───────────────────────────
 
   Future<List<String>> loadCategories() async {

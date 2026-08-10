@@ -515,6 +515,28 @@ class RecentRoutesNotifier extends AsyncNotifier<List<RecentRoute>> {
   }
 }
 
+// ── Search history ────────────────────────────────────────────────────────────
+
+final searchHistoryProvider =
+    AsyncNotifierProvider<SearchHistoryNotifier, List<SearchHistoryItem>>(
+        SearchHistoryNotifier.new);
+
+class SearchHistoryNotifier extends AsyncNotifier<List<SearchHistoryItem>> {
+  @override
+  Future<List<SearchHistoryItem>> build() =>
+      ref.read(placesServiceProvider).loadSearchHistory();
+
+  Future<void> add(SearchHistoryItem item) async {
+    await ref.read(placesServiceProvider).addSearchQuery(item);
+    ref.invalidateSelf();
+  }
+
+  Future<void> clear() async {
+    await ref.read(placesServiceProvider).clearSearchHistory();
+    ref.invalidateSelf();
+  }
+}
+
 // ── Route type filter ─────────────────────────────────────────────────────────
 
 enum RouteTypeFilter { country, provincial, national }

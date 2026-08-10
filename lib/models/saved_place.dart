@@ -103,3 +103,40 @@ class RecentRoute {
   factory RecentRoute.fromJsonString(String s) =>
       RecentRoute.fromJson(jsonDecode(s) as Map<String, dynamic>);
 }
+
+/// 검색 이력 항목.
+class SearchHistoryItem {
+  final String query;      // 검색어 또는 선택된 장소명
+  final double? lat;       // 선택된 결과 좌표 (null이면 검색어만 저장)
+  final double? lng;
+  final String type;       // 'address' | 'poi'
+  final DateTime timestamp;
+
+  const SearchHistoryItem({
+    required this.query,
+    this.lat,
+    this.lng,
+    required this.type,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'query': query,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        'type': type,
+        'timestamp': timestamp.toIso8601String(),
+      };
+
+  factory SearchHistoryItem.fromJson(Map<String, dynamic> j) => SearchHistoryItem(
+        query: j['query'] as String,
+        lat: (j['lat'] as num?)?.toDouble(),
+        lng: (j['lng'] as num?)?.toDouble(),
+        type: (j['type'] as String?) ?? 'address',
+        timestamp: DateTime.parse(j['timestamp'] as String),
+      );
+
+  String toJsonString() => jsonEncode(toJson());
+  factory SearchHistoryItem.fromJsonString(String s) =>
+      SearchHistoryItem.fromJson(jsonDecode(s) as Map<String, dynamic>);
+}
