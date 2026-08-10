@@ -3430,6 +3430,10 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
   }
 
   Widget _buildBody() {
+    // 검색창에 포커스가 있고 텍스트가 비어있으면 최근 검색 이력을 표시한다.
+    if (_searchFocused && _searchCtrl.text.trim().isEmpty) {
+      return _buildHistoryBody();
+    }
     final origin = widget.origin;
     if (origin == null) {
       // 주소 검색 결과도 확인시트/거리표시에 origin이 필요하므로 두 모드 공용.
@@ -3445,6 +3449,75 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
       return _buildAddressBody(origin);
     }
     return _buildBusinessBody(origin);
+  }
+
+  Widget _buildHistoryBody() {
+    final historyAsync = ref.watch(searchHistoryProvider);
+    return historyAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text('최근 검색 없음',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('최근 검색',
+                      style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      ref.read(searchHistoryProvider.notifier).clear(),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: Colors.grey,
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  child: const Text('전체 삭제'),
+                ),
+              ],
+            ),
+            for (final item in items)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.history, size: 18, color: Colors.grey),
+                title: Text(item.query, style: const TextStyle(fontSize: 13)),
+                onTap: () {
+                  final lat = item.lat;
+                  final lng = item.lng;
+                  if (lat != null && lng != null) {
+                    // 좌표가 있으면 바로 목적지 설정
+                    widget.onSelectAddress(AddressResult(
+                      address: item.query,
+                      location: LatLng(lat, lng),
+                    ));
+                  } else {
+                    // 좌표 없으면 검색창에 채워서 재검색 유도
+                    _searchCtrl.text = item.query;
+                    _searchCtrl.selection = TextSelection.fromPosition(
+                      TextPosition(offset: item.query.length),
+                    );
+                  }
+                },
+              ),
+          ],
+        );
+      },
+    );
   }
 
   Widget _buildAddressBody(LatLng origin) {
@@ -3495,7 +3568,16 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
             lng: r.location.longitude,
             initialName: r.address,
           ),
-          onTap: () => widget.onSelectAddress(r),
+          onTap: () {
+            ref.read(searchHistoryProvider.notifier).add(SearchHistoryItem(
+              query: r.address,
+              lat: r.location.latitude,
+              lng: r.location.longitude,
+              type: 'address',
+              timestamp: DateTime.now(),
+            ));
+            widget.onSelectAddress(r);
+          },
         );
       }).toList(),
     );
@@ -3576,7 +3658,16 @@ class _PoiExploreSheetState extends ConsumerState<_PoiExploreSheet> {
             lng: poi.location.longitude,
             initialName: poi.name,
           ),
-          onTap: () => widget.onSelectDest(poi),
+          onTap: () {
+            ref.read(searchHistoryProvider.notifier).add(SearchHistoryItem(
+              query: poi.name,
+              lat: poi.location.latitude,
+              lng: poi.location.longitude,
+              type: 'poi',
+              timestamp: DateTime.now(),
+            ));
+            widget.onSelectDest(poi);
+          },
         );
       }).toList(),
     );
