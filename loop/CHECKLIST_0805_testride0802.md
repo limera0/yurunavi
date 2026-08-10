@@ -795,9 +795,14 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 
 #### S18 상세 — 경로 색상·화살표  `상태: [ ]`
 
-- [ ] 경로 색상 — 네이버급 초록 톤 확정 (브랜드 스킨 A/B/C와 충돌 없는지 확인,
-      memory `project_brand_identity` 참고)
-- [ ] 진행방향 화살표 — MapLibre 심볼 레이어 `symbol-placement: line` 검토
+- **색상 확정(2026-08-10)**: 코스 타입별 3색, 브랜드 스킨 독립(가시성 우선)
+  - 국도(RouteType.national, idx=2) → 밝은 남색 `#2255CC`
+  - 지방도(RouteType.provincial, idx=1) → 밝은 초록 `#00BA4A`
+  - 시골길(RouteType.country, idx=0) → 밝은 주황 `#FF6600`
+  - YuruCam/CubBuddy 스킨의 독자 courseLineColor override 제거 → 전 스킨 통일
+- [ ] `app_theme.dart:62~66` courseLineColor 3값 업데이트
+- [ ] YuruCam·CubBuddy 스킨 독자 색상 override 제거 (legacy 위임으로 통일)
+- [ ] 진행방향 화살표 — MapLibre 심볼 레이어 `symbol-placement: line` 구현
 
 #### S19 상세 — 지도 정보밀도 (RECON 선행)  `상태: [ ]`
 
