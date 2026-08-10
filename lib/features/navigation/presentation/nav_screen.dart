@@ -22,6 +22,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/safe_clamp.dart';
 import '../../../core/widgets/course_sheet.dart';
 import '../../../core/widgets/daylight_bar.dart';
+import '../../../services/active_tour_destination_store.dart';
 import '../../../services/exit_landmark_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
@@ -116,6 +117,9 @@ class NavScreen extends ConsumerStatefulWidget {
   final List<ManeuverStep> maneuvers;
   // Valhalla time은 낙관적 추정치 (~57-88 km/h 기준). TODO: 실효속도 보정 적용
   final int durationMin;
+  // S15: "이어서 안내하기"로 재개된 투어일 때, 중단 전 원래 구간의
+  // TourLog.id. 일반 신규 투어는 null.
+  final String? resumedFromId;
 
   const NavScreen({
     super.key,
@@ -124,6 +128,7 @@ class NavScreen extends ConsumerStatefulWidget {
     this.routePolyline = const [],
     this.maneuvers = const [],
     this.durationMin = 0,
+    this.resumedFromId,
   });
 
   @override
@@ -575,7 +580,17 @@ class _NavScreenState extends ConsumerState<NavScreen>
         if (!_tourRecorderStarted) {
           _tourRecorderStarted = true;
           _navStartedAt = DateTime.now();
-          unawaited(_tourRecorder.start(loc, DateTime.now()));
+          unawaited(_tourRecorder.start(loc, _navStartedAt!));
+          final dest = widget.destination;
+          if (dest != null) {
+            unawaited(ActiveTourDestinationStore().record(
+              id: _navStartedAt!.millisecondsSinceEpoch.toString(),
+              destLat: dest.latitude,
+              destLng: dest.longitude,
+              destName: ref.read(mapInteractionProvider).destinationName,
+              waypoints: widget.waypoints,
+            ));
+          }
         } else {
           _tourRecorder.onFix(loc, next.speedKmh, DateTime.now());
         }
@@ -1088,14 +1103,20 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 감싼다. 이 블록에서 예외가 나도 투어 저장 자체(아래)는 반드시 시도한다 —
     // 이 함수는 unawaited()로 호출돼 예외가 나면 아무 로그도 없이 통째로
     // 유실되기 때문이다.
-    var finalLog = tourLog;
+    // resumedFromId는 역지오코딩 성공 여부와 무관하게 항상 붙어야 하므로
+    // (지오코딩 실패는 흔한 부가정보 손실일 뿐, 재개 연결 정보 유실로
+    // 이어져선 안 된다) try 블록 밖에서 먼저 반영해둔다.
+    var finalLog = tourLog.copyWith(resumedFromId: widget.resumedFromId);
     try {
       final geocoding = GeocodingService();
       final results = await Future.wait([
         geocoding.reverseGeocode(tourLog.startLat, tourLog.startLng),
         geocoding.reverseGeocode(tourLog.endLat, tourLog.endLng),
       ]);
-      finalLog = tourLog.copyWith(startAddress: results[0], endAddress: results[1]);
+      finalLog = finalLog.copyWith(
+        startAddress: results[0],
+        endAddress: results[1],
+      );
     } catch (e) {
       debugPrint('YNAV_TOUR geocode failed, saving without address: $e');
     }

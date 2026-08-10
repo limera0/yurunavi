@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:yurunavi/models/tour_log.dart';
+import 'package:yurunavi/services/active_tour_destination_store.dart';
 import 'package:yurunavi/services/geocoding_service.dart';
 import 'package:yurunavi/services/tour_log_service.dart';
 import 'package:yurunavi/services/tour_recovery_service.dart';
@@ -58,6 +59,33 @@ void main() {
     }
     await f.writeAsString(buf.toString());
     return f;
+  }
+
+  /// 임계값(60초/150m)을 넘기는 2포인트 트랙을, 마지막 포인트 시각이
+  /// 정확히 [lastPointAt]이 되도록(5분/500m 전에 시작) 만든다. S15 재개
+  /// 판정 테스트에서 "지금으로부터 N 전에 멈춘 고아"를 표현하는 데 쓴다.
+  Future<File> writeTrackEndingAt(String id, DateTime lastPointAt) async {
+    final startedAt = lastPointAt.subtract(const Duration(minutes: 5));
+    final endPos = dist.offset(base, 500, 90);
+    return writeTrack(id, [
+      [startedAt.millisecondsSinceEpoch, base.latitude, base.longitude, 0],
+      [lastPointAt.millisecondsSinceEpoch, endPos.latitude, endPos.longitude, 40.0],
+    ]);
+  }
+
+  Future<void> writeDest(
+    String id, {
+    double destLat = 37.9,
+    double destLng = 127.5,
+    String? destName = '목적지',
+  }) async {
+    await ActiveTourDestinationStore().record(
+      id: id,
+      destLat: destLat,
+      destLng: destLng,
+      destName: destName,
+      baseDirOverride: tempDir,
+    );
   }
 
   group('TourRecoveryService — 정상 고아 파일 복구', () {
@@ -311,6 +339,300 @@ void main() {
 
       expect(fakeLogs.saved, isEmpty);
       expect(await file.exists(), isFalse);
+    });
+  });
+
+  group('TourRecoveryService.recoverOrphans — S15 재개 판정 확장', () {
+    test('(a) resumeThresholdHours: null이면 기존 동작 그대로(즉시 finalize) — 회귀 없음',
+        () async {
+      const id = 'a-null-threshold';
+      final lastPointAt = DateTime.now().subtract(const Duration(minutes: 10));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      await writeDest(id); // dest.json이 있어도 threshold가 null이면 무시된다.
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      await service.recoverOrphans(baseDirOverride: tempDir);
+
+      expect(fakeLogs.saved.length, 1);
+      expect(fakeLogs.saved.first.id, id);
+      expect(await file.exists(), isTrue); // 트랙 파일 자체는 유지(기존 동작)
+    });
+
+    test('(b) 임계치 내 + dest.json 있음 → finalize하지 않고 스킵(파일 그대로 남음)',
+        () async {
+      const id = 'b-resumable';
+      final lastPointAt = DateTime.now().subtract(const Duration(minutes: 20));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      await writeDest(id);
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      await service.recoverOrphans(
+        baseDirOverride: tempDir,
+        resumeThresholdHours: 2,
+      );
+
+      expect(fakeLogs.saved, isEmpty); // TourLog로 저장되지 않음
+      expect(await file.exists(), isTrue); // .jsonl 파일 그대로 남음
+      expect(
+        await ActiveTourDestinationStore().read(id, baseDirOverride: tempDir),
+        isNotNull,
+      ); // dest.json도 그대로 남음(별도 API가 정리할 때까지)
+    });
+
+    test('(c) 임계치 초과(오래 전에 멈춤) → dest.json이 있어도 기존처럼 즉시 finalize',
+        () async {
+      const id = 'c-expired';
+      final lastPointAt = DateTime.now().subtract(const Duration(hours: 5));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      await writeDest(id);
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      await service.recoverOrphans(
+        baseDirOverride: tempDir,
+        resumeThresholdHours: 2,
+      );
+
+      expect(fakeLogs.saved.length, 1);
+      expect(fakeLogs.saved.first.id, id);
+      expect(await file.exists(), isTrue);
+    });
+
+    test('(d) 임계치 내여도 dest.json이 없으면 재개 불가 판정으로 즉시 finalize',
+        () async {
+      const id = 'd-no-dest';
+      final lastPointAt = DateTime.now().subtract(const Duration(minutes: 5));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      // writeDest() 호출 없음 — dest.json 부재
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      await service.recoverOrphans(
+        baseDirOverride: tempDir,
+        resumeThresholdHours: 2,
+      );
+
+      expect(fakeLogs.saved.length, 1);
+      expect(fakeLogs.saved.first.id, id);
+      expect(await file.exists(), isTrue);
+    });
+  });
+
+  group('TourRecoveryService.findResumableOrphan', () {
+    test('재개 가능한 여러 고아 중 가장 최근(lastPointAt) 것 1건만 반환한다', () async {
+      const olderId = 'older';
+      const newerId = 'newer';
+      final olderLastAt = DateTime.now().subtract(const Duration(minutes: 90));
+      final newerLastAt = DateTime.now().subtract(const Duration(minutes: 5));
+      await writeTrackEndingAt(olderId, olderLastAt);
+      await writeDest(olderId, destName: '오래된 목적지');
+      await writeTrackEndingAt(newerId, newerLastAt);
+      await writeDest(newerId, destName: '최신 목적지');
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final resumable = await service.findResumableOrphan(
+        thresholdHours: 2,
+        baseDirOverride: tempDir,
+      );
+
+      expect(resumable, isNotNull);
+      expect(resumable!.id, newerId);
+      expect(resumable.destName, '최신 목적지');
+      expect(resumable.destLat, 37.9);
+      expect(resumable.destLng, 127.5);
+    });
+
+    test('dest.json이 없는 고아는 후보에서 제외된다', () async {
+      const id = 'no-dest-candidate';
+      await writeTrackEndingAt(
+          id, DateTime.now().subtract(const Duration(minutes: 5)));
+      // dest.json 미기록
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final resumable = await service.findResumableOrphan(
+        thresholdHours: 2,
+        baseDirOverride: tempDir,
+      );
+
+      expect(resumable, isNull);
+    });
+
+    test('임계치를 초과한 고아는 후보에서 제외된다', () async {
+      const id = 'too-old';
+      await writeTrackEndingAt(
+          id, DateTime.now().subtract(const Duration(hours: 10)));
+      await writeDest(id);
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final resumable = await service.findResumableOrphan(
+        thresholdHours: 2,
+        baseDirOverride: tempDir,
+      );
+
+      expect(resumable, isNull);
+    });
+
+    test('조건을 만족하는 고아가 하나도 없으면 null을 반환한다(디렉터리 없음 포함)',
+        () async {
+      final emptyBase =
+          await Directory.systemTemp.createTemp('tour_recovery_empty_find_');
+      addTearDown(() async {
+        if (await emptyBase.exists()) await emptyBase.delete(recursive: true);
+      });
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final resumable = await service.findResumableOrphan(
+        thresholdHours: 2,
+        baseDirOverride: emptyBase,
+      );
+
+      expect(resumable, isNull);
+    });
+
+    test('이미 TourLogService에 저장된 id는 후보에서 제외된다', () async {
+      const id = 'already-known';
+      final lastPointAt = DateTime.now().subtract(const Duration(minutes: 5));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      await writeDest(id);
+
+      final existing = TourLog(
+        id: id,
+        startedAt: lastPointAt.subtract(const Duration(minutes: 5)),
+        endedAt: lastPointAt,
+        startLat: base.latitude,
+        startLng: base.longitude,
+        endLat: base.latitude,
+        endLng: base.longitude,
+        distanceM: 1000,
+        durationS: 300,
+        avgSpeedKmh: 12,
+        maxSpeedKmh: 40,
+        trackFilePath: file.path,
+      );
+
+      final fakeLogs = _FakeTourLogService([existing]);
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final resumable = await service.findResumableOrphan(
+        thresholdHours: 2,
+        baseDirOverride: tempDir,
+      );
+
+      expect(resumable, isNull);
+    });
+  });
+
+  group('TourRecoveryService.finalizeAsInterrupted', () {
+    test('정상 트랙을 finalize하고 dest.json 사이드카를 정리한다', () async {
+      const id = 'finalize-me';
+      final lastPointAt = DateTime.now().subtract(const Duration(minutes: 5));
+      final file = await writeTrackEndingAt(id, lastPointAt);
+      await writeDest(id);
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final result = await service.finalizeAsInterrupted(
+        id,
+        baseDirOverride: tempDir,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.id, id);
+      expect(fakeLogs.saved.length, 1);
+      expect(fakeLogs.saved.first.id, id);
+      expect(await file.exists(), isTrue); // 트랙 파일 자체는 유지(기존 정책)
+      expect(
+        await ActiveTourDestinationStore().read(id, baseDirOverride: tempDir),
+        isNull,
+      ); // dest.json은 정리됨
+    });
+
+    test('임계값 미달 트랙은 null을 반환하지만 dest.json은 정리된다', () async {
+      const id = 'too-short';
+      final startedAt = DateTime.now().subtract(const Duration(seconds: 10));
+      await writeTrack(id, [
+        [startedAt.millisecondsSinceEpoch, base.latitude, base.longitude, 0],
+      ]);
+      await writeDest(id);
+
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final result = await service.finalizeAsInterrupted(
+        id,
+        baseDirOverride: tempDir,
+      );
+
+      expect(result, isNull);
+      expect(fakeLogs.saved, isEmpty);
+      expect(
+        await ActiveTourDestinationStore().read(id, baseDirOverride: tempDir),
+        isNull,
+      );
+    });
+
+    test('존재하지 않는 id를 넘겨도 예외 없이 null을 반환한다', () async {
+      final fakeLogs = _FakeTourLogService();
+      final service = TourRecoveryService(
+        tourLogService: fakeLogs,
+        geocodingService: _FakeGeocodingService(),
+      );
+
+      final result = await service.finalizeAsInterrupted(
+        'never-existed',
+        baseDirOverride: tempDir,
+      );
+
+      expect(result, isNull);
+      expect(fakeLogs.saved, isEmpty);
     });
   });
 }

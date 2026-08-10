@@ -6,6 +6,7 @@ TourLog _log({
   String? startAddress,
   String? endAddress,
   String? memo,
+  String? resumedFromId,
 }) {
   return TourLog(
     id: id,
@@ -23,6 +24,7 @@ TourLog _log({
     maxSpeedKmh: 102.3,
     trackFilePath: '/tmp/tracks/$id.jsonl',
     memo: memo,
+    resumedFromId: resumedFromId,
   );
 }
 
@@ -60,8 +62,21 @@ void main() {
       expect(restored.startAddress, isNull);
       expect(restored.endAddress, isNull);
       expect(restored.memo, isNull);
+      expect(restored.resumedFromId, isNull);
       expect(restored.id, log.id);
       expect(restored.distanceM, log.distanceM);
+    });
+
+    test('resumedFromId가 non-null이면 왕복 직렬화된다', () {
+      final log = _log(resumedFromId: '1720000000000');
+      final restored = TourLog.fromJsonString(log.toJsonString());
+
+      expect(restored.resumedFromId, '1720000000000');
+    });
+
+    test('resumedFromId가 null이면 toJson에 키 자체가 없다', () {
+      final log = _log();
+      expect(log.toJson().containsKey('resumedFromId'), isFalse);
     });
   });
 
@@ -102,6 +117,34 @@ void main() {
       final unchanged = original.copyWith();
 
       expect(unchanged.memo, '보존되어야 할 메모');
+    });
+
+    test('resumedFromId를 지정하면 반영되고 나머지는 유지된다', () {
+      final original = _log(startAddress: '서울시청', endAddress: '인천대공원');
+
+      final updated = original.copyWith(resumedFromId: '999');
+
+      expect(updated.resumedFromId, '999');
+      expect(updated.startAddress, original.startAddress);
+      expect(updated.endAddress, original.endAddress);
+      expect(updated.memo, original.memo);
+    });
+
+    test('resumedFromId: null을 명시적으로 지정하면 null로 지워진다 '
+        '(sentinel 패턴 회귀 가드)', () {
+      final original = _log(resumedFromId: '888');
+
+      final cleared = original.copyWith(resumedFromId: null);
+
+      expect(cleared.resumedFromId, isNull);
+    });
+
+    test('resumedFromId를 아예 지정하지 않으면(생략) 기존 값이 보존된다', () {
+      final original = _log(resumedFromId: '777');
+
+      final unchanged = original.copyWith();
+
+      expect(unchanged.resumedFromId, '777');
     });
   });
 }

@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/tour_log.dart';
+import 'active_tour_destination_store.dart';
 import 'geocoding_service.dart';
 import 'tour_log_service.dart';
 
@@ -40,12 +41,15 @@ import 'tour_log_service.dart';
 class TourRecoveryService {
   final TourLogService _tourLogService;
   final GeocodingService _geocodingService;
+  final ActiveTourDestinationStore _destStore;
 
   TourRecoveryService({
     TourLogService? tourLogService,
     GeocodingService? geocodingService,
+    ActiveTourDestinationStore? destinationStore,
   })  : _tourLogService = tourLogService ?? TourLogService(),
-        _geocodingService = geocodingService ?? GeocodingService();
+        _geocodingService = geocodingService ?? GeocodingService(),
+        _destStore = destinationStore ?? ActiveTourDestinationStore();
 
   static const Distance _distance = Distance();
 
@@ -64,15 +68,25 @@ class TourRecoveryService {
   /// 예외를 밖으로 던지지 않는다 — 앱 시작 시 fire-and-forget으로 호출되기
   /// 때문이다.
   ///
+  /// [resumeThresholdHours]가 null이면(기본값) 발견된 고아는 모두 즉시
+  /// finalize한다(기존 동작 그대로 — 회귀 없음). 값이 주어지면, 각 고아의
+  /// 마지막 트랙 포인트 시각이 그 임계치 이내이고 동시에
+  /// [ActiveTourDestinationStore]에 목적지 사이드카가 남아있는("재개 가능"
+  /// 판정) 경우에는 finalize하지 않고 파일을 그대로 둔 채 건너뛴다 — 그
+  /// 판정·재개는 [findResumableOrphan]/[finalizeAsInterrupted]가 전담한다.
+  ///
   /// 알려진 한계: "고아"의 유일한 판별 신호는 "파일명이 tour_*.jsonl 패턴과
   /// 일치하고 id가 아직 TourLogService에 없다"는 것뿐이라, 개념적으로는
   /// "이번 세션에서 방금 시작해 아직 끝나지 않은 정상 진행 중인 투어"와
-  /// 구분되지 않는다. 오늘은 문제되지 않는다 — 현재는 어떤 코드 경로도 사용자
-  /// 상호작용/활성 내비게이션 없이 자동으로 TourRecorder를 시작하지 않으므로
-  /// 이 메서드가 도중에 경합할 대상이 없다. 다만 향후 자동 재개나 딥링크로
-  /// 투어를 자동 시작하는 기능이 생긴다면 이 메서드와 경합(활성 투어를 고아로
-  /// 오인해 조기 종료 처리)할 수 있으니 주의할 것.
-  Future<void> recoverOrphans({Directory? baseDirOverride}) async {
+  /// 구분되지 않는다. 문제되지 않는다 — 재개 가능 판정이 서는 고아는 위에서
+  /// 설명한 대로 여기서 스킵하고 [findResumableOrphan]/[finalizeAsInterrupted]
+  /// 만 건드리며, 새로 시작되는 재개 세션은 항상 새 id(현재 시각 기준)로
+  /// 시작해 이 파일을 다시 열지 않으므로 활성 투어를 고아로 오인해 조기
+  /// 종료 처리하는 경합이 발생하지 않는다.
+  Future<void> recoverOrphans({
+    Directory? baseDirOverride,
+    int? resumeThresholdHours,
+  }) async {
     try {
       final baseDir =
           baseDirOverride ?? await getApplicationDocumentsDirectory();
@@ -98,7 +112,24 @@ class TourRecoveryService {
           final id = match.group(1)!;
           if (knownIds.contains(id)) continue; // 이미 정상 저장됨 — 건드리지 않음
 
-          await _recoverOne(id, file);
+          final lines = await file.readAsLines();
+
+          if (resumeThresholdHours != null) {
+            final lastPoint = _lastTrackPointFromLines(lines);
+            if (lastPoint != null &&
+                DateTime.now().difference(lastPoint.at) <=
+                    Duration(hours: resumeThresholdHours)) {
+              final dest = await _destStore.read(
+                id,
+                baseDirOverride: baseDirOverride,
+              );
+              if (dest != null) {
+                continue; // 재개 가능 판정 — finalize하지 않고 스킵
+              }
+            }
+          }
+
+          await _recoverOne(id, file, lines);
         } catch (e) {
           debugPrint('YNAV_TOUR_RECOVERY file failed path=${file.path}: $e');
         }
@@ -108,8 +139,135 @@ class TourRecoveryService {
     }
   }
 
-  Future<void> _recoverOne(String id, File file) async {
-    final lines = await file.readAsLines();
+  /// 재개 임계치([thresholdHours]) 이내의 마지막 트랙 포인트를 갖고 있고
+  /// 동시에 목적지 사이드카([ActiveTourDestinationStore])가 남아있는(=재개
+  /// 가능 판정) 고아들 중, 가장 최근에 움직인 1건을 [ResumableOrphan]으로
+  /// 반환한다. 없으면 null. 이 메서드는 finalize를 수행하지 않는다 — 순수
+  /// 조회다.
+  Future<ResumableOrphan?> findResumableOrphan({
+    required int thresholdHours,
+    Directory? baseDirOverride,
+  }) async {
+    try {
+      final baseDir =
+          baseDirOverride ?? await getApplicationDocumentsDirectory();
+      final toursDir = Directory('${baseDir.path}/tours');
+      if (!await toursDir.exists()) return null;
+
+      final entries = await toursDir.list().toList();
+      final files = entries
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.jsonl'))
+          .toList();
+
+      final knownIds =
+          (await _tourLogService.loadAll()).map((l) => l.id).toSet();
+
+      ResumableOrphan? best;
+      for (final file in files) {
+        try {
+          final name = file.uri.pathSegments.last;
+          final match = _idPattern.firstMatch(name);
+          if (match == null) continue;
+          final id = match.group(1)!;
+          if (knownIds.contains(id)) continue;
+
+          final lines = await file.readAsLines();
+          final lastPoint = _lastTrackPointFromLines(lines);
+          if (lastPoint == null) continue;
+          if (DateTime.now().difference(lastPoint.at) >
+              Duration(hours: thresholdHours)) {
+            continue;
+          }
+
+          final dest =
+              await _destStore.read(id, baseDirOverride: baseDirOverride);
+          if (dest == null) continue;
+          final destLat = (dest['destLat'] as num?)?.toDouble();
+          final destLng = (dest['destLng'] as num?)?.toDouble();
+          if (destLat == null || destLng == null) continue;
+
+          final waypointsRaw = dest['waypoints'] as List?;
+          final waypoints = <LatLng>[
+            if (waypointsRaw != null)
+              for (final w in waypointsRaw)
+                LatLng(
+                  ((w as List)[0] as num).toDouble(),
+                  (w[1] as num).toDouble(),
+                ),
+          ];
+
+          final candidate = ResumableOrphan(
+            id: id,
+            lastPos: lastPoint.pos,
+            lastPointAt: lastPoint.at,
+            destLat: destLat,
+            destLng: destLng,
+            destName: dest['destName'] as String?,
+            waypoints: waypoints,
+          );
+          if (best == null || candidate.lastPointAt.isAfter(best.lastPointAt)) {
+            best = candidate;
+          }
+        } catch (e) {
+          debugPrint(
+              'YNAV_TOUR_RECOVERY findResumableOrphan file failed path=${file.path}: $e');
+        }
+      }
+      return best;
+    } catch (e) {
+      debugPrint('YNAV_TOUR_RECOVERY findResumableOrphan failed: $e');
+      return null;
+    }
+  }
+
+  /// [id]의 고아 트랙을 (재개 여부와 무관하게) 기존 [_recoverOne] 로직으로
+  /// 확정 저장하고, 목적지 사이드카([ActiveTourDestinationStore])를 정리한다.
+  /// 스플래시의 "이어서 안내하기" 수락/거절 양쪽 경로에서 호출된다 — 재개를
+  /// 수락해도(중단 전 구간을 별도 히스토리로 확정) 거절해도(그냥 일반 고아처럼
+  /// 확정) 동일하게 이 메서드로 마무리한다.
+  Future<TourLog?> finalizeAsInterrupted(
+    String id, {
+    Directory? baseDirOverride,
+  }) async {
+    TourLog? result;
+    try {
+      final baseDir =
+          baseDirOverride ?? await getApplicationDocumentsDirectory();
+      final file = File('${baseDir.path}/tours/tour_$id.jsonl');
+      if (await file.exists()) {
+        final lines = await file.readAsLines();
+        result = await _recoverOne(id, file, lines);
+      }
+    } catch (e) {
+      debugPrint('YNAV_TOUR_RECOVERY finalizeAsInterrupted failed id=$id: $e');
+    }
+    await _destStore.delete(id, baseDirOverride: baseDirOverride);
+    return result;
+  }
+
+  /// 트랙 라인 목록에서(뒤에서부터 훑어) 손상되지 않은 마지막 포인트의
+  /// 시각/위치를 뽑아낸다. kill 도중 partial write된 마지막 줄 등 손상된
+  /// 라인은 건너뛰고 그 앞의 유효한 라인을 사용한다. 유효한 라인이 하나도
+  /// 없으면 null.
+  ({DateTime at, LatLng pos})? _lastTrackPointFromLines(List<String> lines) {
+    for (var i = lines.length - 1; i >= 0; i--) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+      try {
+        final arr = jsonDecode(line) as List;
+        return (
+          at: DateTime.fromMillisecondsSinceEpoch((arr[0] as num).toInt()),
+          pos: LatLng((arr[1] as num).toDouble(), (arr[2] as num).toDouble()),
+        );
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  Future<TourLog?> _recoverOne(String id, File file, List<String> lines) async {
     final points = <_TrackPoint>[];
     for (final line in lines) {
       if (line.trim().isEmpty) continue;
@@ -128,7 +286,7 @@ class TourRecoveryService {
 
     if (points.length < 2) {
       await _deleteQuietly(file);
-      return;
+      return null;
     }
 
     final first = points.first;
@@ -160,7 +318,7 @@ class TourRecoveryService {
       // 넘겼을 라이드가 여기서 걸러질 가능성이 있으나(과소평가 방향), 폴백
       // 경로이므로 감내한다.
       await _deleteQuietly(file);
-      return;
+      return null;
     }
 
     final avgSpeedKmh =
@@ -203,6 +361,7 @@ class TourRecoveryService {
         'durationS=$durationS '
         'avgKmh=${avgSpeedKmh.toStringAsFixed(1)} '
         'maxKmh=${maxSpeedKmh.toStringAsFixed(1)}');
+    return log;
   }
 
   Future<void> _deleteQuietly(File file) async {
@@ -214,6 +373,29 @@ class TourRecoveryService {
       // 이미 삭제되었거나 실패해도 무시한다.
     }
   }
+}
+
+/// [TourRecoveryService.findResumableOrphan]이 반환하는, "재개 가능" 판정을
+/// 통과한 고아 트랙 1건의 요약. 트랙 파일 자체를 finalize하지 않은 채로
+/// 재개 여부를 판단·표시하는 데 필요한 최소 정보만 담는다.
+class ResumableOrphan {
+  final String id;
+  final LatLng lastPos;
+  final DateTime lastPointAt;
+  final double destLat;
+  final double destLng;
+  final String? destName;
+  final List<LatLng> waypoints;
+
+  const ResumableOrphan({
+    required this.id,
+    required this.lastPos,
+    required this.lastPointAt,
+    required this.destLat,
+    required this.destLng,
+    this.destName,
+    this.waypoints = const [],
+  });
 }
 
 class _TrackPoint {

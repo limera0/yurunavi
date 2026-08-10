@@ -17,6 +17,7 @@ class TourLog {
   final double maxSpeedKmh;
   final String trackFilePath; // path to the per-trip .jsonl track file
   final String? memo; // nullable free-text note
+  final String? resumedFromId; // 중단 전 원래 구간의 TourLog.id, 없으면 일반 투어
 
   const TourLog({
     required this.id,
@@ -34,6 +35,7 @@ class TourLog {
     required this.maxSpeedKmh,
     required this.trackFilePath,
     this.memo,
+    this.resumedFromId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -52,6 +54,7 @@ class TourLog {
         'maxSpeedKmh': maxSpeedKmh,
         'trackFilePath': trackFilePath,
         if (memo != null) 'memo': memo,
+        if (resumedFromId != null) 'resumedFromId': resumedFromId,
       };
 
   factory TourLog.fromJson(Map<String, dynamic> j) => TourLog(
@@ -70,6 +73,7 @@ class TourLog {
         maxSpeedKmh: (j['maxSpeedKmh'] as num).toDouble(),
         trackFilePath: j['trackFilePath'] as String,
         memo: j['memo'] as String?,
+        resumedFromId: j['resumedFromId'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
@@ -98,6 +102,7 @@ class TourLog {
     double? maxSpeedKmh,
     String? trackFilePath,
     Object? memo = _unset,
+    Object? resumedFromId = _unset,
   }) =>
       TourLog(
         id: id ?? this.id,
@@ -119,5 +124,8 @@ class TourLog {
         maxSpeedKmh: maxSpeedKmh ?? this.maxSpeedKmh,
         trackFilePath: trackFilePath ?? this.trackFilePath,
         memo: identical(memo, _unset) ? this.memo : memo as String?,
+        resumedFromId: identical(resumedFromId, _unset)
+            ? this.resumedFromId
+            : resumedFromId as String?,
       );
 }
