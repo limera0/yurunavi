@@ -164,10 +164,29 @@ class DaylightService {
         bottomTime: today.eent,
       );
     } else {
-      // 밤: EENT → 익일BMNT
-      final eent = now.isBefore(today.bmnt) ? today.eent.subtract(const Duration(hours: 24)) : today.eent;
-      // 익일 BMNT ≈ 오늘 BMNT + 24h (±30분 오차 허용)
-      final nextBmnt = today.bmnt.add(const Duration(hours: 24));
+      // 밤: EENT → 익일BMNT. ±24h 근사 대신 실제 전일 일몰/익일 일출을 사용해
+      // 자정 전후 연속성과 일출 직전 구간을 정확히 계산한다.
+      final DateTime eent;
+      final DateTime nextBmnt;
+      if (now.isBefore(today.bmnt)) {
+        // 자정~오늘 일출 전: 어제 일몰 ~ 오늘 일출
+        final yesterday = calculate(
+          lat: lat,
+          lng: lng,
+          date: now.subtract(const Duration(days: 1)),
+        );
+        eent = yesterday.eent;
+        nextBmnt = today.bmnt;
+      } else {
+        // 오늘 일몰 이후: 오늘 일몰 ~ 내일 일출
+        final tomorrow = calculate(
+          lat: lat,
+          lng: lng,
+          date: now.add(const Duration(days: 1)),
+        );
+        eent = today.eent;
+        nextBmnt = tomorrow.bmnt;
+      }
       final total = nextBmnt.difference(eent).inSeconds.toDouble();
       final elapsed = now.difference(eent).inSeconds.toDouble();
       final progress = total > 0 ? (elapsed / total).clamp(0.0, 1.0) : 0.5;

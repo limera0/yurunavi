@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yurunavi/core/theme/app_theme.dart';
 import 'package:yurunavi/core/widgets/daylight_bar.dart';
 
 // 회귀 대상: num.clamp(lower, upper)는 upper < lower면 ArgumentError를 던진다
@@ -13,7 +14,12 @@ import 'package:yurunavi/core/widgets/daylight_bar.dart';
 const _heights = <double>[0, 10, 24, 60, 71, 72, 90, 117, 118, 120, 285, 300, 800];
 const _progresses = <double>[0.0, 0.5, 1.0];
 
-Future<void> _pump(WidgetTester tester, double height, double progress) async {
+Future<void> _pump(
+  WidgetTester tester,
+  double height,
+  double progress, {
+  bool? isNightMode,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
@@ -25,6 +31,7 @@ Future<void> _pump(WidgetTester tester, double height, double progress) async {
               progress: progress,
               sunriseLabel: '06:00',
               sunsetLabel: '19:00',
+              isNightMode: isNightMode,
             ),
           ),
         ),
@@ -32,6 +39,13 @@ Future<void> _pump(WidgetTester tester, double height, double progress) async {
     ),
   );
 }
+
+// 알약(pill) 배경 Container를 찾는다 — width:38 + BoxDecoration 조합은
+// DaylightBar 트리 안에서 이 컨테이너 하나뿐이다(게이지 레일은 width:6).
+Finder _pillContainerFinder() => find.byWidgetPredicate((widget) =>
+    widget is Container &&
+    widget.constraints?.maxWidth == 38 &&
+    widget.decoration is BoxDecoration);
 
 void main() {
   for (final h in _heights) {
@@ -81,4 +95,56 @@ void main() {
       expect(find.byType(Icon), findsNothing);
     },
   );
+
+  // S14 ② — 야간 색상 반전 회귀 테스트
+  group('S14 night-mode color inversion', () {
+    testWidgets(
+      'isNightMode=true: pill background is daylightNightBg',
+      (tester) async {
+        await _pump(tester, 300, 0.5, isNightMode: true);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+
+        final pill = tester.widget<Container>(_pillContainerFinder());
+        final decoration = pill.decoration as BoxDecoration;
+        expect(
+          decoration.color,
+          AppColors.daylightNightBg.withValues(alpha: 0.95),
+        );
+      },
+    );
+
+    testWidgets(
+      'isNightMode=false: pill background is daylightDayBg',
+      (tester) async {
+        await _pump(tester, 300, 0.5, isNightMode: false);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+
+        final pill = tester.widget<Container>(_pillContainerFinder());
+        final decoration = pill.decoration as BoxDecoration;
+        expect(
+          decoration.color,
+          AppColors.daylightDayBg.withValues(alpha: 0.95),
+        );
+      },
+    );
+
+    testWidgets(
+      'night pill color differs from day pill color',
+      (tester) async {
+        await _pump(tester, 300, 0.5, isNightMode: true);
+        await tester.pump();
+        final nightPill = tester.widget<Container>(_pillContainerFinder());
+        final nightColor = (nightPill.decoration as BoxDecoration).color;
+
+        await _pump(tester, 300, 0.5, isNightMode: false);
+        await tester.pump();
+        final dayPill = tester.widget<Container>(_pillContainerFinder());
+        final dayColor = (dayPill.decoration as BoxDecoration).color;
+
+        expect(nightColor, isNot(equals(dayColor)));
+      },
+    );
+  });
 }

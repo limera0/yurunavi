@@ -46,6 +46,10 @@ class AppColors {
   // Daylight bar
   static const sunrise = Color(0xFFFFB300);
   static const sunset = Color(0xFF5C6BC0);
+  static const daylightDayBg = Colors.white;
+  static const daylightDayBar = Color(0xFFFFF59D);
+  static const daylightNightBg = Color(0xFF1A237E);
+  static const daylightNightAccent = Color(0xFFFFF9C4);
 
   // 내비 카드 배경 — 스킨에서 별도 관리 (tertiary와 독립)
   static const navCard = Color(0xFF9481C4); // muted lavender

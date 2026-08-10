@@ -53,13 +53,13 @@ class DaylightBar extends StatelessWidget {
     final isNight = isNightMode ?? (cs.brightness == Brightness.dark);
 
     final containerBg = isNight
-        ? cs.surface.withValues(alpha: 0.95)
-        : Colors.white.withValues(alpha: 0.95);
+        ? AppColors.daylightNightBg.withValues(alpha: 0.95)
+        : AppColors.daylightDayBg.withValues(alpha: 0.95);
     final shadowColor = isNight
         ? Colors.black.withValues(alpha: 0.3)
         : AppColors.secondary.withValues(alpha: 0.12);
-    final sunriseColor = isNight ? cs.onSurfaceVariant : AppColors.sunrise;
-    final sunsetColor = isNight ? cs.tertiary : AppColors.sunset;
+    final sunriseColor = isNight ? AppColors.daylightNightAccent : AppColors.sunrise;
+    final sunsetColor = isNight ? AppColors.daylightNightAccent : AppColors.sunset;
 
     return LayoutBuilder(
       builder: (context, outerConstraints) {
@@ -135,8 +135,8 @@ class DaylightBar extends StatelessWidget {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(3),
                               color: isNight
-                                  ? const Color(0xFF1A237E)
-                                  : const Color(0xFFFFF59D),
+                                  ? AppColors.daylightNightAccent
+                                  : AppColors.daylightDayBar,
                             ),
                           ),
                           if (showHandle)
@@ -147,8 +147,8 @@ class DaylightBar extends StatelessWidget {
                                 isNight ? Icons.nightlight_round : Icons.wb_sunny_rounded,
                                 size: 24,
                                 color: isNight
-                                    ? const Color(0xFFFFF9C4)
-                                    : const Color(0xFFFFB300),
+                                    ? AppColors.daylightNightAccent
+                                    : AppColors.sunrise,
                               ),
                             ),
                         ],
