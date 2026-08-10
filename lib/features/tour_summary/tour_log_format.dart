@@ -39,3 +39,67 @@ List<MapEntry<DateTime, List<TourLog>>> groupTourLogsByDay(
   }
   return map.entries.toList();
 }
+
+/// S15: `resumedFromId`로 연결된 log 체인을 시간순 leg 묶음 하나로 만든다.
+/// 원본 두(이상) `TourLog`는 저장소에서 합치지 않는다 — 이 함수는 **표시
+/// 시점에만** 묶어서 반환한다(삭제/메모 편집 등 기존 단건 동작을 깨지 않기
+/// 위함). 연결이 없는 일반 투어는 leg 1개짜리 그룹이 된다. 체인이 끊겨
+/// 있으면(원본이 이미 삭제된 경우 등) 안전하게 단일 leg 그룹으로 취급한다.
+class TourLogGroup {
+  /// startedAt 오름차순(중단 전 → 재개 후) — 최소 1개.
+  final List<TourLog> legs;
+  TourLogGroup(this.legs) : assert(legs.isNotEmpty);
+
+  bool get isMerged => legs.length > 1;
+
+  /// 날짜 그룹 배정·카드 대표 표시에 쓰는 leg — 가장 이른(최초 출발) leg.
+  TourLog get primary => legs.first;
+
+  double get totalDistanceM =>
+      legs.fold(0.0, (sum, l) => sum + l.distanceM);
+  int get totalDurationS => legs.fold(0, (sum, l) => sum + l.durationS);
+}
+
+/// [logs] 중 `resumedFromId`로 서로 가리키는 것들을 [TourLogGroup]으로
+/// 묶는다. id로 명시적으로 연결을 찾으므로 리스트 내 인접 여부와 무관하게
+/// 정확히 짝을 찾는다(날짜 그룹 경계를 걸쳐도 무방).
+List<TourLogGroup> groupResumedTourLogs(List<TourLog> logs) {
+  final byId = {for (final l in logs) l.id: l};
+
+  String rootIdOf(TourLog log) {
+    var current = log;
+    final visited = <String>{current.id};
+    while (true) {
+      final parentId = current.resumedFromId;
+      final parent = parentId == null ? null : byId[parentId];
+      if (parent == null || !visited.add(parent.id)) break; // 연결 없음/순환 방어
+      current = parent;
+    }
+    return current.id;
+  }
+
+  final chains = <String, List<TourLog>>{};
+  for (final log in logs) {
+    chains.putIfAbsent(rootIdOf(log), () => <TourLog>[]).add(log);
+  }
+
+  return chains.values
+      .map((legs) =>
+          TourLogGroup(legs..sort((a, b) => a.startedAt.compareTo(b.startedAt))))
+      .toList();
+}
+
+/// [groups]를 primary(최초 leg) startedAt의 캘린더 day 기준으로 그룹화한다.
+/// 재개로 자정을 넘긴 투어는 **출발한 날**의 그룹 하나에 통째로 표시된다
+/// (재개된 날짜 쪽에 따로 쪼개 보여주지 않는다) — "그 날의 라이딩"이라는
+/// 사용자 인식과 맞고, 몇 번을 재개하든 배정이 안정적이기 때문.
+List<MapEntry<DateTime, List<TourLogGroup>>> groupTourLogGroupsByDay(
+    List<TourLogGroup> groups) {
+  final map = <DateTime, List<TourLogGroup>>{};
+  for (final g in groups) {
+    final day = DateTime(g.primary.startedAt.year, g.primary.startedAt.month,
+        g.primary.startedAt.day);
+    (map[day] ??= <TourLogGroup>[]).add(g);
+  }
+  return map.entries.toList();
+}

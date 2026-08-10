@@ -28,12 +28,17 @@ class TourSummaryListScreen extends ConsumerWidget {
           if (logs.isEmpty) {
             return const Center(child: Text('아직 저장된 투어가 없어요'));
           }
-          final groups = groupTourLogsByDay(logs);
+          // S15: resumedFromId로 연결된 중단/재개 구간을 먼저 하나의
+          // TourLogGroup으로 묶은 뒤, 그 그룹을 (최초 출발 leg 기준) 날짜별로
+          // 그룹화한다 — 두 leg가 서로 다른 날짜 그룹에 걸쳐 있어도 id로
+          // 정확히 짝을 찾으므로 인접 여부는 상관없다.
+          final dayGroups =
+              groupTourLogGroupsByDay(groupResumedTourLogs(logs));
           return ListView.builder(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: groups.length,
+            itemCount: dayGroups.length,
             itemBuilder: (context, i) {
-              final entry = groups[i];
+              final entry = dayGroups[i];
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -48,7 +53,9 @@ class TourSummaryListScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  ...entry.value.map((log) => _TourLogCard(tourLog: log)),
+                  ...entry.value.map((g) => g.isMerged
+                      ? _MergedTourLogCard(group: g)
+                      : _TourLogCard(tourLog: g.primary)),
                 ],
               );
             },
@@ -146,6 +153,87 @@ class _TourLogCard extends ConsumerWidget {
                   const SizedBox(width: 12),
                   Text('최고 ${formatTourSpeedKmh(tourLog.maxSpeedKmh)}',
                       style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                fromTo,
+                style: TextStyle(fontSize: 13, color: cs.onSurface),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// S15: 중단 전/재개 후로 이어진 [TourLogGroup]을 카드 1개로 표시한다.
+/// 두 leg의 원본 [TourLog]는 저장소에서 합치지 않으므로(표시 전용 병합)
+/// 삭제 아이콘은 두지 않는다 — 어느 leg를 지울지 모호해지기 때문. 탭하면
+/// 첫 leg(primary)의 상세 화면으로 이동한다(두 leg를 합친 상세 화면은
+/// 스코프 밖, `loop/HANDOFF_0810_S15_resume_navigation.md` §4 참조).
+class _MergedTourLogCard extends StatelessWidget {
+  final TourLogGroup group;
+  const _MergedTourLogCard({required this.group});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final first = group.legs.first;
+    final last = group.legs.last;
+    final fromTo =
+        '${first.startAddress ?? '${first.startLat.toStringAsFixed(4)}, ${first.startLng.toStringAsFixed(4)}'}'
+        ' → '
+        '${last.endAddress ?? '${last.endLat.toStringAsFixed(4)}, ${last.endLng.toStringAsFixed(4)}'}';
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+              builder: (_) => TourSummaryDetailScreen(tourLog: group.primary)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '이어서 안내됨 · ${group.legs.length}구간',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(
+                    formatTourDistanceKm(group.totalDistanceM),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: cs.onSurface),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    formatTourDuration(group.totalDurationS),
+                    style: TextStyle(fontSize: 15, color: cs.onSurfaceVariant),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${DateFormat('HH:mm').format(first.startedAt)}~${DateFormat('HH:mm').format(last.endedAt)}',
+                    style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),

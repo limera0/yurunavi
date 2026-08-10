@@ -91,4 +91,73 @@ void main() {
       expect(groupTourLogsByDay([]), isEmpty);
     });
   });
+
+  group('groupResumedTourLogs (S15)', () {
+    test('resumedFromId 연결이 없으면 각자 leg 1개짜리 그룹이 된다', () {
+      final logs = [
+        _log(id: '1', startedAt: DateTime(2026, 8, 10, 9, 0)),
+        _log(id: '2', startedAt: DateTime(2026, 8, 10, 11, 0)),
+      ];
+
+      final groups = groupResumedTourLogs(logs);
+
+      expect(groups.length, 2);
+      expect(groups.every((g) => !g.isMerged), isTrue);
+    });
+
+    test('resumedFromId로 연결된 두 leg를 하나의 그룹으로 묶고 시간순 정렬한다', () {
+      final original = _log(id: 'a', startedAt: DateTime(2026, 8, 10, 9, 0));
+      final resumed = _log(id: 'b', startedAt: DateTime(2026, 8, 10, 11, 30))
+          .copyWith(resumedFromId: 'a');
+      // 리스트 순서를 일부러 최신순(재개 leg 먼저)으로 둔다 —
+      // TourLogService.loadAll()의 실제 정렬과 동일 조건에서 검증.
+      final groups = groupResumedTourLogs([resumed, original]);
+
+      expect(groups.length, 1);
+      final g = groups.single;
+      expect(g.isMerged, isTrue);
+      expect(g.legs.map((l) => l.id), ['a', 'b']); // startedAt 오름차순
+      expect(g.primary.id, 'a');
+      expect(g.totalDistanceM, original.distanceM + resumed.distanceM);
+      expect(g.totalDurationS, original.durationS + resumed.durationS);
+    });
+
+    test('3단 연속 재개(체인)도 하나의 그룹으로 묶인다', () {
+      final leg1 = _log(id: '1', startedAt: DateTime(2026, 8, 10, 9, 0));
+      final leg2 = _log(id: '2', startedAt: DateTime(2026, 8, 10, 11, 0))
+          .copyWith(resumedFromId: '1');
+      final leg3 = _log(id: '3', startedAt: DateTime(2026, 8, 10, 13, 0))
+          .copyWith(resumedFromId: '2');
+
+      final groups = groupResumedTourLogs([leg3, leg2, leg1]);
+
+      expect(groups.length, 1);
+      expect(groups.single.legs.map((l) => l.id), ['1', '2', '3']);
+    });
+
+    test('resumedFromId가 가리키는 원본이 리스트에 없으면(삭제됨) 단일 그룹으로 취급한다', () {
+      final resumed = _log(id: 'b', startedAt: DateTime(2026, 8, 10, 11, 0))
+          .copyWith(resumedFromId: 'missing-a');
+
+      final groups = groupResumedTourLogs([resumed]);
+
+      expect(groups.length, 1);
+      expect(groups.single.isMerged, isFalse);
+      expect(groups.single.primary.id, 'b');
+    });
+  });
+
+  group('groupTourLogGroupsByDay (S15)', () {
+    test('병합 그룹은 primary(최초 leg) 날짜의 그룹에 배정된다(자정을 넘겨도)', () {
+      final original =
+          _log(id: 'a', startedAt: DateTime(2026, 8, 10, 23, 30));
+      final resumed = _log(id: 'b', startedAt: DateTime(2026, 8, 11, 0, 15))
+          .copyWith(resumedFromId: 'a');
+      final groups = groupTourLogGroupsByDay(groupResumedTourLogs([original, resumed]));
+
+      expect(groups.length, 1);
+      expect(groups.single.key, DateTime(2026, 8, 10));
+      expect(groups.single.value.single.isMerged, isTrue);
+    });
+  });
 }
