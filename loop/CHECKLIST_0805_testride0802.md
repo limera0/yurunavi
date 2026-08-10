@@ -595,23 +595,36 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 
 ## 🟡 P2 — 데이터·라우팅
 
-### S9 · 자동차전용도로 하드 배제  `상태: [ ] 착수` (2026-08-10, S1b 다음 순번)
+### S9 · 자동차전용도로 하드 배제  `상태: [x]` (2026-08-10, 커밋 `6f4858f` + Valhalla 포크 `de28c1ae7`)
 
-> **오토바이 법적 절대 원칙** (memory: `project_motorcycle_legal_constraints`).
-> 현재는 소프트 패널티라 대안 없으면 뚫고 지나간다.
+> **오토바이 법적 절대 원칙** (memory: `project_motorcycle_legal_constraints`). 완료.
 >
 > 지시서: [HANDOFF_0810_S9_motorroad_hard_exclusion.md](HANDOFF_0810_S9_motorroad_hard_exclusion.md).
-> **`motorroad=yes`가 "코스팅만 고치면 됨"이라던 아래 전제는 정정됨** — 해당 태그는
-> 그래프에 남지 않아 코스팅 레벨에서 조회 불가함을 확인. 대안(exclude_polygons 등)은
-> 지시서 §2 참고. 아래 원 항목은 참고용으로만 남김, 실제 작업은 지시서 기준.
+> **지시서 §2가 제안한 exclude_polygons/그래프 오버레이 파이프라인은 최종적으로 쓰지
+> 않았다** — 착수 중 소스를 직접 추적해 더 작은 근본 수정을 발견함(아래 참고).
 
-- [ ] `routing_service.dart:174-186, 195-206`(라인은 낡음, 지시서 §1 참고) —
-      `use_highways: 0.0` + `class_factors['0']:100` **패널티 → 하드 배제**로 전환
-      (지시서 §1 트랙A: Valhalla 포크 `motorcyclecost.cc` RoadClass 체크)
-- [ ] **`motorroad=yes` 태그 배제** — 38번 지방도 사례의 핵심 (지시서 §2 트랙B:
-      exclude_polygons 우선 검토, 목록 규모 확인 후 결정)
-- [ ] 나무위키 자동차전용도로 목록으로 **검증 좌표셋** 구성 (지시서 §2, 이 리포엔 아직 없음)
-- [ ] **검증**: 검증셋 전 구간에 대해 경로가 진입하지 않음
+- [x] **트랙 A(motorway/trunk)**: `motorcyclecost.cc` `Allowed()`/`AllowedReverse()`에
+      `RoadClass::kMotorway`/`kTrunk` 직접 체크 추가 — JSON costing과 무관하게 항상
+      하드 배제. 기존 3코스 회귀 확인(용인남부→팔당댐 67.4/57.9/51.7km, 패치 전과
+      일치).
+- [x] **트랙 B(motorroad=yes)**: 나무위키 목록이 197건(1,984.5km)으로 지시서의
+      "100건+" 게이트에 걸려 exclude_polygons 검토 → Valhalla
+      `max_exclude_polygons_length`(10km 제한)에 바로 막힘을 확인 → 그래프 오버레이
+      파이프라인(옵션 C) 착수 결정 → **착수 중 소스 추적으로 전제 자체가 틀렸음을
+      발견**: `motorroad=yes`는 그래프 스키마 변경이 필요한 게 아니라, `admins.sqlite`가
+      애초에 생성된 적이 없어(설정은 있었으나 파일 부재) 국가별 access override
+      테이블이 통째로 죽어있던 게 근본 원인. `admins.sqlite` 생성 +
+      `adminconstants.h`에 South Korea 항목 추가(모터사이클 접근권 제외, 비트마스크
+      233 SQL로 직접 검증)로 해결. 부수효과로 일본 타일 우측통행 오류도 같이 고쳐짐.
+- [x] **검증**: 격리 컨테이너 회귀 통과, 프로덕션 스왑 후 동일 OD 재확인 일치.
+      나무위키 197건 좌표 기반 대량 회귀 curl은 **미실행**(아래 알려진 제약 참고).
+- ⚠️ **알려진 제약**: 초장거리 단일 요청(서울↔부산 등 500km+ 직선)은 motorway/trunk
+      셧컷 제거로 Valhalla 탐색이 실패할 수 있음(실제 무경로 아님 — 경유점 분할 시
+      정상 산출 확인, 585km). `max_distance` 500km→800km로 완화했으나 근본 해결은
+      아님. 품질 판단은 실주행에서(마스터 결정).
+- ⚠️ motorroad=yes 배제는 SQL 레벨(정확한 access 비트마스크가 테이블에 반영됨)로
+      검증했고, 실제 도로 좌표 기반 end-to-end 예시는 확보하지 못함(Overpass API가
+      이 환경에서 접속 불가) — 나무위키 197건 목록 기반 curl 회귀는 후속 과제.
 
 ### S10 · 회전 안내 등급 기반 억제  `상태: [x]` (커밋 35d29e1)
 
@@ -679,7 +692,8 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 
 ### P3 실행 계획 — 우선순위·스코프 확정 (마스터 결정 2026-08-10)
 
-> **착수 시점**: P0~P2 잔여 5건(S1b·S9·S11·S13·S14) 완료 후. 그 전까지는 계획만 확정.
+> **착수 시점**: P0~P2 잔여 4건(S1b·S11·S13·S14) 완료 후 — S9 완료(2026-08-10). 그
+> 전까지는 계획만 확정.
 > **스코프**: 위 8개 항목 중 4개 트랙 선정(검색 3종은 한 세션으로 묶음) — 오프라인(O)
 > 트랙은 이미 별도 계획됨(아래 §O), 코스 공유는 정적 공유로 범위 축소.
 
