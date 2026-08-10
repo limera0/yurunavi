@@ -35,6 +35,20 @@ String? eventForType(int type) {
   }
 }
 
+/// S10: 진입/진출 road_class 등급이 유지되거나 상승할 때 음성 억제 대상이
+/// 되는 이벤트 집합. 포함: turn_left/turn_right(type 15,16,9,10),
+/// sharp_turn_*(14,11), keep/keep_left/keep_right(type 22,23,24 = Valhalla
+/// kStayStraight/kStayRight/kStayLeft, 갈림길 차선유지). 제외(등급 무관 항상
+/// 정상 안내): ramp_*/exit_*(진출입은 등급이 "상승"해도 실제로 차선을 빠져나가야
+/// 하는 필수 조작), roundabout_*(별도 방위각 기반 판정, S6 참조), uturn(항상
+/// 의도적 조작), merge/destination/continue(억제 대상 자체가 없음). 이 목록을
+/// 넓히거나 좁히면 안전 관련 안내가 사라질 수 있으니 임의로 조정하지 말 것
+/// (HANDOFF_0807_S10 §2).
+const _gradeSuppressible = {
+  'turn_left', 'turn_right', 'sharp_turn_left', 'sharp_turn_right',
+  'keep', 'keep_left', 'keep_right',
+};
+
 /// 거리(미터)를 50m 단위로 스냅한 뒤 한글 수사로 변환한다.
 ///
 /// - 50m 미만은 50으로 올림(clamp), 1000m 초과도 1000으로 내림.
@@ -108,8 +122,16 @@ class VoiceEngine {
   /// 뒤늦게 도착할 때마다 값이 갱신되므로 final이 아닌 settable 필드 —
   /// 호출자가 매 onProgress 호출 전 최신 값으로 갱신해야 한다.
   Map<int, StructureType>? exitStructureByManeuverIdx;
+  /// maneuver 인덱스(turnIdx) → 진입/진출 road_class. S10 등급 기반 억제
+  /// 판정에 쓰인다. RouteProgressNotifier.roadClassByManeuverIdx를 그대로
+  /// 참조받아 조회하며, [exitStructureByManeuverIdx]와 동일한 이유(비동기
+  /// trace_attributes 응답 타이밍)로 settable — 호출자가 매 onProgress 호출
+  /// 전 최신 값으로 갱신해야 한다.
+  Map<int, ({String? entry, String? exit})>? roadClassByManeuverIdx;
   VoiceEngine(this.profile,
-      {this.landmarkService, this.exitStructureByManeuverIdx});
+      {this.landmarkService,
+      this.exitStructureByManeuverIdx,
+      this.roadClassByManeuverIdx});
 
   int _voiceStepIdx = -1;
   List<double> _pendingPoints = [];
@@ -128,6 +150,20 @@ class VoiceEngine {
     if (turnIdx >= steps.length) return const [];
     final event = eventForType(steps[turnIdx].type);
     if (event == null) return const [];
+
+    // S10: 진입 도로 대비 진출 도로의 등급이 유지되거나 상승하는 회전/갈림길
+    // 안내는 음성 억제한다(예: 지방도 유지 갈림길에서의 불필요한 "좌회전").
+    // 대상 이벤트는 [_gradeSuppressible] 참조.
+    if (_gradeSuppressible.contains(event)) {
+      final rc = roadClassByManeuverIdx?[turnIdx];
+      // rc == null(데이터 없음/미매칭)이면 판단 불가 → fail-open, 억제하지
+      // 않는다(RoutingService.isGradeDowngrade 자체도 값 결측 시 true를
+      // 반환하지만, rc 자체가 없으면 여기서 먼저 억제 조건을 성립시키지
+      // 않는다 — 의미는 동일하게 "안내함").
+      if (rc != null && !RoutingService.isGradeDowngrade(rc.entry, rc.exit)) {
+        return const [];
+      }
+    }
 
     final imminentM = profile.imminentForEvent(_profileEventKey(event));
     if (step != _voiceStepIdx) {

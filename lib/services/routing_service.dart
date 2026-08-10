@@ -1090,13 +1090,63 @@ class RoutingService {
     return RoundaboutDirection.straight;
   }
 
-  /// 경로 좌표 목록으로 Valhalla trace_attributes를 호출해 다리/터널 구간을
-  /// 조회한다. 부가 기능이므로 어떤 실패에서도 예외를 던지지 않고 빈 리스트를
-  /// 반환한다.
-  static Future<List<StructureZone>> fetchStructureZones(
+  /// maneuvers[i]의 진입(entry)/진출(exit) road_class.
+  /// entry = beginShapeIdx에서 끝나는 직전 edge의 등급(지금까지 타고 온 도로).
+  /// exit  = beginShapeIdx에서 시작하는 edge의 등급(이 maneuver로 올라타는 도로).
+  /// 매칭 실패(트레이스 실패/데이터 누락)는 그냥 맵에서 빠진다 — 호출부가
+  /// null을 "판단 불가"로 다뤄야 한다(S10 HANDOFF §2 fail-open 참조).
+  static Map<int, ({String? entry, String? exit})> buildRoadClassByManeuverIdx(
+    List<dynamic> edges,
+    List<ManeuverStep> maneuvers,
+  ) {
+    final map = <int, ({String? entry, String? exit})>{};
+    for (int i = 0; i < maneuvers.length; i++) {
+      final b = maneuvers[i].beginShapeIdx;
+      String? entry, exit;
+      for (final e in edges) {
+        final m = e as Map;
+        if ((m['end_shape_index'] as num?)?.toInt() == b) {
+          entry = m['road_class'] as String?;
+        }
+        if ((m['begin_shape_index'] as num?)?.toInt() == b) {
+          exit = m['road_class'] as String?;
+        }
+      }
+      if (entry != null || exit != null) map[i] = (entry: entry, exit: exit);
+    }
+    return map;
+  }
+
+  /// Valhalla `RoadClass` enum 순위(낮을수록 상위 등급). motorway(0) >
+  /// trunk(1) > primary(2) > secondary(3) > tertiary(4) > unclassified(5) >
+  /// residential(6) > service_other(7) — S10 HANDOFF §0 curl 실측 확인.
+  static const _roadClassRank = {
+    'motorway': 0, 'trunk': 1, 'primary': 2, 'secondary': 3,
+    'tertiary': 4, 'unclassified': 5, 'residential': 6, 'service_other': 7,
+  };
+
+  /// exit 등급이 entry보다 실제로 하락(랭크 숫자 증가)했을 때만 true.
+  /// 값이 없거나 인식 불가하면 판단 불가 → **안내를 억제하지 않는다**
+  /// (안전 우선 — 불확실할 땐 "억제"보다 "과잉 안내"가 낫다는 원칙,
+  /// memory `feedback_safety_priority`/S7 HANDOFF §3 동일 판단).
+  static bool isGradeDowngrade(String? entryClass, String? exitClass) {
+    final er = _roadClassRank[entryClass];
+    final xr = _roadClassRank[exitClass];
+    if (er == null || xr == null) return true;
+    return xr > er;
+  }
+
+  /// 경로 좌표 목록으로 Valhalla trace_attributes를 호출해 다리/터널 구간과
+  /// maneuver별 진입/진출 road_class를 함께 조회한다(S10 — 같은 호출의
+  /// filters.attributes에 'edge.road_class'만 추가해 재사용, 새 HTTP 호출을
+  /// 만들지 않는다). 부가 기능이므로 어떤 실패에서도 예외를 던지지 않고 빈
+  /// zones/roadClasses를 반환한다.
+  static Future<({List<StructureZone> zones,
+      Map<int, ({String? entry, String? exit})> roadClasses})> fetchStructureZones(
     List<LatLng> points,
+    List<ManeuverStep> maneuvers,
   ) async {
-    if (points.length < 2) return [];
+    if (points.length < 2) return (zones: <StructureZone>[], roadClasses: <int, ({String? entry, String? exit})>{});
 
     try {
       final encoded = _encodePolyline6(points);
@@ -1126,6 +1176,10 @@ class RoutingService {
                   // (2026-07-19). 응답에서 flat 'names' 리스트로 온다(실측
                   // 확인, 아래 buildStructureZones/_classifyStructureEdge 참조).
                   'edge.names',
+                  // S10: 등급 유지/상승 갈림길 음성 억제 판정에 필요 —
+                  // 새 HTTP 호출을 만들지 않고 기존 trace_attributes 응답에
+                  // 얹는다(HANDOFF_0807_S10 §0).
+                  'edge.road_class',
                 ],
                 'action': 'include',
               },
@@ -1141,16 +1195,19 @@ class RoutingService {
           level: 900,
         );
         debugPrint('YNAV_STRUCT_ERR status=${resp.statusCode}');
-        return [];
+        return (zones: <StructureZone>[], roadClasses: <int, ({String? entry, String? exit})>{});
       }
 
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
       final edges = data['edges'] as List? ?? [];
-      return buildStructureZones(edges);
+      return (
+        zones: buildStructureZones(edges),
+        roadClasses: buildRoadClassByManeuverIdx(edges, maneuvers),
+      );
     } catch (e) {
       dev.log('fetchStructureZones 실패: $e', name: 'RoutingService', level: 900);
       debugPrint('YNAV_STRUCT_ERR exception=$e');
-      return [];
+      return (zones: <StructureZone>[], roadClasses: <int, ({String? entry, String? exit})>{});
     }
   }
 

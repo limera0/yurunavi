@@ -680,6 +680,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // 갱신해 전달한다.
     _voiceEngine!.exitStructureByManeuverIdx =
         ref.read(routeProgressProvider.notifier).exitStructureByManeuverIdx;
+    // roadClassByManeuverIdx도 동일 이유(파생 데이터, 매 틱 최신값 필요)로
+    // onProgress 호출 직전에 갱신한다(S10).
+    _voiceEngine!.roadClassByManeuverIdx =
+        ref.read(routeProgressProvider.notifier).roadClassByManeuverIdx;
     final voiceIntents = _voiceEngine!.onProgress(
         prog.activeStepIdx, prog.distToNextTurnM, _maneuvers,
         shapePoints: _routePoints,
@@ -762,11 +766,14 @@ class _NavScreenState extends ConsumerState<NavScreen>
   /// 최신 _applyRouteGuidance 호출과 다르면(그 사이 재탐색/코스 재선택으로
   /// 경로가 또 바뀌었으면) stale 응답이니 버린다.
   Future<void> _loadStructureZones(List<LatLng> points, int generation) async {
-    final zones = await RoutingService.fetchStructureZones(points);
+    final result = await RoutingService.fetchStructureZones(points, _maneuvers);
     if (!mounted || generation != _routeGeneration) return;
-    debugPrint('YNAV_STRUCT zones=${zones.length}');
+    debugPrint('YNAV_STRUCT zones=${result.zones.length}');
     final notifier = ref.read(routeProgressProvider.notifier);
-    notifier.setStructureZones(zones);
+    notifier.setStructureZones(result.zones);
+    // S10: 등급 유지/상승 갈림길 음성 억제 판정용 진입/진출 road_class —
+    // 같은 trace_attributes 응답에서 함께 받아온다(HANDOFF_0807_S10 §1).
+    notifier.setRoadClasses(result.roadClasses);
     // exit(20/21) 카드 라벨이 방금 갱신된 exitStructureByManeuverIdx를 반영할
     // 수 있도록 카드 목록을 다시 만든다 — maneuvers 자체는 그대로다.
     setState(() {

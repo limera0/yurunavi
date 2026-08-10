@@ -85,6 +85,13 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   // 온-루트 결과가 없을 때만 폴백으로 사용된다 — 온-루트가 항상 우선.
   Map<int, StructureType> _offRouteStructureByManeuverIdx = const {};
 
+  // maneuver 인덱스 → 진입/진출 road_class(S10). fetchStructureZones가 같은
+  // trace_attributes 호출에서 함께 받아오는 정적 파생 데이터라
+  // _exitStructureByManeuverIdx와 달리 _recomputeExitStructureMap을 거치지
+  // 않고 setRoadClasses()가 직접 갱신한다(구조물처럼 온-/옆-루트 두 소스를
+  // 병합할 필요가 없음).
+  Map<int, ({String? entry, String? exit})> _roadClassByManeuverIdx = const {};
+
   // bridge zone 인덱스 중 "갈림길이 있는" 것만 alert 대상으로 필터링하기 위한 집합.
   // null = 비자명 maneuver가 하나도 없어 필터 비활성(모든 bridge 표시).
   // 빈 Set = maneuver는 있지만 bridge 인근에 갈림길 없음(모든 bridge 억제).
@@ -103,6 +110,10 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   /// [_exitStructureByManeuverIdx]의 읽기 전용 노출.
   Map<int, StructureType> get exitStructureByManeuverIdx =>
       _exitStructureByManeuverIdx;
+
+  /// [_roadClassByManeuverIdx]의 읽기 전용 노출.
+  Map<int, ({String? entry, String? exit})> get roadClassByManeuverIdx =>
+      _roadClassByManeuverIdx;
 
   // ── 진행 상태 ──
   int _snapIdx = 0;
@@ -302,6 +313,7 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
     _maneuvers = maneuvers;
     _zones = const []; // 구조물 구간은 setStructureZones로 비동기 별도 주입
     _offRouteStructureByManeuverIdx = const {}; // 새 경로엔 이전 옆길 조회 결과가 무의미
+    _roadClassByManeuverIdx = const {}; // 이전 경로의 shape 인덱스는 새 경로와 무관(S10)
     // 급커브는 순수 geometry 계산이라 fetchStructureZones처럼 비동기 HTTP
     // 응답을 기다릴 필요가 없다 — setRoute 시점에 바로 계산해 반영한다.
     _curves = RoutingService.detectSharpCurves(points, maneuvers);
@@ -407,6 +419,16 @@ class RouteProgressNotifier extends Notifier<RouteProgress?> {
   void setOffRouteStructures(Map<int, StructureType> byManeuverIdx) {
     _offRouteStructureByManeuverIdx = byManeuverIdx;
     _recomputeExitStructureMap();
+  }
+
+  /// maneuver별 진입/진출 road_class 주입(S10). trace_attributes HTTP 호출이
+  /// setRoute 이후 비동기로 완료되므로 setStructureZones와 마찬가지로 별도
+  /// 메서드로 분리한다. RouteProgress state의 다른 필드와 무관하므로 재emit는
+  /// 하지 않는다 — exitStructureByManeuverIdx와 동일하게 getter로 직접
+  /// 조회되는 파생 데이터라 호출자(nav_screen._handleVoice)가 매 틱 최신값을
+  /// 직접 읽어간다.
+  void setRoadClasses(Map<int, ({String? entry, String? exit})> byManeuverIdx) {
+    _roadClassByManeuverIdx = byManeuverIdx;
   }
 
   /// 점 pos를 [_snapIdx, _snapIdx+window] 범위 세그먼트에 스냅(단조).
