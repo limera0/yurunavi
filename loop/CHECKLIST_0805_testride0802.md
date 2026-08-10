@@ -4,7 +4,7 @@
 - 원본: [testride_result/260802_testride_result.md](testride_result/260802_testride_result.md)
 - **상태 표기**: `[ ]` 미착수 · `[~]` 진행중 · `[x]` 완료 · `[!]` 마스터 확인 대기 · `[-]` 스코프 밖
 
-**진행 요약: 12 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7·S8·S14 코드 완료 — 실기기
+**진행 요약: 13 / 38 완료** (S0·S1·S2·S3·S4a·S4b·S4c·S5·S6·S7·S8·S13·S14 코드 완료 — 실기기
 검증만 마스터 대기. S3의 알림 일원화(§2-5)·PIP 복구 UX(§2-7) 2건은 **2026-08-06 밤 S3b
 구현 완료** — 알림 A(geolocator FGS off) 반영, PIP 폐기 + 플로팅 오버레이
 (SYSTEM_ALERT_WINDOW) 자체 구현 완료.
@@ -16,7 +16,8 @@
 **S5·S6·S7·S8(정차모드·로터리방향·터널추측항법·UI잔여) 2026-08-07 코드 완료** — P1(주행
 품질) 트랙 전부 완료. **S13은 2026-08-10 저녁 스티어링에서 스코프 확인 완료** — yurunavi
 저장소 밖(valhalla-src) 작업이라 별도 세션에서 진행하기로 결정(방식: 로컬 수정 후
-`git push backup yurunavi-fork`). S9·S10 기완료. 다음 큐: S1b·S11·S13.
+`git push backup yurunavi-fork`), **2026-08-10 같은 저녁 이 방식대로 완료**
+(커밋 `bf8081f35`). S9·S10 기완료. 다음 큐: S1b·S11.
 
 ---
 
@@ -670,7 +671,7 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
       픽셀 샘플링 + 로컬 tileserver-gl 렌더 미리보기로 검증.
 - [ ] OSMAND·네이버지도 대조 — **실기기·육안 확인은 마스터 몫으로 남김**
 
-### S13 · Valhalla CI 실패  `상태: [ ]` — 우선순위 최하
+### S13 · Valhalla CI 실패  `상태: [x]` — 완료 2026-08-10
 
 > **2026-08-10 저녁 스티어링에서 스코프 확인**: 대상 파일은
 > `/data/projects/valhalla-src/.github/workflows/clean_cache.yml` —
@@ -681,7 +682,17 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 > `origin`은 공식 valhalla/valhalla라 push 금지). gh CLI 미설치 확인됨 — GitHub UI
 > 조작이 필요하면 마스터가 직접 처리.
 
-- [ ] 포크의 "Clear S3 cache" 워크플로 비활성화 (앱과 무관, 업스트림 잔재)
+> **완료 2026-08-10** · 착수 전 마스터 확인: ① 비활성화 방식(트리거만 제거 vs 파일
+> 전체 삭제 vs GitHub Actions UI 비활성화) → **트리거만 제거** 결정
+> (workflow_dispatch는 남겨 수동 캐시 정리 가능, 업스트림 병합 시 diff 추적 용이).
+> ② 이 세션에서 커밋·push까지 바로 진행할지 → **승인**.
+> `clean_cache.yml`의 `on:` 블록에서 `schedule`(매월 1·15일)과
+> `pull_request(closed→master)` 트리거 삭제, `workflow_dispatch`만 유지.
+> 원인: 포크(`limera0/valhalla-yurunavi-fork`)에 `HETZNER_S3_ACCESS_KEY`/
+> `_SECRET` secrets가 없어 두 트리거가 매번 실패. 커밋 `bf8081f35`
+> (`valhalla-src`, `yurunavi-fork` 브랜치) → `backup` 리모트 push 완료.
+
+- [x] 포크의 "Clear S3 cache" 워크플로 비활성화 (앱과 무관, 업스트림 잔재)
 
 ### ~~Google API 결제 확인~~  `상태: [x] 종결`
 
