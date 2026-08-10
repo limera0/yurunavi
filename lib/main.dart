@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,7 +14,6 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'firebase_options.dart';
 import 'providers/app_providers.dart';
-import 'services/tour_recovery_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,9 +30,10 @@ void main() async {
   MemoryPressureObserver.init();
   AppConfig.init(const ProdConfig());
   // 프로세스 강제종료(태스크 스와이프/OEM 배터리 매니저/OOM)로 인해 요약이
-  // 저장되지 못한 고아 투어 트랙을 백그라운드에서 복구한다 — 앱 시작을
-  // 지연시키면 안 되므로 await 없이 fire-and-forget으로 호출한다.
-  unawaited(TourRecoveryService().recoverOrphans());
+  // 저장되지 못한 고아 투어 트랙 복구는 S15("이어서 안내하기")부터 스플래시
+  // 화면(`splash_screen.dart`)으로 옮겨졌다 — 재개 프롬프트가 이 복구의
+  // 완료를 기다려야 하므로 여기서 fire-and-forget으로 먼저 실행하면 경합이
+  // 생긴다.
   await initCrashReporting(DefaultFirebaseOptions.currentPlatform);
   await FileLogger.init();
   // _sink가 준비된 뒤에만 구독 시작 — writeRaw()가 _sink에 직접 쓰기 때문.

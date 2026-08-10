@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -8,7 +10,11 @@ import '../../../core/config/app_config.dart';
 import '../../../core/config/routing_config.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../providers/app_providers.dart';
+import '../../../services/routing_service.dart';
+import '../../../services/tour_recovery_service.dart';
 import '../../map/presentation/main_map_screen.dart';
+import '../../navigation/presentation/nav_screen.dart';
+import '../../settings/providers/settings_providers.dart';
 
 /// 스플래시 위치 선확보 예산 (S0) — `getCurrentPosition()` 자체 타임아웃이자,
 /// `_goToMain()` 직전 대기 상한이기도 하다. 이 시간을 넘기면 조용히 포기하고
@@ -191,7 +197,101 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
           startedAt: locationStartedAt, budget: locationBudget);
     }
     if (!mounted) return;
+
+    // S15: 프로세스가 비정상 종료된 고아 투어를 복구한다. 재개 프롬프트가
+    // 이 복구의 완료를 기다려야 하므로(재개 가능 판정은 recoverOrphans()가
+    // 스킵한 고아만 findResumableOrphan()으로 다시 찾는다) 여기서 await한다
+    // — main.dart의 기존 fire-and-forget 호출은 제거됐다.
+    final thresholdHours = await ref.read(resumeThresholdHoursProvider.future);
+    await TourRecoveryService().recoverOrphans(
+      resumeThresholdHours: thresholdHours,
+    );
+    if (!mounted) return;
+    final resumable = await TourRecoveryService().findResumableOrphan(
+      thresholdHours: thresholdHours,
+    );
+    if (!mounted) return;
+    // 재탐색 origin은 새로 GPS를 뜨지 않고 위에서 이미 확보된
+    // bootLocationProvider 값을 재사용한다 — 값이 없으면(권한 거부/실패)
+    // 재개 프롬프트 자체를 건너뛴다(재탐색이 불가능한 프롬프트는 의미 없음).
+    final currentPos = ref.read(bootLocationProvider);
+    if (resumable != null && currentPos != null && mounted) {
+      final navigated = await _offerResume(resumable, currentPos);
+      if (navigated) return; // 이미 NavScreen으로 진입 완료 — _goToMain() 생략
+    }
+    if (!mounted) return;
     _goToMain();
+  }
+
+  /// 중단된 투어([r])를 이어서 안내할지 사용자에게 묻는다. "그만두기"를
+  /// 고르거나 다이얼로그를 닫으면 중단 구간을 일반 히스토리로 확정하고
+  /// false를 반환한다("이어서 안내" 버튼과 무관하게 finalizeAsInterrupted는
+  /// 재탐색 성공 여부와 상관없이 먼저 호출돼, 재탐색이 실패해도 중단 구간
+  /// 데이터는 유실되지 않는다). "이어서 안내"를 고르면 현재위치→원목적지로
+  /// 재탐색해 성공 시 [NavScreen]으로 pushReplacement하고 true를 반환한다.
+  Future<bool> _offerResume(ResumableOrphan r, LatLng currentPos) async {
+    final elapsedMin = DateTime.now().difference(r.lastPointAt).inMinutes;
+    final resume = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('이어서 안내할까요?'),
+        content: Text(
+          '$elapsedMin분 전 중단된 투어가 있어요.\n'
+          '현재 위치에서 원래 목적지까지 다시 안내할게요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('그만두기'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('이어서 안내'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return false;
+
+    if (resume != true) {
+      unawaited(TourRecoveryService().finalizeAsInterrupted(r.id));
+      return false;
+    }
+
+    final oldLeg = await TourRecoveryService().finalizeAsInterrupted(r.id);
+    if (!mounted) return false;
+    try {
+      final routes = await RoutingService.fetchRoutes(
+        origin: currentPos,
+        destination: LatLng(r.destLat, r.destLng),
+        waypoints: r.waypoints,
+      );
+      if (!mounted || routes.isEmpty) return false;
+      // MVP 단순화: 첫 코스(시골길)를 기본 선택한다 — 중단 전 실제로 어떤
+      // 코스로 달리고 있었는지는 저장하지 않으므로 재선택 UI는 스코프 밖
+      // (loop/HANDOFF_0810_S15_resume_navigation.md §3 참조).
+      final route = routes.first;
+      ref.read(pastSplashProvider.notifier).markPastSplash();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => NavScreen(
+            destination: LatLng(r.destLat, r.destLng),
+            waypoints: r.waypoints,
+            routePolyline: route.points,
+            maneuvers: route.maneuvers,
+            durationMin: route.durationMin,
+            resumedFromId: oldLeg?.id,
+          ),
+        ),
+      );
+      return true;
+    } catch (e) {
+      // 재탐색 실패 — 중단 구간은 위 finalizeAsInterrupted()로 이미 정상
+      // 히스토리에 저장된 뒤라 데이터 유실 없이 평소 진입 경로로 폴백한다.
+      debugPrint('YNAV_RESUME reroute failed: $e');
+      return false;
+    }
   }
 
   /// [acquireBootLocation]을 [budget] 예산으로 호출해 결과를
