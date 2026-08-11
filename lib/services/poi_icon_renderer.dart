@@ -88,6 +88,32 @@ Future<Uint8List> renderPlainDotPng(Color color, {double size = 96}) async {
   }
 }
 
+/// 경로 진행방향 화살표 PNG — 흰 삼각형·투명 배경 48×48.
+/// MapLibre addSymbolLayer(symbolPlacement: 'line')와 함께 쓰인다.
+Future<Uint8List> renderRouteArrowPng({double size = 48}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final paint = Paint()
+    ..color = Colors.white
+    ..style = PaintingStyle.fill;
+  final path = Path()
+    ..moveTo(size / 2, 0)
+    ..lineTo(size, size)
+    ..lineTo(0, size)
+    ..close();
+  canvas.drawPath(path, paint);
+  final picture = recorder.endRecording();
+  ui.Image? image;
+  try {
+    image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  } finally {
+    picture.dispose();
+    image?.dispose();
+  }
+}
+
 // POI 카테고리 → 아이콘/배경색 (기존 CircleLayer match 표현식과 동일 색상 유지).
 // 이름 규칙 'poi-icon-${PoiType.name}'으로 addImage 등록 및 SymbolLayer에서 참조.
 const Map<PoiType, Color> poiIconBgColors = {

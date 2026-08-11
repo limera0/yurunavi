@@ -145,6 +145,8 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
 
   static const _routeSourceId = 'route-source';
   static const _routeLayerId = 'route-layer';
+  static const _routeArrowLayerId = 'route-arrow-layer';
+  static const _kRouteArrowIcon = 'route-arrow';
   static const _routeBgSourceId = 'route-bg-source';
   static const _routeBgLayerId = 'route-bg-layer';
   static const _locSourceId = 'loc-source';
@@ -161,6 +163,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
   static const _kFavPoiIcon    = 'poi-icon-favorite';
 
   bool _locLayerReady = false;
+  bool _routeArrowLayerReady = false;
   ml.Symbol? _destMarker;
   ml.Symbol? _originMarker;
   List<ml.Symbol> _waypointMarkers = [];
@@ -521,6 +524,7 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded) return;
     final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
+    if (_routeArrowLayerReady) await ctrl.removeLayer(_routeArrowLayerId);
     await ctrl.removeLayer(_routeLayerId);
     await ctrl.addLineLayer(
       _routeSourceId,
@@ -533,6 +537,42 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
       ),
       belowLayerId: 'waterway-name',
     );
+    if (_routeArrowLayerReady) {
+      await ctrl.addSymbolLayer(
+        _routeSourceId,
+        _routeArrowLayerId,
+        const ml.SymbolLayerProperties(
+          symbolPlacement: 'line',
+          symbolSpacing: 80.0,
+          iconImage: _kRouteArrowIcon,
+          iconSize: 0.6,
+          iconRotationAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        belowLayerId: 'waterway-name',
+      );
+    }
+  }
+
+  Future<void> _initRouteArrowLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addSymbolLayer(
+      _routeSourceId,
+      _routeArrowLayerId,
+      const ml.SymbolLayerProperties(
+        symbolPlacement: 'line',
+        symbolSpacing: 80.0,
+        iconImage: _kRouteArrowIcon,
+        iconSize: 0.6,
+        iconRotationAlignment: 'map',
+        iconAllowOverlap: true,
+        iconIgnorePlacement: true,
+      ),
+      belowLayerId: 'waterway-name',
+    );
+    _routeArrowLayerReady = true;
   }
 
   // ── Marker helpers (B1/B2) ────────────────────────────────────────────────
@@ -1891,6 +1931,7 @@ Future<void> _onMapTap(LatLng tapped) async {
               _waypointMarkers = <ml.Symbol>[];
               _searchPreviewMarker = null;
               _locLayerReady = false;
+              _routeArrowLayerReady = false;
               await _initRouteLayer();
               // 스타일 로드 시점에 이미 경로가 있으면 즉시 반영
               final mapState = ref.read(mapInteractionProvider);
@@ -1926,6 +1967,8 @@ Future<void> _onMapTap(LatLng tapped) async {
                     mapState.waypoints, mapState.waypointNames);
               }
               // B1: 현위치 화살표 puck — 경로 레이어 위에 그려지도록 마지막에 추가
+              await _mlCtrl!.addImage(_kRouteArrowIcon, await renderRouteArrowPng());
+              await _initRouteArrowLayer();
               await _initLocationLayer();
               await _ensureLocationMarker();
               // POI 카테고리 아이콘 — 스타일 재주입마다 다시 등록해야 한다

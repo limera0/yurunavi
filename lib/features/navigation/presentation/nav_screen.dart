@@ -152,6 +152,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
 
   bool _locLayerReady = false;
   bool _destLayerReady = false;
+  bool _navRouteArrowLayerReady = false;
   static const String _kDestIcon = 'pointer_red';
   // 기존 1.5 × 0.7 = 1.05 (핀 이미지 96px 기준, 화면상 96×1.05 ≈ 100.8px).
   static const double _kDestIconSize = 1.05;
@@ -172,6 +173,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
   // 보이고 나머지 두 코스와 비교가 안 되던 버그를 고친다.
   static const _navRouteBgSourceId = 'nav-route-bg-source';
   static const _navRouteBgLayerId  = 'nav-route-bg-layer';
+  static const _navRouteArrowLayerId = 'nav-route-arrow-layer';
+  static const _kRouteArrowIcon = 'route-arrow';
   static const _navLocSourceId = 'nav-loc-source';
   static const _navLocLayerId  = 'nav-loc-layer';
   // 13-1b: 줌 레벨 기준으로 항상 켜져 있는 POI 레이어 (도착배너용 _arrivalPois와
@@ -1672,6 +1675,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     // (main_map_screen.dart와 동일한 패턴, A-5).
     _locLayerReady = false;
     _destLayerReady = false;
+    _navRouteArrowLayerReady = false;
     // 레이어 설치 후 진입 시 이미 있는 경로 즉시 반영
     _initRouteLayer().whenComplete(() async {
       if (_routePoints.length >= 2 && _canCallMap()) {
@@ -1695,6 +1699,8 @@ class _NavScreenState extends ConsumerState<NavScreen>
         );
         await _mlCtrl?.addImage('poi-icon-${type.name}', bytes);
       }
+      await _mlCtrl?.addImage(_kRouteArrowIcon, await renderRouteArrowPng());
+      await _initNavRouteArrowLayer();
       _initDestLayer().whenComplete(() {
         _initLocationLayer().whenComplete(() => _ensureLocationMarker()); // unawaited — ③
         _initPoiLayer(); // unawaited — 13-1b 상시 표시 POI 레이어
@@ -1908,6 +1914,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
     final ctrl = _mlCtrl;
     if (ctrl == null || !_styleLoaded || !_canCallMap()) return;
     final courseLineColor = ref.read(skinProvider).colors.courseLineColor;
+    if (_navRouteArrowLayerReady) await ctrl.removeLayer(_navRouteArrowLayerId);
     await ctrl.removeLayer(_navRouteLayerId);
     await ctrl.addLineLayer(
       _navRouteSourceId,
@@ -1920,6 +1927,42 @@ class _NavScreenState extends ConsumerState<NavScreen>
       ),
       belowLayerId: 'waterway-name',
     );
+    if (_navRouteArrowLayerReady) {
+      await ctrl.addSymbolLayer(
+        _navRouteSourceId,
+        _navRouteArrowLayerId,
+        const ml.SymbolLayerProperties(
+          symbolPlacement: 'line',
+          symbolSpacing: 80.0,
+          iconImage: _kRouteArrowIcon,
+          iconSize: 0.6,
+          iconRotationAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        belowLayerId: 'waterway-name',
+      );
+    }
+  }
+
+  Future<void> _initNavRouteArrowLayer() async {
+    final ctrl = _mlCtrl;
+    if (ctrl == null) return;
+    await ctrl.addSymbolLayer(
+      _navRouteSourceId,
+      _navRouteArrowLayerId,
+      const ml.SymbolLayerProperties(
+        symbolPlacement: 'line',
+        symbolSpacing: 80.0,
+        iconImage: _kRouteArrowIcon,
+        iconSize: 0.6,
+        iconRotationAlignment: 'map',
+        iconAllowOverlap: true,
+        iconIgnorePlacement: true,
+      ),
+      belowLayerId: 'waterway-name',
+    );
+    _navRouteArrowLayerReady = true;
   }
 
   /// 재탐색/코스 재선택으로 _routePoints가 통째로 교체되기 직전에 호출해,
