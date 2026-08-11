@@ -835,6 +835,7 @@
     {
       "id": "building",
       "type": "fill",
+      "minzoom": 13,
       "metadata": {
         "mapbox:group": "1444849364238.8171"
       },
@@ -846,11 +847,11 @@
           "base": 1,
           "stops": [
             [
-              15.5,
+              13,
               "#f2eae2"
             ],
             [
-              16,
+              14,
               "#dfdbd7"
             ]
           ]
@@ -860,6 +861,7 @@
     {
       "id": "building-top",
       "type": "fill",
+      "minzoom": 13,
       "metadata": {
         "mapbox:group": "1444849364238.8171"
       },
@@ -878,7 +880,7 @@
               0
             ],
             [
-              16,
+              14,
               1
             ]
           ]

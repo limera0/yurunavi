@@ -793,21 +793,25 @@ final nextBmnt = today.bmnt.add(const Duration(hours: 24)); // ✘ 항상 +24h
 - [ ] QR 생성 — 기존 의존성 확인 후 신규 패키지 여부 결정
 - [ ] 앱 딥링크 수신 핸들러 (공유받은 경로 로드)
 
-#### S18 상세 — 경로 색상·화살표  `상태: [ ]`
+#### S18 상세 — 경로 색상·화살표  `상태: [x]`
 
 - **색상 확정(2026-08-10)**: 코스 타입별 3색, 브랜드 스킨 독립(가시성 우선)
   - 국도(RouteType.national, idx=2) → 밝은 남색 `#2255CC`
   - 지방도(RouteType.provincial, idx=1) → 밝은 초록 `#00BA4A`
   - 시골길(RouteType.country, idx=0) → 밝은 주황 `#FF6600`
   - YuruCam/CubBuddy 스킨의 독자 courseLineColor override 제거 → 전 스킨 통일
-- [ ] `app_theme.dart:62~66` courseLineColor 3값 업데이트
-- [ ] YuruCam·CubBuddy 스킨 독자 색상 override 제거 (legacy 위임으로 통일)
-- [ ] 진행방향 화살표 — MapLibre 심볼 레이어 `symbol-placement: line` 구현
+- [x] `app_theme.dart:62~66` courseLineColor 3값 업데이트 (청크1+2, commit `bfbe4b8`)
+- [x] YuruCam·CubBuddy 스킨 독자 색상 override 제거 (legacy 위임으로 통일) (청크1+2)
+- [x] 진행방향 화살표 — MapLibre 심볼 레이어 `symbol-placement: line` 구현 (청크3, commit `2710f0e`)
+- **⚠ 실기기 시각 검증 미완**: 색상 3종 + 화살표 렌더 결과를 실주행에서 눈으로 확인하지 않음
 
 #### S19 상세 — 지도 정보밀도 (RECON 선행)  `상태: [ ]`
 
-- [ ] **RECON 먼저**: 한국 OSM `indoor=*`/건물 내부 태그 커버리지 실측 — 사실상 데이터
-      없으면 "건물 내부 정보"는 스코프 제외 권고, POI/라벨 밀도 상향으로 재정의
+- **스코프 정정(2026-08-11)**: "건물 내부(indoor=*)" 아님 — **부지 안 건물 형상(building=*)
+  표시**가 목표. 예: 평택 고덕 삼성 공장 같은 산업단지/공단 내 개별 건물 폴리곤.
+  OsmAND에는 표시됨 → 현재 타일 스타일의 minzoom/filter 문제로 추정.
+- [ ] **RECON**: `osm_liberty_yurunavi.json` 스타일에서 `building` 레이어 minzoom·filter 확인
+      — 현재 어느 줌 레벨에서 켜지는지, 산업단지 내 건물이 OSM 데이터에 있는지 실측
 - [ ] RECON 결과로 마스터 재확인 후 구현 스코프 확정
 
 ### O · 오프라인 우선 전환 (마스터 제안 2026-08-05) — **승인 완료, 착수는 S3 뒤**
