@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../theme/app_theme.dart';
-import '../../theme/app_theme.dart' as legacy;
 import '../skin.dart';
 
 class DefaultSkin implements AppSkin {
@@ -82,7 +81,7 @@ class _DefaultColors implements SkinColors {
   Color get speedometerBg => AppColors.surface;
 
   @override
-  Map<int, Color> get courseLineColor => legacy.courseLineColor;
+  Map<int, Color> get courseLineColor => skinCourseLineColor;
 }
 
 /// 3종 무료 스킨(유루캠/레트로 모터링/동네 라이딩 메이트)이 모두 공유하는 타이포

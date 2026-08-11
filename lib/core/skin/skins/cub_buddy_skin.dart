@@ -84,9 +84,5 @@ class _CubBuddyColors implements SkinColors {
   Color get speedometerBg => surface;
 
   @override
-  Map<int, Color> get courseLineColor => const {
-        0: Color(0xFFC05F4C),
-        1: Color(0xFF4F6B58),
-        2: Color(0xFF232A3B),
-      };
+  Map<int, Color> get courseLineColor => skinCourseLineColor;
 }

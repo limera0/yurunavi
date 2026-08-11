@@ -60,10 +60,15 @@ class AppColors {
 /// 2: 국도(national/fast) — blue. Shared between home (main_map_screen) and
 /// nav (nav_screen) route-line paint + the home course-selector card badges.
 const Map<int, Color> courseLineColor = {
-  0: Color(0xFFC79A00), // 시골길 — dark yellow
-  1: Color(0xFF2E9E4F), // 지방도 — green
-  2: Color(0xFF1E5AFF), // 국도 — blue
+  0: Color(0xFFFF6600), // 시골길 — bright orange (흰 배경 대비 최대)
+  1: Color(0xFF00BA4A), // 지방도 — bright green (연노랑 배경 대비)
+  2: Color(0xFF2255CC), // 국도 — bright navy (연주황 배경 대비)
 };
+
+/// SkinColors.courseLineColor 게터 구현용 alias.
+/// getter와 이름이 같으면 this.courseLineColor로 해석돼 순환 참조가 되므로
+/// 다른 이름으로 참조할 수 있도록 제공한다.
+const Map<int, Color> skinCourseLineColor = courseLineColor;
 
 /// Converts a [Color] to a MapLibre-style `#RRGGBB` hex string (paint
 /// properties need string hex, not a Color object). Uses toARGB32() rather

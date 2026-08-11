@@ -84,9 +84,5 @@ class _YuruCamColors implements SkinColors {
   Color get speedometerBg => surface;
 
   @override
-  Map<int, Color> get courseLineColor => const {
-        0: Color(0xFFE2896F),
-        1: Color(0xFF8CA283),
-        2: Color(0xFF7C8B99),
-      };
+  Map<int, Color> get courseLineColor => skinCourseLineColor;
 }

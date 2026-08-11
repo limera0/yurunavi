@@ -84,9 +84,5 @@ class _RetroMotoringColors implements SkinColors {
   Color get speedometerBg => surface;
 
   @override
-  Map<int, Color> get courseLineColor => const {
-        0: Color(0xFF78B4AC),
-        1: Color(0xFFC7A768),
-        2: Color(0xFFDFA79E),
-      };
+  Map<int, Color> get courseLineColor => skinCourseLineColor;
 }
