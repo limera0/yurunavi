@@ -1,4 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// StateProvider는 Riverpod 3에서 legacy.dart로 분리됐다 — pendingDeepLinkRouteProvider가
+// 단순 명령형 상태 플래그로 이 API를 쓴다.
+import 'package:flutter_riverpod/legacy.dart';
+
+import '../models/saved_route.dart';
 
 // Re-export from new feature-based structure.
 // Kept for backward compatibility with screens not yet migrated.
@@ -18,3 +23,5 @@ class PastSplashNotifier extends Notifier<bool> {
 
   void markPastSplash() => state = true;
 }
+
+final pendingDeepLinkRouteProvider = StateProvider<SavedRoute?>((ref) => null);

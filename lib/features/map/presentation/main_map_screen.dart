@@ -31,6 +31,9 @@ import '../../../services/native_engine.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
 import '../../../services/routing_service.dart';
+import '../../../models/saved_route.dart';
+import '../../../providers/app_providers.dart';
+// ignore: unnecessary_import
 import '../providers/map_providers.dart';
 import '../style_language_transform.dart';
 import '../../navigation/presentation/nav_screen.dart';
@@ -1724,6 +1727,17 @@ Future<void> _onMapTap(LatLng tapped) async {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SavedRoute?>(pendingDeepLinkRouteProvider, (_, route) async {
+      if (route == null) return;
+      ref.read(pendingDeepLinkRouteProvider.notifier).state = null;
+      await ref.read(savedRoutesProvider.notifier).add(route);
+      if (!mounted) return;
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(this.context).showSnackBar(
+        const SnackBar(content: Text('공유된 코스가 저장되었습니다')),
+      );
+    });
+
     final interaction = ref.watch(mapInteractionProvider);
     final dest = interaction.destination;
     final waypoint = interaction.waypoint; // ignore: unused_local_variable

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +17,7 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/splash_screen.dart';
 import 'firebase_options.dart';
 import 'providers/app_providers.dart';
+import 'services/route_share_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,11 +62,54 @@ void main() async {
   runApp(const ProviderScope(child: YuruNaviApp()));
 }
 
-class YuruNaviApp extends ConsumerWidget {
+class YuruNaviApp extends ConsumerStatefulWidget {
   const YuruNaviApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<YuruNaviApp> createState() => _YuruNaviAppState();
+}
+
+class _YuruNaviAppState extends ConsumerState<YuruNaviApp> {
+  StreamSubscription<Uri>? _linkSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    final appLinks = AppLinks();
+
+    // 앱 종료 상태에서 딥링크로 시작된 경우
+    try {
+      final initial = await appLinks.getInitialLink();
+      if (initial != null) _handleUri(initial);
+    } catch (_) {}
+
+    // 앱 실행 중 수신
+    _linkSub = appLinks.uriLinkStream.listen(
+      _handleUri,
+      onError: (_) {},
+    );
+  }
+
+  void _handleUri(Uri uri) {
+    if (uri.scheme != 'yurunavi' || uri.host != 'route') return;
+    final route = RouteShareService.decodeRoute(uri.toString());
+    if (route == null) return;
+    if (!mounted) return;
+    ref.read(pendingDeepLinkRouteProvider.notifier).state = route;
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final pastSplash = ref.watch(pastSplashProvider);
     if (pastSplash) {
       // Post-splash: every screen (home/map, course sheet, route option
