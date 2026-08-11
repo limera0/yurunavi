@@ -35,6 +35,7 @@ import '../../../services/tour_log_service.dart';
 import '../../../services/voice_pack_service.dart';
 import '../../../models/map_language.dart';
 import '../../../models/poi.dart';
+import '../../../services/connectivity_service.dart';
 import '../../../services/routing_service.dart';
 import '../../map/providers/map_providers.dart';
 import '../../map/style_language_transform.dart';
@@ -354,6 +355,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   static const _kFailureWindow = Duration(seconds: 12);
   static const _kFailureCount = 3;
   bool _rerouteFallback = false;                // true면 재탐색 중단, 기존 경로 유지
+  bool _isOfflineRouting = false;               // serverDown 재탐색 실패 중
   bool _saidPassedDest = false;                 // '목적지를 지나쳤습니다' 중복 발화 방지
 
   late List<_TurnStep> _steps; // Valhalla maneuvers 또는 더미 폴백
@@ -916,6 +918,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
         setState(() {
           _routePoints = newPoints;
           _durationMin = routes[selIdx].durationMin;
+          _isOfflineRouting = false;
           _applyRouteGuidance(routes[selIdx].maneuvers);
         });
         debugPrint('YNAV_GUIDE reroute steps=${_steps.length} first=${_steps.isNotEmpty ? _steps[0].label : "none"}');
@@ -927,8 +930,10 @@ class _NavScreenState extends ConsumerState<NavScreen>
               _navRouteSourceId, _buildRouteGeoJson(newPoints));
         }
       }
-    } on RoutingException {
-      // 재탐색 실패 — 기존 경로 유지
+    } on RoutingException catch (e) {
+      if (e.type == RoutingError.serverDown) {
+        if (mounted) setState(() => _isOfflineRouting = true);
+      }
     } finally {
       if (mounted) setState(() => _isRerouting = false);
       final now = DateTime.now();
@@ -2035,6 +2040,13 @@ class _NavScreenState extends ConsumerState<NavScreen>
       if (mounted) setState(() => _styleJson = applyMapLanguageToStyle(raw, lang));
     });
 
+    ref.listen<bool>(isOnlineProvider, (prev, next) {
+      if (next && !(prev ?? false) && _isOfflineRouting) {
+        final pos = ref.read(navStateProvider)?.pos;
+        if (pos != null && mounted) _reroute(pos, silent: true);
+      }
+    });
+
     // 하단 ETA 카드(_etaCardKey) 실측 높이 갱신 — 우측 버튼 컬럼의 bottom
     // 오프셋 계산용(1-C). 매 프레임 후 측정해 값이 바뀐 경우에만 setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2134,6 +2146,32 @@ class _NavScreenState extends ConsumerState<NavScreen>
                     const SizedBox(width: 6),
                     Text('10초 후 현위치 복귀',
                         style: TextStyle(color: cs.onSurface, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+
+          if (_isOfflineRouting)
+            Positioned(
+              top: MediaQuery.of(context).padding.top +
+                  (_isManualMode ? 132 : 88),
+              left: 60,
+              right: 60,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.signal_wifi_off, color: Colors.white70, size: 14),
+                    SizedBox(width: 6),
+                    Text(
+                      '신호 없음 — 기존 경로로 안내 중',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
                   ],
                 ),
               ),
