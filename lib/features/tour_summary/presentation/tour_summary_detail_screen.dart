@@ -9,11 +9,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/skin/skin_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/map_language.dart';
+import '../../../models/saved_route.dart';
 import '../../../models/tour_log.dart';
+import '../../../services/route_share_service.dart';
 import '../../map/style_language_transform.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/tour_log_providers.dart';
@@ -117,6 +121,76 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
     } finally {
       if (mounted) setState(() => _savingMemo = false);
     }
+  }
+
+  void _shareRouteLink() {
+    final route = SavedRoute(
+      id: '',
+      name: '',
+      points: [
+        RoutePoint(widget.tourLog.startLat, widget.tourLog.startLng),
+        RoutePoint(widget.tourLog.endLat, widget.tourLog.endLng),
+      ],
+      type: RouteType.country,
+      savedAt: widget.tourLog.startedAt,
+      distanceKm: widget.tourLog.distanceM / 1000,
+    );
+    final url = RouteShareService.encodeRoute(route);
+    if (url.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '코스 공유',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(ctx).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 16),
+            QrImageView(data: url, size: 200),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: url));
+                      Navigator.of(ctx).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('링크가 복사되었습니다')),
+                      );
+                    },
+                    icon: const Icon(Icons.link),
+                    label: const Text('링크 복사'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      SharePlus.instance.share(ShareParams(text: url));
+                      Navigator.of(ctx).pop();
+                    },
+                    icon: const Icon(Icons.share),
+                    label: const Text('공유'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _shareTour() async {
@@ -463,6 +537,11 @@ class _TourSummaryDetailScreenState extends ConsumerState<TourSummaryDetailScree
                                   ? Colors.white
                                   : Colors.white70,
                             ),
+                          ),
+                          const SizedBox(width: 12),
+                          GestureDetector(
+                            onTap: _shareRouteLink,
+                            child: const Icon(Icons.qr_code_2_outlined, color: Colors.white),
                           ),
                           const SizedBox(width: 12),
                           // 캡처 도중(_sharing)에는 아이콘을 스피너로 바꾸지
