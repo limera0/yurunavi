@@ -36,8 +36,9 @@ Syncthing 컨테이너는 이미 `/archive/wiki`를 "LLM-Wiki" 폴더로 동기�
 볼트도 이미 잡혀 있다(927파일 · 15.5MB · idle). **폴더를 새로 만들 필요 없고,
 폰을 기기로 추가하기만 하면 된다.**
 
-1. 폰에 Syncthing 안드로이드 앱 설치. 공식 앱은 2024년 말 개발 중단됐으니
-   **Syncthing-Fork(Catfriend1)** 를 F-Droid나 Play 스토어에서 받아라.
+1. 폰에 Syncthing 안드로이드 앱 설치 — **F-Droid의 Syncthing-Fork**
+   (`com.github.catfriend1.syncthingfork`)를 받아라. 공식 앱은 2024년 말 개발
+   중단됐다. 아래 "앱 고를 때 주의" 절을 먼저 읽을 것.
 2. 서버 Syncthing GUI(`http://100.66.25.27:8384`, Tailscale 안에서만 열린다)
    → Add Remote Device → 폰 앱에 뜨는 device ID를 붙여넣고, 공유 폴더로
    **LLM-Wiki** 를 체크.
@@ -53,6 +54,33 @@ Syncthing 컨테이너는 이미 `/archive/wiki`를 "LLM-Wiki" 폴더로 동기�
 
 연결되면 폰에서 파일을 옮기고 → Syncthing이 서버로 밀고 → 15분 안에 cron이
 DB에 반영한다.
+
+### 앱 고를 때 주의 (2026-08-12 확인)
+
+플레이스토어 것과 F-Droid/GitHub 것이 **지금은 다른 사람이 만드는 다른 빌드**다.
+패키지 ID가 달라서 안드로이드는 별개 앱으로 취급한다(상호 업데이트 안 됨).
+
+| | 플레이스토어 | F-Droid / GitHub |
+|---|---|---|
+| 패키지 ID | `com.github.catfriend1.syncthingandroid` | `com.github.catfriend1.syncthingfork` |
+| 버전 | 2.0.11.1 (2025-12, 정지) | 2.1.3.0 (2026-08-05, 활발) |
+| 관리자 | nel0x | researchxxl |
+
+경위: 원 개발자 Catfriend1이 은퇴하며 저장소와 **앱 서명키까지** researchxxl
+(2025-11 개설된 새 계정)에게 넘겼는데 공개 검증 가능한 인수인계 발표가 없었고,
+Catfriend1은 프로필을 비공개로 돌리고 연락이 끊겼다(계정 탈취 가능성도 배제
+불가). heise 보도 + F-Droid 이슈 #3712로 커뮤니티 경보. **악성 코드는 발견되지
+않았고** F-Droid는 소스에서 직접 빌드해 배포를 계속하고 있다. 우려는 "지금 뭔가
+심어져 있다"가 아니라 "키를 쥔 사람이 불투명해 앞으로가 보장되지 않는다"는 쪽이다.
+
+→ **F-Droid를 쓰는 이유**: 소스에서 직접 빌드하므로 서명키를 누가 쥐었든 공개
+소스에 없는 코드는 들어갈 수 없다. GitHub APK 직접 설치는 자동 업데이트가 없어
+Obtainium이 따로 필요하다.
+
+**대안(앱을 아예 안 깔고 싶으면)**: 폰에 Tailscale이 이미 있으니 서버에 WebDAV를
+띄우고 Obsidian의 Remotely Save 플러그인으로 볼트를 동기화하면 된다. 시스템 권한
+파일 접근 앱이 안 늘고 전송은 Tailscale이 감싼다. 대신 실시간이 아니라 버튼/열람
+시점 동기화다. 서버 볼트는 어느 경로로 가든 그대로 쓴다.
 
 ---
 
