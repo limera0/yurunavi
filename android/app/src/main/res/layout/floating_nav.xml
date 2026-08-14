@@ -1,37 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  플로팅 내비게이션 오버레이 뷰
-  - 72dp 정사각형, 반투명 다크 라운드 배경
-  - 위: 턴 아이콘 (38dp), 아래: 거리 텍스트 (12sp)
-  - FloatingOverlayService.kt에서 WindowManager.addView()로 사용
+  플로팅 내비게이션 오버레이 뷰 — S21 리디자인(2026-08-14, 네이버지도 스타일 기준)
+  - 폭은 FloatingOverlayService.kt에서 화면폭의 일정 비율로 동적 계산(WindowManager.LayoutParams),
+    높이는 wrap_content.
+  - 2행 구성: 위=현재 안내(아이콘+거리, 크게), 아래=다음 안내(작게). 다음 안내 없으면 2행 GONE.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="72dp"
-    android:layout_height="72dp"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:gravity="center"
     android:background="@drawable/floating_nav_bg"
-    android:padding="6dp">
+    android:padding="12dp">
 
-    <ImageView
-        android:id="@+id/nav_icon"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:src="@drawable/nav_straight"
-        android:contentDescription="@null"
-        android:scaleType="fitCenter"/>
-
-    <TextView
-        android:id="@+id/nav_dist"
-        android:layout_width="wrap_content"
+    <!-- 현재 안내 -->
+    <LinearLayout
+        android:id="@+id/nav_row_current"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:gravity="center"
-        android:text=""/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/nav_icon"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:src="@drawable/nav_straight"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"/>
+
+        <TextView
+            android:id="@+id/nav_dist"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:gravity="start|center_vertical"
+            android:text=""/>
+
+    </LinearLayout>
+
+    <View
+        android:id="@+id/nav_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp"
+        android:background="#33FFFFFF"/>
+
+    <!-- 다음 안내 -->
+    <LinearLayout
+        android:id="@+id/nav_row_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/nav_icon2"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:src="@drawable/nav_straight"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:alpha="0.75"/>
+
+        <TextView
+            android:id="@+id/nav_dist2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:textColor="#BFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:gravity="start|center_vertical"
+            android:text=""/>
+
+    </LinearLayout>
 
 </LinearLayout>

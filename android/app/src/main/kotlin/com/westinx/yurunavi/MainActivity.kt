@@ -80,13 +80,17 @@ class MainActivity : FlutterActivity() {
                     "show" -> {
                         val iconType = call.argument<String>("iconType") ?: "nav_straight"
                         val distText = call.argument<String>("distanceText") ?: ""
-                        sendOverlayIntent(FloatingOverlayService.ACTION_SHOW, iconType, distText)
+                        val iconType2 = call.argument<String>("nextIconType")
+                        val distText2 = call.argument<String>("nextDistanceText")
+                        sendOverlayIntent(FloatingOverlayService.ACTION_SHOW, iconType, distText, iconType2, distText2)
                         result.success(null)
                     }
                     "update" -> {
                         val iconType = call.argument<String>("iconType") ?: "nav_straight"
                         val distText = call.argument<String>("distanceText") ?: ""
-                        sendOverlayIntent(FloatingOverlayService.ACTION_UPDATE, iconType, distText)
+                        val iconType2 = call.argument<String>("nextIconType")
+                        val distText2 = call.argument<String>("nextDistanceText")
+                        sendOverlayIntent(FloatingOverlayService.ACTION_UPDATE, iconType, distText, iconType2, distText2)
                         result.success(null)
                     }
                     "hide" -> {
@@ -111,11 +115,19 @@ class MainActivity : FlutterActivity() {
         IdeographFontBridge(flutterEngine.dartExecutor.binaryMessenger)
     }
 
-    private fun sendOverlayIntent(action: String, iconType: String, distText: String) {
+    private fun sendOverlayIntent(
+        action: String,
+        iconType: String,
+        distText: String,
+        iconType2: String? = null,
+        distText2: String? = null,
+    ) {
         val intent = Intent(this, FloatingOverlayService::class.java).apply {
             this.action = action
             putExtra(FloatingOverlayService.EXTRA_ICON, iconType)
             putExtra(FloatingOverlayService.EXTRA_TEXT, distText)
+            if (iconType2 != null) putExtra(FloatingOverlayService.EXTRA_ICON2, iconType2)
+            if (distText2 != null) putExtra(FloatingOverlayService.EXTRA_TEXT2, distText2)
         }
         startService(intent)
     }
