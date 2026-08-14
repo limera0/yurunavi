@@ -13,6 +13,18 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Impeller 비활성화(레거시 Skia+OpenGL 렌더러로 폴백), 2026-08-14 마스터 결정.
+             배경: RECON_0814_memory_management_research.md — Impeller-Vulkan GPU 리소스
+             풀은 앱 코드에서 조회/제어 API가 아예 없음(flutter/flutter#178264, #187905,
+             엔진팀도 기능 요청 단계로만 인지). 유루나비 UI는 화려한 셰이더 효과가 거의
+             없어 Impeller의 핵심 장점(셰이더 컴파일 버벅임 제거) 수혜가 적은 반면,
+             #187905 실측 비교는 동일 idle 상태에서 Impeller가 GPU 메모리를 훨씬 더
+             쓴다는 정황을 보였다 — 8/1·8/14 블랙아웃/렌더 소실 버그의 유력 원인. 판별용
+             실험이 아니라 실사용 채택 — 재발 여부는 기존 진단 로그(YNAV_GPUMEM/
+             YNAV_LIFECYCLE)로 계속 관찰. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
