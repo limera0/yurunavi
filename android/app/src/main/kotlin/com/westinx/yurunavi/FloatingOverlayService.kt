@@ -66,7 +66,6 @@ class FloatingOverlayService : Service() {
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
-    private var overlayParams: WindowManager.LayoutParams? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -154,7 +153,6 @@ class FloatingOverlayService : Service() {
         view.setOnTouchListener(makeDragTouchListener(view, params, wm, density, screenWidth, screenHeight, widthPx))
 
         overlayView = view
-        overlayParams = params
         wm.addView(view, params)
     }
 
@@ -272,6 +270,5 @@ class FloatingOverlayService : Service() {
             } catch (_: Exception) { /* view가 이미 분리됐으면 무시 */ }
         }
         overlayView = null
-        overlayParams = null
     }
 }

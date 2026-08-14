@@ -28,6 +28,7 @@ import '../../../services/connectivity_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
 import '../../../services/native_engine.dart';
+import '../../../services/nav_floating_overlay.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
 import '../../../services/routing_service.dart';
@@ -291,6 +292,17 @@ class _MainMapScreenState extends ConsumerState<MainMapScreen>
     ).animate(CurvedAnimation(parent: _sheetCtrl, curve: Curves.easeOutCubic));
     _startLocationTracking();
     _loadRawStyle();
+    // 2026-08-14 결정: 플로팅 오버레이 권한 다이얼로그는 더 이상 내비 시작 시
+    // 표시하지 않고, 앱 진입 직후(홈 화면) 1회만 표시한다 — 내부적으로
+    // SharedPreferences 플래그로 게이트되므로 매번 홈 화면에 들어올 때마다
+    // 호출해도 안전하다(생애주기 통틀어 실제 다이얼로그는 최대 1번만 뜬다).
+    if (Platform.isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(NavFloatingOverlay.checkPermissionAndMaybePrompt(context));
+        }
+      });
+    }
   }
 
   Future<void> _loadRawStyle() async {

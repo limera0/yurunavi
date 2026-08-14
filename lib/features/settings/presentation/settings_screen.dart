@@ -8,6 +8,7 @@ import '../../../models/map_language.dart';
 import '../../../core/skin/skin.dart';
 import '../../../core/skin/skin_provider.dart';
 import '../../../core/skin/skins/registry.dart';
+import '../../../services/nav_floating_overlay.dart';
 import '../../profile/presentation/profile_screen.dart';
 import 'favorite_categories_screen.dart';
 import 'terms_screen.dart';
@@ -54,6 +55,27 @@ class SettingsScreen extends ConsumerWidget {
                   ref.read(mapNightDimEnabledProvider.notifier).set(v),
             );
           }),
+          if (Platform.isAndroid)
+            Consumer(builder: (ctx, ref, _) {
+              final overlayEnabled =
+                  ref.watch(floatingOverlayEnabledProvider).value ?? true;
+              return SwitchListTile(
+                secondary: const Icon(Icons.picture_in_picture_alt_outlined),
+                title: const Text('다른 앱 위에 PIP 화면 표시'),
+                subtitle: const Text(
+                    '주행 중 다른 앱을 볼 때 유루나비 안내를 작은 창으로 띄워요'),
+                value: overlayEnabled,
+                onChanged: (v) async {
+                  await ref.read(floatingOverlayEnabledProvider.notifier).set(v);
+                  if (v) {
+                    final has = await NavFloatingOverlay.canDrawOverlays();
+                    if (!has) {
+                      await NavFloatingOverlay.openOverlaySettings();
+                    }
+                  }
+                },
+              );
+            }),
           const Divider(height: 1),
           // TODO Phase 2: 안내 음성 / 안내 언어
 

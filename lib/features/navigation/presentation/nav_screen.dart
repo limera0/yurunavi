@@ -434,13 +434,9 @@ class _NavScreenState extends ConsumerState<NavScreen>
     unawaited(NavForegroundService.start('경로 안내 중'));
     _loadRawStyle();
     // 결정 2(2026-08-06) 반영: 플로팅 오버레이 진입점 초기화.
-    // attach는 ref/context를 보관하고, 권한 다이얼로그는 첫 프레임 이후에 표시.
+    // 권한 다이얼로그는 2026-08-14 결정으로 여기서 더 이상 호출하지 않는다 —
+    // main_map_screen(홈 화면) initState에서 앱 생애주기 1회만 표시한다.
     NavFloatingOverlay.attach(ref, context);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        unawaited(NavFloatingOverlay.checkPermissionAndMaybePrompt(context));
-      }
-    });
   }
 
   Future<void> _loadRawStyle() async {
@@ -506,7 +502,11 @@ class _NavScreenState extends ConsumerState<NavScreen>
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
-        unawaited(NavFloatingOverlay.show(_currentGuidance()));
+        // 설정 토글(주행 설정 > "다른 앱 위에 PIP 화면 표시")이 꺼져 있으면
+        // 오버레이를 아예 띄우지 않는다 — 끈 상태에서는 show/hide 둘 다 no-op.
+        if (ref.read(floatingOverlayEnabledProvider).value ?? true) {
+          unawaited(NavFloatingOverlay.show(_currentGuidance()));
+        }
       case AppLifecycleState.resumed:
         unawaited(NavFloatingOverlay.hide());
       case AppLifecycleState.inactive:
@@ -515,20 +515,39 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
   }
 
-  /// 현재 안내 스텝의 아이콘 타입과 잔여 거리를 반환한다.
-  /// FloatingOverlayService에 전달할 [GuidanceInfo]를 생성한다.
+  /// 현재 안내 스텝의 아이콘 타입과 잔여 거리, 그리고 다음 스텝(있으면)의
+  /// 아이콘 타입과 거리를 반환한다. FloatingOverlayService에 전달할
+  /// [GuidanceInfo]를 생성한다(네이티브 2줄 오버레이용, 2026-08-14).
   /// _steps / _stepIdx / _cardRemainingM는 progressSub가 매 tick 갱신한다.
   GuidanceInfo _currentGuidance() {
-    final step = _steps.isNotEmpty ? _steps[_stepIdx.clamp(0, _steps.length - 1)] : null;
+    // build()의 메인 카드(2028행 upcoming = _steps[_stepIdx+1])와 같은 컨벤션을
+    // 따른다 — _cardRemainingM(=routeProgressProvider의 distToNextTurnM)이 실제로
+    // 카운트다운하는 대상은 _steps[_stepIdx]가 아니라 _steps[_stepIdx+1]이다.
+    // (code-auditor 2026-08-14 지적: _steps[_stepIdx]를 쓰면 1행 아이콘과 거리가
+    // 서로 다른 회전을 가리키게 됨.) 마지막 스텝이면 _stepIdx 자신으로 폴백.
+    final current = _stepIdx + 1 < _steps.length
+        ? _steps[_stepIdx + 1]
+        : (_steps.isNotEmpty ? _steps[_stepIdx.clamp(0, _steps.length - 1)] : null);
     // svgAsset 경로에서 파일명만 추출해 iconType으로 변환
     // (예: 'assets/images/nav_icons/nav_right.svg' → 'nav_right')
-    final iconType = step != null
-        ? step.svgAsset.split('/').last.replaceAll('.svg', '')
+    final iconType = current != null
+        ? current.svgAsset.split('/').last.replaceAll('.svg', '')
         : 'nav_straight';
     final distText = _cardRemainingM > 0
         ? _TurnStep._formatDist(_cardRemainingM / 1000)
         : '';
-    return (iconType: iconType, distanceText: distText);
+    // 다음 스텝 — 위 1행보다 한 스텝 더 앞(온스크린 카드2와 동일하게 _stepIdx+2).
+    // 없으면 null로 둬 네이티브가 1줄 레이아웃으로 접히게 한다.
+    final upcoming = _stepIdx + 2 < _steps.length ? _steps[_stepIdx + 2] : null;
+    final nextIconType =
+        upcoming?.svgAsset.split('/').last.replaceAll('.svg', '');
+    final nextDistanceText = upcoming?.dist;
+    return (
+      iconType: iconType,
+      distanceText: distText,
+      nextIconType: nextIconType,
+      nextDistanceText: nextDistanceText,
+    );
   }
 
   /// 지도 API 호출 허용 여부 게이트.

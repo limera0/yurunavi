@@ -49,6 +49,27 @@ class MapNightDimEnabledNotifier extends AsyncNotifier<bool> {
   }
 }
 
+// ── 플로팅 오버레이(다른 앱 위에 PIP 화면 표시) 온/오프 (Android 전용, 기본 on) ─
+final floatingOverlayEnabledProvider =
+    AsyncNotifierProvider<FloatingOverlayEnabledNotifier, bool>(
+        FloatingOverlayEnabledNotifier.new);
+
+class FloatingOverlayEnabledNotifier extends AsyncNotifier<bool> {
+  static const _key = 'floating_overlay_enabled_v1';
+
+  @override
+  Future<bool> build() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_key) ?? true;
+  }
+
+  Future<void> set(bool enabled) async {
+    state = AsyncData(enabled);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_key, enabled);
+  }
+}
+
 final mapLanguageProvider =
     AsyncNotifierProvider<MapLanguageNotifier, MapLanguage>(
         MapLanguageNotifier.new);
