@@ -37,6 +37,11 @@ class MemoryPressureObserver extends WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // S20 조사(2026-08-14): nav_screen 자체 옵저버는 도착 후 auto-exit로
+    // dispose()되면 함께 제거돼, 그 뒤에 오는 background/foreground 전이를
+    // 못 본다. 이 전역 옵저버에서 모든 state 전이를 남겨야 어느 화면이
+    // 떠 있을 때 몇 번 전이가 왔는지 다음 실주행에서 재구성할 수 있다.
+    debugPrint('YNAV_LIFECYCLE state=$state');
     if (state == AppLifecycleState.paused) {
       _clearImageCache('background');
     }
