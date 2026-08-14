@@ -152,11 +152,44 @@ class _YuruNaviAppState extends ConsumerState<YuruNaviApp> {
       ],
       locale: const Locale('ko'),
       builder: (context, child) {
+        // Android 15+(targetSdk 36, flutter 3.44 기본값) edge-to-edge 강제 이후
+        // 위 SystemUiOverlayStyle의 statusBarColor/systemNavigationBarColor를
+        // OS가 무시한다(아이콘 밝기 설정만 유효, 배경색 API는 no-op). 위와 같은
+        // pastSplash 분기를 그대로 미러링해 인셋 영역에 배경색 띠를 직접 그려서
+        // 우회한다 — 화면 콘텐츠는 이미 SafeArea/padding.top·bottom로 이 영역을
+        // 피해 그리므로 덮어 가릴 위험 없음.
+        final viewPadding = MediaQuery.of(context).viewPadding;
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.noScaling,
           ),
-          child: child!,
+          child: Stack(
+            children: [
+              child!,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: viewPadding.top,
+                child: IgnorePointer(
+                  child: Container(
+                    color: pastSplash ? kSystemBarColor : Colors.transparent,
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: viewPadding.bottom,
+                child: IgnorePointer(
+                  child: Container(
+                    color: pastSplash ? kSystemBarColor : AppColors.background,
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
       home: const SplashScreen(),
