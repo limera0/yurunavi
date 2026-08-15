@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:math' as math show sin, cos, sqrt, asin, pi;
-
-import 'package:http/http.dart' as http;
 
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -238,12 +235,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
   bool _arrived = false;
   bool _saidArrival = false; // 'arrival' 음성 전용 래치 (배너/POI와 별도 트리거)
   bool _arrivalBannerVisible = false;
-  // 라운드7: 독립 도착 배너를 폐기하며 이 리스트를 렌더링할 자리가 새 목업엔
-  // 없어졌다(PROGRESS.md 미확정 항목 — 완전 제거 vs 다른 화면 이전은 별도
-  // 결정 필요). 조회(_fetchNearbyPois) 자체는 부작용 없어 그대로 두고 값만
-  // 계속 채우므로, 표시하지 않는 한 analyzer가 "읽히지 않는 필드"로 잡는다.
-  // ignore: unused_field
-  List<({String name, String type})> _arrivalPois = const [];
   // 실제 주행 경과시간(라운드7 카드1 "목적지 도착" 표시용) — 내비 시작
   // 시각(_tourRecorderStarted와 같은 시점)을 기록해두고, 도착 판정 순간
   // 한 번만 스냅샷(_arrivalDurationS)을 찍는다(실시간 갱신 스톱워치 아님).
@@ -651,9 +642,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
                 ? DateTime.now().difference(_navStartedAt!).inSeconds
                 : null;
           });
-          _fetchNearbyPois(widget.destination!).then((pois) {
-            if (mounted) setState(() => _arrivalPois = pois);
-          });
         }
         if (_arrivalBannerVisible) _updateExitGate(prog.distToDestM);
         if (!_saidArrival &&
@@ -899,7 +887,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       _exitAutoCloseTimer?.cancel();
       setState(() {
         _arrivalBannerVisible = false;
-        _arrivalPois = const [];
         _arrived = false;
         _saidArrival = false;
         _canExit = false;
@@ -1056,44 +1043,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
     }
     // 비-출발 접근 안내는 임계 경로(_handleVoice)가 담당 — 여기서 발화하지 않음
     debugPrint('YNAV_GUIDE announceStep idx=$idx label="${step.label}"');
-  }
-
-  /// Overpass API로 도착지 반경 500m 내 주유소·편의점·식당 최대 3개 조회.
-  Future<List<({String name, String type})>> _fetchNearbyPois(LatLng dest) async {
-    final query =
-        '[out:json][timeout:5];'
-        '(node["amenity"~"fuel|convenience|restaurant"]'
-        '(around:500,${dest.latitude},${dest.longitude}););'
-        'out 3;';
-    try {
-      final resp = await http
-          .post(
-            Uri.parse('https://overpass-api.de/api/interpreter'),
-            body: query,
-          )
-          .timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) return [];
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final elements = (data['elements'] as List?) ?? [];
-      return elements.take(3).map((e) {
-        final tags = (e['tags'] as Map?) ?? {};
-        return (
-          name: (tags['name'] as String?) ?? '근처 장소',
-          type: _poiTypeLabel(tags['amenity'] as String? ?? ''),
-        );
-      }).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  static String _poiTypeLabel(String amenity) {
-    switch (amenity) {
-      case 'fuel': return '주유소';
-      case 'convenience': return '편의점';
-      case 'restaurant': return '식당';
-      default: return amenity;
-    }
   }
 
   static String _etaText(int durationMin) {
@@ -1388,8 +1337,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   }
 
   // ── POI 상시 표시(ambient) 레이어 (13-1b) ──────────────────────────────────
-  // main_map_screen의 검색 시트 POI(_fetchNearbyPois/_arrivalPois는 도착배너용
-  // 완전히 다른 기능)와 무관 — 줌 레벨 임계값(Poi.minZoomLevel)에 따라 자동
+  // main_map_screen의 검색 시트 POI와 무관 — 줌 레벨 임계값(Poi.minZoomLevel)에 따라 자동
   // 표시된다.
 
   Map<String, dynamic> _buildPoiGeoJson(List<Poi> pois) => {
