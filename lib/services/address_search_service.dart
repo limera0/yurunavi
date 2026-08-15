@@ -20,10 +20,14 @@ import '../models/address_result.dart';
 class AddressSearchService {
   static String get _baseUrl => '${AppConfig.instance.naviBaseUrl}/geocode/search';
 
+  static final Map<String, List<AddressResult>> _cache = {};
+
   Future<List<AddressResult>> search(String query) async {
     final trimmed = query.trim();
     // 빈 질의는 서버도 곧바로 빈 배열을 반환하므로, 왕복 없이 바로 반환한다.
     if (trimmed.isEmpty) return [];
+
+    if (_cache.containsKey(trimmed)) return _cache[trimmed]!;
 
     final uri = Uri.parse(_baseUrl).replace(queryParameters: {'q': trimmed});
 
@@ -37,10 +41,12 @@ class AddressSearchService {
       }
 
       final rawList = jsonDecode(resp.body) as List<dynamic>;
-      return rawList
+      final result = rawList
           .map((e) => _parseItem(e as Map<String, dynamic>))
           .whereType<AddressResult>()
           .toList();
+      _cache[trimmed] = result;
+      return result;
     } on AddressSearchException {
       rethrow;
     } catch (e) {
