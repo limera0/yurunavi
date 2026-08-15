@@ -12,7 +12,7 @@ import 'slider_start_button.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CourseSheet extends StatelessWidget {
-  final List<({double km, int mins, double windingScore})> routeMeta;
+  final List<({double km, int mins})> routeMeta;
   final int selectedIdx;
   final ValueChanged<int> onSelect;
   final VoidCallback onStart;

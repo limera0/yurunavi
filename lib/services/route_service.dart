@@ -54,12 +54,4 @@ class RouteService {
     return results;
   }
 
-  // ── 와인딩 점수 계산 ──────────────────────────────────────
-
-  static WindingScore getWindingScore(SavedRoute route) {
-    final pts = route.points
-        .map((p) => GpsPoint(p.lat, p.lng))
-        .toList();
-    return NativeEngine.calcWindingScore(pts);
-  }
 }

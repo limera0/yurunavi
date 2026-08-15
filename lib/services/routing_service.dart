@@ -132,7 +132,6 @@ class RouteResult {
   final List<LatLng> points;
   final double distanceKm;
   final int durationMin; // round(distance / realistic_speed_kmh * 60)
-  final double windingScore; // 0~100 from NativeEngine.calcWindingScore
   final List<ManeuverStep> maneuvers; // Valhalla 턴바이턴 단계
   /// 다리/터널 구간 (fetchRoutes()/_doFetch()는 채우지 않음 — 별도 호출자가 채운다).
   final List<StructureZone> structures;
@@ -140,7 +139,6 @@ class RouteResult {
     required this.points,
     required this.distanceKm,
     required this.durationMin,
-    this.windingScore = 0.0,
     this.maneuvers = const [],
     this.structures = const [],
   });

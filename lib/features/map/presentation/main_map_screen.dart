@@ -27,7 +27,6 @@ import '../../../services/address_search_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
-import '../../../services/native_engine.dart';
 import '../../../services/nav_floating_overlay.dart';
 import '../../../services/poi_icon_renderer.dart';
 import '../../../services/poi_service.dart';
@@ -1551,13 +1550,9 @@ Future<void> _onMapTap(LatLng tapped) async {
       }
       final notifier = ref.read(mapInteractionProvider.notifier);
       notifier.setAllRoutes(routes.map((r) => r.points).toList());
-      final scores = await Future.wait(
-        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
-      );
       notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
         km: routes[i].distanceKm,
         mins: routes[i].durationMin,
-        windingScore: scores[i].funScoreV2,
       )));
       final idx = ref.read(mapInteractionProvider).selectedRouteIdx;
       final selIdx = idx.clamp(0, routes.length - 1);

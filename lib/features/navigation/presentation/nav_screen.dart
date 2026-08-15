@@ -26,7 +26,6 @@ import '../../../services/active_tour_destination_store.dart';
 import '../../../services/exit_landmark_service.dart';
 import '../../../services/gas_station_service.dart';
 import '../../../services/geocoding_service.dart';
-import '../../../services/native_engine.dart';
 import '../../../services/nav_floating_overlay.dart';
 import '../../../services/nav_foreground_service.dart';
 import '../../../services/poi_icon_renderer.dart';
@@ -333,7 +332,7 @@ class _NavScreenState extends ConsumerState<NavScreen>
   List<RouteResult> _fetchedRoutes = [];
   int? _originalSelectedIdx;
   List<List<LatLng>>? _originalAllRoutes;
-  List<({double km, int mins, double windingScore})>? _originalAllRouteMeta;
+  List<({double km, int mins})>? _originalAllRouteMeta;
   int _courseSheetReqId = 0;
 
   // 이탈 재탐색
@@ -1831,10 +1830,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
         waypoints: widget.waypoints.sublist(_passedWaypointCount),
       );
       if (!mounted || reqId != _courseSheetReqId) return;
-      final scores = await Future.wait(
-        routes.map((r) => NativeEngine.scoreFunV2(r.points)),
-      );
-      if (!mounted || reqId != _courseSheetReqId) return;
       final notifier = ref.read(mapInteractionProvider.notifier);
       final allPoints = routes.map((r) => r.points).toList();
       notifier.setAllRoutes(allPoints);
@@ -1843,7 +1838,6 @@ class _NavScreenState extends ConsumerState<NavScreen>
       notifier.setAllRouteMeta(List.generate(routes.length, (i) => (
         km: routes[i].distanceKm,
         mins: routes[i].durationMin,
-        windingScore: scores[i].funScoreV2,
       )));
       setState(() => _fetchedRoutes = routes);
     } on RoutingException {
