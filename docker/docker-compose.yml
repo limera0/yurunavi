@@ -40,3 +40,5 @@ services:
       # 라우팅 코스팅 파라미터 JSON — 앱 재배포 없이 서버에서 파라미터 수정 가능.
       # /routing-config 엔드포인트가 이 경로에서 읽음. 파일 없으면 내장 기본값 사용.
       - /data/routing-config:/data/routing-config:ro
+      # 주유소 일일 스냅샷 — refresh_gasstations 바이너리가 5시에 갱신.
+      - /data/gasstations:/data/gasstations:ro

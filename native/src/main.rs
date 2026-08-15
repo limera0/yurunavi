@@ -26,14 +26,17 @@ fn http_client() -> &'static reqwest::Client {
 const POI_DB_PATH: &str = "/data/poi/poi.db";
 
 use axum::{
+    body::Body,
     extract::{Json, Query},
-    http::StatusCode,
-    response::Html,
+    http::{header, StatusCode},
+    response::{Html, Response},
     routing::{get, post},
     Router,
 };
+use flate2::{write::GzEncoder, Compression};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::io::Write as _;
 
 // ── Serde-compatible DTOs ──────────────────────────────────────
 
@@ -1056,9 +1059,48 @@ async fn handle_geocode_search(
     Ok(Json(Vec::new()))
 }
 
-// ── /gasstations/nearby (주유소 최저가) ─────────────────────────
+// ── /gasstations 엔드포인트 ────────────────────────────────────
+
+/// refresh_gasstations 바이너리가 매일 05:00에 저장하는 전국 주유소 스냅샷.
+/// `/gasstations/bulk` 서빙 원본이며, `/gasstations/nearby`의 로컬-파일 우선 경로
+/// 에서도 이 파일을 읽는다.
+const GASSTATIONS_FILE_PATH: &str = "/data/gasstations/gasstations.json";
 
 const MAX_GAS_RESULTS: usize = 20;
+
+/// `GASSTATIONS_FILE_PATH`에 저장된 JSON 배열의 각 레코드 구조.
+/// `GasStationDto`와 달리 `distance_m`이 없다 — 요청 시점에 haversine으로 계산한다.
+#[derive(Deserialize, Clone)]
+struct GasStationFileRecord {
+    name: String,
+    brand: String,
+    address: String,
+    lat: f64,
+    lon: f64,
+    price: Option<i32>,
+    premium_price: Option<i32>,
+}
+
+/// `GET /gasstations/bulk` — `GASSTATIONS_FILE_PATH` 파일 전체를 그대로 서빙.
+/// refresh_gasstations가 아직 한 번도 실행되지 않은 경우(파일 없음) → 503.
+/// 인증: API 키 없이 서빙해도 내용이 민감하지 않으므로 public_routes에 등록한다.
+async fn handle_gasstations_bulk() -> Result<Response<Body>, StatusCode> {
+    let bytes = tokio::fs::read(GASSTATIONS_FILE_PATH).await.map_err(|e| {
+        eprintln!(
+            "[YuruNavi/Rust] /gasstations/bulk 파일 읽기 실패({GASSTATIONS_FILE_PATH}): {e}"
+        );
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+        .body(Body::from(bytes))
+        .map_err(|e| {
+            eprintln!("[YuruNavi/Rust] /gasstations/bulk 응답 빌드 실패: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
+}
 
 #[derive(Deserialize)]
 struct GasStationsQuery {
@@ -1243,6 +1285,73 @@ async fn fetch_opinet_region(
     Some(v["list"].as_array().cloned().unwrap_or_default())
 }
 
+/// `GASSTATIONS_FILE_PATH`를 읽어 로컬 캐시에서 주유소를 필터링한다.
+/// 성공 시 `Some(hits)`를 반환하고, 파일이 없거나 25시간 초과라면 `None`을 반환한다.
+async fn filter_gasstations_from_local_file(
+    lat: f64,
+    lon: f64,
+    radius_m: f64,
+    fuel: &str,
+) -> Option<Vec<GasStationDto>> {
+    // mtime 확인 — 파일 없거나 25시간 초과면 None
+    let meta = tokio::fs::metadata(GASSTATIONS_FILE_PATH).await.ok()?;
+    let modified = meta.modified().ok()?;
+    let age_secs = std::time::SystemTime::now()
+        .duration_since(modified)
+        .ok()?
+        .as_secs();
+    const TWENTY_FIVE_HOURS_SECS: u64 = 25 * 3600;
+    if age_secs > TWENTY_FIVE_HOURS_SECS {
+        eprintln!(
+            "[YuruNavi/Rust] /gasstations/nearby 로컬 파일이 {age_secs}초 전 갱신 \
+             — 25시간 초과, Opinet fallback"
+        );
+        return None;
+    }
+
+    let bytes = tokio::fs::read(GASSTATIONS_FILE_PATH).await.ok()?;
+    let stations: Vec<GasStationFileRecord> = serde_json::from_slice(&bytes).ok()?;
+
+    let center = GpsPoint { lat, lng: lon };
+    let mut hits: Vec<(i32, f64, GasStationDto)> = stations
+        .iter()
+        .filter_map(|s| {
+            let dist = haversine_m(&center, &GpsPoint { lat: s.lat, lng: s.lon });
+            if dist > radius_m {
+                return None;
+            }
+            if !should_include_for_fuel(fuel, s.price, s.premium_price) {
+                return None;
+            }
+            let sort_price = match fuel {
+                "B034" => s.premium_price.unwrap_or(i32::MAX),
+                _ => s.price.unwrap_or(i32::MAX),
+            };
+            Some((
+                sort_price,
+                dist,
+                GasStationDto {
+                    name: s.name.clone(),
+                    brand: s.brand.clone(),
+                    address: s.address.clone(),
+                    lat: s.lat,
+                    lon: s.lon,
+                    distance_m: (dist * 10.0).round() / 10.0,
+                    price: s.price,
+                    premium_price: s.premium_price,
+                },
+            ))
+        })
+        .collect();
+
+    hits.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    Some(hits.into_iter().take(MAX_GAS_RESULTS).map(|(_, _, d)| d).collect())
+}
+
 async fn handle_gasstations_nearby(
     Query(q): Query<GasStationsQuery>,
 ) -> Result<Json<Vec<GasStationDto>>, StatusCode> {
@@ -1250,6 +1359,15 @@ async fn handle_gasstations_nearby(
         return Err(StatusCode::BAD_REQUEST);
     }
     let radius_m = q.radius_m.clamp(100.0, 10_000.0);
+
+    // 1. 로컬 파일 우선 시도 — 파일이 존재하고 25시간 이내이면 즉시 반환.
+    if let Some(dtos) =
+        filter_gasstations_from_local_file(q.lat, q.lon, radius_m, &q.fuel).await
+    {
+        return Ok(Json(dtos));
+    }
+
+    // 2. 로컬 파일 없거나 만료: 기존 Opinet 방식(역지오코딩 + API 조회) fallback.
     let client = http_client();
 
     let (sido, sigungu) = nominatim_region(client, q.lat, q.lon)
@@ -1310,6 +1428,100 @@ async fn handle_gasstations_nearby(
 
     let dtos = hits.into_iter().take(MAX_GAS_RESULTS).map(|(_, _, d)| d).collect();
     Ok(Json(dtos))
+}
+
+// ── /poi/bulk ──────────────────────────────────────────────────
+
+/// poi.db 전체(5개 카테고리)를 gzip 압축해 메모리에 캐시한 바이트.
+/// `OnceLock`이라 최초 요청 시 1회만 생성하고 이후엔 클론 없이 참조만 한다.
+/// DB 연결은 `poi_db()`가 이미 열어둔 걸 공유하므로 추가 연결 비용 없음.
+static POI_BULK_CACHE: std::sync::OnceLock<Result<Vec<u8>, String>> =
+    std::sync::OnceLock::new();
+
+fn build_poi_bulk_cache() -> Result<Vec<u8>, String> {
+    let mutex = poi_db()
+        .as_ref()
+        .ok_or_else(|| "POI DB 사용 불가".to_string())?;
+    let conn = mutex.lock().map_err(|e| format!("POI DB 락 실패: {e}"))?;
+
+    let categories: Vec<String> = ALL_POI_CATEGORIES.iter().map(|s| s.to_string()).collect();
+    let placeholders: Vec<String> = (1..=categories.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "SELECT id, name, category, lat, lon, address \
+         FROM poi \
+         WHERE category IN ({})",
+        placeholders.join(",")
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare 실패: {e}"))?;
+
+    #[derive(Serialize)]
+    struct PoiBulkRecord {
+        id: String,
+        name: String,
+        category: String,
+        lat: f64,
+        lon: f64,
+        address: Option<String>,
+    }
+
+    let params: Vec<&dyn rusqlite::ToSql> = categories
+        .iter()
+        .map(|s| s as &dyn rusqlite::ToSql)
+        .collect();
+
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok(PoiBulkRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                category: row.get(2)?,
+                lat: row.get(3)?,
+                lon: row.get(4)?,
+                address: row.get(5)?,
+            })
+        })
+        .map_err(|e| format!("query_map 실패: {e}"))?;
+
+    let mut records: Vec<PoiBulkRecord> = Vec::new();
+    for row in rows {
+        match row {
+            Ok(r) => records.push(r),
+            Err(e) => eprintln!("[YuruNavi/Rust] /poi/bulk row 파싱 실패(건너뜀): {e}"),
+        }
+    }
+
+    let json = serde_json::to_vec(&records).map_err(|e| format!("JSON 직렬화 실패: {e}"))?;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&json).map_err(|e| format!("gzip write 실패: {e}"))?;
+    encoder.finish().map_err(|e| format!("gzip finish 실패: {e}"))
+}
+
+/// `GET /poi/bulk` — poi.db 5개 카테고리 전체를 gzip JSON으로 서빙.
+/// 서버 메모리에 최초 1회 생성하고 이후는 캐시를 재사용한다(DB가 분기별 교체되므로
+/// 서버 재시작 시 자동으로 새 캐시가 생성됨).
+async fn handle_poi_bulk() -> Result<Response<Body>, StatusCode> {
+    let cached = POI_BULK_CACHE.get_or_init(|| {
+        let result = build_poi_bulk_cache();
+        if let Err(ref e) = result {
+            eprintln!("[YuruNavi/Rust] /poi/bulk 캐시 생성 실패: {e}");
+        }
+        result
+    });
+
+    match cached {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+            .header(header::CONTENT_ENCODING, "gzip")
+            .body(Body::from(bytes.clone()))
+            .map_err(|e| {
+                eprintln!("[YuruNavi/Rust] /poi/bulk 응답 빌드 실패: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }),
+        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+    }
 }
 
 // ── /privacy ───────────────────────────────────────────────────
@@ -1587,7 +1799,8 @@ async fn main() {
     // 미들웨어를 거친다 — 두 라우터를 만들어 merge하는 방식으로 분리한다.
     let public_routes = Router::new()
         .route("/health", get(handle_health))
-        .route("/privacy", get(handle_privacy));
+        .route("/privacy", get(handle_privacy))
+        .route("/gasstations/bulk", get(handle_gasstations_bulk));
 
     let protected_routes = Router::new()
         .route("/calc_route", post(handle_calc_route))
@@ -1600,6 +1813,7 @@ async fn main() {
         .route("/poi/nearby", get(handle_poi_nearby))
         .route("/geocode/search", get(handle_geocode_search))
         .route("/gasstations/nearby", get(handle_gasstations_nearby))
+        .route("/poi/bulk", get(handle_poi_bulk))
         .route("/routing-config", get(handle_routing_config))
         .route_layer(axum::middleware::from_fn(require_api_key));
 
