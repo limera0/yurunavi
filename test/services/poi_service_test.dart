@@ -377,10 +377,23 @@ void main() {
   });
 
   // S2(2026-08-05) — 429 서킷브레이커/백오프/예외 전달 회귀 가드.
+  // 서킷브레이커 테스트는 네트워크 경로를 직접 검증하므로, 로컬 bulk 조회를
+  // 건너뛰도록 localPoisLoader: () async => null 을 공통으로 주입한다.
+  // (bulk 조회는 path_provider 바인딩이 필요해 순수 unit test에서 쓸 수 없음.)
+  PoiService makeService({
+    required http.Client Function() clientFactory,
+    DateTime Function()? now,
+  }) =>
+      PoiService(
+        clientFactory: clientFactory,
+        now: now,
+        localPoisLoader: () async => null,
+      );
+
   group('PoiService — 서킷브레이커·예외 전달', () {
     test('1) 200 정상 응답 → POI가 파싱되고 서킷은 닫힌 채(정상) 유지된다', () async {
       var callCount = 0;
-      final service = PoiService(
+      final service = makeService(
         clientFactory: () => MockClient((request) async {
           callCount++;
           return http.Response(
@@ -409,7 +422,7 @@ void main() {
     });
 
     test('2) 429 응답 → PoiFetchException(statusCode: 429)을 던진다(빈 리스트 아님)', () async {
-      final service = PoiService(
+      final service = makeService(
         clientFactory: () => MockClient((request) async => http.Response('', 429)),
       );
 
@@ -429,7 +442,7 @@ void main() {
         '3) 429 직후 재호출은 서킷이 열려 있어 MockClient에 닿지 않고(호출 카운터 불변) '
         'circuitOpen: true로 즉시 던진다', () async {
       var callCount = 0;
-      final service = PoiService(
+      final service = makeService(
         clientFactory: () => MockClient((request) async {
           callCount++;
           return http.Response('', 429);
@@ -457,7 +470,7 @@ void main() {
         '1→2→4→8→16→32→60(상한)초로 늘어난다', () async {
       var now = DateTime(2026, 1, 1, 12, 0, 0);
       var callCount = 0;
-      final service = PoiService(
+      final service = makeService(
         now: () => now,
         clientFactory: () => MockClient((request) async {
           callCount++;
@@ -495,7 +508,7 @@ void main() {
       var now = DateTime(2026, 1, 1, 12, 0, 0);
       var callCount = 0;
       var respondWithFailure = true;
-      final service = PoiService(
+      final service = makeService(
         now: () => now,
         clientFactory: () => MockClient((request) async {
           callCount++;
@@ -533,7 +546,7 @@ void main() {
     test('6) Retry-After 헤더 값을 지수 백오프보다 우선해서 존중한다', () async {
       var now = DateTime(2026, 1, 1, 12, 0, 0);
       var callCount = 0;
-      final service = PoiService(
+      final service = makeService(
         now: () => now,
         clientFactory: () => MockClient((request) async {
           callCount++;
@@ -569,7 +582,7 @@ void main() {
 
     test('9) 실패 시 PoiRegionCache.put이 호출되지 않는다(캐시 미오염)', () async {
       final cache = PoiRegionCache();
-      final service = PoiService(
+      final service = makeService(
         clientFactory: () => MockClient((request) async => http.Response('', 500)),
       );
 
@@ -606,7 +619,7 @@ void main() {
       // 서킷 전이 로그뿐 아니라 실패 상세 로그도 연속 구간당 1회로 억제돼야 한다.
       var now = DateTime(2026, 8, 5, 12);
       var fail = true;
-      final service = PoiService(
+      final service = makeService(
         now: () => now,
         clientFactory: () => MockClient((request) async =>
             fail ? http.Response('', 429) : http.Response('[]', 200)),

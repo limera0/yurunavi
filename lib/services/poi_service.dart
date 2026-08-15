@@ -1,9 +1,12 @@
+import 'dart:async' show unawaited;
 import 'dart:convert';
+import 'dart:io' show GZipCodec, File;
 import 'dart:math';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/config/app_config.dart';
 
@@ -24,13 +27,24 @@ class PoiService {
   PoiService({
     http.Client Function()? clientFactory,
     DateTime Function()? now,
+    /// 테스트 전용 주입: 로컬 bulk POI 로더를 대체한다. null 이면 실제 파일
+    /// 시스템 경로(_isBulkFresh + _loadLocalPois)를 그대로 쓴다.
+    /// 테스트에서 `() async => null` 을 넘기면 bulk 경로를 완전히 건너뛰고
+    /// 네트워크(MockClient) 경로로 직행한다.
+    Future<List<Poi>?> Function()? localPoisLoader,
   })  : _clientFactory = clientFactory ?? (() => http.Client()),
-        _now = now ?? DateTime.now;
+        _now = now ?? DateTime.now,
+        _localPoisLoader = localPoisLoader;
 
   static String get _poiBaseUrl => '${AppConfig.instance.naviBaseUrl}/poi/nearby';
 
+  static const String _bulkFileName = 'poi_bulk.json.gz';
+  static const Duration _bulkFreshness = Duration(days: 90);
+  static List<Poi>? _localPois; // 세션 메모리 캐시
+
   final http.Client Function() _clientFactory;
   final DateTime Function() _now;
+  final Future<List<Poi>?> Function()? _localPoisLoader;
 
   /// 요청 타임아웃 — 주행 중 10초 지난 POI 응답은 이미 무가치하고, 라디오
   /// 점유 시간을 줄이기 위해 기존 30초에서 단축(2026-08-05 S2).
@@ -102,6 +116,92 @@ class PoiService {
     final parsed = int.tryParse(headerValue.trim());
     if (parsed == null || parsed < 0) return null;
     return parsed;
+  }
+
+  // ── bulk 로컬 캐시 헬퍼 ────────────────────────────────────────
+
+  static Future<File> _bulkFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/$_bulkFileName');
+  }
+
+  static Future<bool> _isBulkFresh() async {
+    final file = await _bulkFile();
+    if (!await file.exists()) return false;
+    final age = DateTime.now().difference(await file.lastModified());
+    return age < _bulkFreshness;
+  }
+
+  static Future<bool> _downloadBulk(http.Client client) async {
+    try {
+      final uri = Uri.parse('${AppConfig.instance.naviBaseUrl}/poi/bulk');
+      final resp = await client
+          .get(uri, headers: {'X-Api-Key': AppConfig.instance.naviApiKey})
+          .timeout(const Duration(seconds: 120));
+      if (resp.statusCode != 200) return false;
+      final file = await _bulkFile();
+      await file.writeAsBytes(resp.bodyBytes);
+      _localPois = null; // 파일 변경 시 메모리 캐시 무효화
+      return true;
+    } catch (e) {
+      debugPrint('YNAV_POI bulk download failed: $e');
+      return false;
+    } finally {
+      client.close();
+    }
+  }
+
+  static Future<List<Poi>?> _loadLocalPois() async {
+    if (_localPois != null) return _localPois;
+    final file = await _bulkFile();
+    if (!await file.exists()) return null;
+    try {
+      final compressed = await file.readAsBytes();
+      final raw = GZipCodec().decode(compressed);
+      final list = jsonDecode(utf8.decode(raw)) as List<dynamic>;
+      _localPois = list
+          .map((e) => _parseItem(e as Map<String, dynamic>))
+          .whereType<Poi>()
+          .toList();
+      debugPrint('YNAV_POI local bulk loaded: ${_localPois!.length} records');
+      return _localPois;
+    } catch (e) {
+      debugPrint('YNAV_POI local bulk load failed: $e');
+      return null;
+    }
+  }
+
+  static List<Poi> _filterLocal(
+    List<Poi> allPois, {
+    required LatLng center,
+    required double radiusMeters,
+    required List<PoiType> types,
+  }) {
+    final typeSet = types.toSet();
+    return allPois.where((p) {
+      if (!typeSet.contains(p.type)) return false;
+      return haversineMeters(center, p.location) <= radiusMeters;
+    }).toList()
+      ..sort((a, b) =>
+          haversineMeters(center, a.location).compareTo(haversineMeters(center, b.location)));
+  }
+
+  static List<Poi> _filterLocalBounds(
+    List<Poi> allPois, {
+    required double south,
+    required double west,
+    required double north,
+    required double east,
+    required List<PoiType> types,
+  }) {
+    final typeSet = types.toSet();
+    return allPois.where((p) {
+      if (!typeSet.contains(p.type)) return false;
+      return p.location.latitude >= south &&
+          p.location.latitude <= north &&
+          p.location.longitude >= west &&
+          p.location.longitude <= east;
+    }).toList();
   }
 
   /// GET 요청 1회를 서킷브레이커·in-flight 취소·타임아웃 정책과 함께 수행하고
@@ -224,6 +324,23 @@ class PoiService {
   }) async {
     if (types.isEmpty) return [];
 
+    // 로컬 bulk 조회 (주입된 로더 우선, 없으면 실제 파일 시스템 경로)
+    final loader = _localPoisLoader;
+    if (loader != null) {
+      final allPois = await loader();
+      if (allPois != null) {
+        return _filterLocal(allPois, center: center, radiusMeters: max(0.0, radiusMeters), types: types);
+      }
+    } else if (await _isBulkFresh()) {
+      final allPois = await _loadLocalPois();
+      if (allPois != null) {
+        return _filterLocal(allPois, center: center, radiusMeters: max(0.0, radiusMeters), types: types);
+      }
+    } else {
+      // 신선하지 않으면 백그라운드에서 다운로드 트리거 (unawaited)
+      unawaited(_downloadBulk(_clientFactory()));
+    }
+
     final clampedRadius = max(0.0, radiusMeters);
     final categories = types.map((t) => _typeToCategory[t]).whereType<String>().toList();
 
@@ -267,6 +384,23 @@ class PoiService {
   }) async {
     if (types.isEmpty) return [];
 
+    // 로컬 bulk 조회 (주입된 로더 우선, 없으면 실제 파일 시스템 경로)
+    final loader = _localPoisLoader;
+    if (loader != null) {
+      final allPois = await loader();
+      if (allPois != null) {
+        return _filterLocalBounds(allPois, south: south, west: west, north: north, east: east, types: types);
+      }
+    } else if (await _isBulkFresh()) {
+      final allPois = await _loadLocalPois();
+      if (allPois != null) {
+        return _filterLocalBounds(allPois, south: south, west: west, north: north, east: east, types: types);
+      }
+    } else {
+      // 신선하지 않으면 백그라운드에서 다운로드 트리거 (unawaited)
+      unawaited(_downloadBulk(_clientFactory()));
+    }
+
     final categories = types.map((t) => _typeToCategory[t]).whereType<String>().toList();
 
     final query = <String, String>{
@@ -292,7 +426,7 @@ class PoiService {
     }
   }
 
-  Poi? _parseItem(Map<String, dynamic> item) {
+  static Poi? _parseItem(Map<String, dynamic> item) {
     final id = item['id'] as String?;
     final name = item['name'] as String?;
     final categoryStr = item['category'] as String?;
