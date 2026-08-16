@@ -71,7 +71,7 @@ fi
     echo "- 작업트리: clean"
   else
     echo "- 작업트리: **미커밋 ${dirty_n}건** — 다른 세션 작업일 수 있으니 \`git status\`로 확인 후"
-    echo "  내 파일만 골라 스테이징할 것(CLAUDE.md 하드룰: \`git add -A\` 금지)"
+    echo "  내 파일만 골라 스테이징할 것(.ai/GIT_SAFETY.md 규칙: \`git add -A\` 금지)"
   fi
   echo
 
@@ -108,7 +108,7 @@ fi
     if [ -n "$verdict" ]; then
       echo "  - $verdict"
     else
-      echo "  - _(달성도 판정 줄 없음 — CLAUDE.md 규칙 B 미준수)_"
+      echo "  - _(달성도 판정 줄 없음 — `.ai/REPORTING.md` 달성도 판정 누락)_"
     fi
   done
   [ "$found_report" -eq 0 ] && echo "- (리포트 없음)"

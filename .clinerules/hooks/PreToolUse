@@ -1,39 +1,38 @@
 #!/usr/bin/env bash
-# Gate: block `git commit` unless flutter analyze + flutter test both pass.
-# Requires jq. If "flutter: not found", set FLUTTER to its full path.
+# Cline commit gate: run checks for the staged code surface only.
+set -uo pipefail
 
-FLUTTER="/data/projects/flutter/bin/flutter"   # e.g. /home/USER/flutter/bin/flutter
-
+FLUTTER="/data/projects/flutter/bin/flutter"
 input=$(cat)
-
-tool=$(echo "$input" | jq -r '.preToolUse.toolName // empty')
-cmd=$(echo "$input"  | jq -r '.preToolUse.parameters.command // empty')
-root=$(echo "$input" | jq -r '.workspaceRoots[0] // "."')
-
-# Fallback: if the command field is named differently, scan raw params.
-if [[ -z "$cmd" ]]; then
-  cmd=$(echo "$input" | jq -c '.preToolUse.parameters // {}')
-fi
-
-# Only gate git commits. Everything else passes straight through.
+tool=$(printf '%s' "$input" | jq -r '.preToolUse.toolName // empty')
+cmd=$(printf '%s' "$input" | jq -r '.preToolUse.parameters.command // empty')
+root=$(printf '%s' "$input" | jq -r '.workspaceRoots[0] // "."')
+[[ -n "$cmd" ]] || cmd=$(printf '%s' "$input" | jq -c '.preToolUse.parameters // {}')
 if [[ "$tool" != "execute_command" ]] || [[ "$cmd" != *"git commit"* ]]; then
   echo '{"cancel": false}'
   exit 0
 fi
-
 cd "$root" 2>/dev/null || { echo '{"cancel": false}'; exit 0; }
 
-echo "GATE: running flutter analyze + flutter test before commit..."
-
-if ! "$FLUTTER" analyze; then
-  echo '{"cancel": true, "errorMessage": "BLOCKED: flutter analyze failed. Fix errors before committing."}'
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR)
+if ((${#staged[@]} == 0)); then
+  echo '{"cancel": true, "errorMessage": "BLOCKED: no staged files."}'
   exit 0
 fi
-
-if ! "$FLUTTER" test; then
-  echo '{"cancel": true, "errorMessage": "BLOCKED: flutter test failed (must be 51/51). Fix tests before committing."}'
+need_flutter=false
+need_rust=false
+for f in "${staged[@]}"; do
+  case "$f" in
+    lib/*|test/*|pubspec.yaml|pubspec.lock|analysis_options.yaml|l10n.yaml) need_flutter=true ;;
+    native/*.toml|native/*.lock|native/src/*) need_rust=true ;;
+  esac
+done
+if $need_flutter && { ! "$FLUTTER" analyze || ! "$FLUTTER" test; }; then
+  echo '{"cancel": true, "errorMessage": "BLOCKED: Flutter analyze or complete test suite failed."}'
   exit 0
 fi
-
-# The JSON must be the LAST line on stdout — Cline parses only the final JSON.
-echo '{"cancel": false, "contextModification": "GATE PASSED: analyze clean, tests green."}'
+if $need_rust && ! (cd native && cargo build && cargo test); then
+  echo '{"cancel": true, "errorMessage": "BLOCKED: Rust build or test failed."}'
+  exit 0
+fi
+echo '{"cancel": false, "contextModification": "GATE PASSED: staged code surfaces verified."}'

@@ -1,0 +1,4 @@
+interface:
+  display_name: "YuruNavi Flutter"
+  short_description: "Implement and verify YuruNavi Flutter work"
+  default_prompt: "Use $yurunavi-flutter to implement this Flutter or Dart change safely."

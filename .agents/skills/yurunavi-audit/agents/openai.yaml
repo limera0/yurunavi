@@ -1,0 +1,4 @@
+interface:
+  display_name: "YuruNavi Audit"
+  short_description: "Independently audit a YuruNavi change"
+  default_prompt: "Use $yurunavi-audit to review the completed change and return PASS or FAIL."

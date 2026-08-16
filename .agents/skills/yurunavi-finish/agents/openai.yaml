@@ -1,0 +1,4 @@
+interface:
+  display_name: "YuruNavi Finish"
+  short_description: "Verify, commit, and report a checkpoint"
+  default_prompt: "Use $yurunavi-finish to complete verification, commit safely, and report the result."

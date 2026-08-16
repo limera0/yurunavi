@@ -1,0 +1,4 @@
+interface:
+  display_name: "YuruNavi Android Verify"
+  short_description: "Build and verify Android or ride behavior"
+  default_prompt: "Use $yurunavi-android-verify to prepare and assess Android or real-device verification."
